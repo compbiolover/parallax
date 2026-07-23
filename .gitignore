@@ -22,6 +22,10 @@ models/
 # ---- Local config (keep only the *.example.yaml tracked) ----
 config/settings.yaml
 
+# ---- Dashboard generated data (aggregates only, still not committed) ----
+dashboard/public/data/*
+!dashboard/public/data/.gitkeep
+
 # ---- Secrets ----
 .env
 .env.*
