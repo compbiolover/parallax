@@ -70,6 +70,25 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,              -- provenance, e.g. 'lexicon'
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS embeddings (
+    document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+    dim         INTEGER NOT NULL,
+    vector      TEXT NOT NULL,           -- JSON array of floats
+    embedder    TEXT NOT NULL
+);
+
+-- A single latest clustering (rewritten each cluster run).
+CREATE TABLE IF NOT EXISTS clusters (
+    cluster_id  INTEGER PRIMARY KEY,     -- -1 reserved for noise
+    label       TEXT,
+    size        INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS document_clusters (
+    document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+    cluster_id  INTEGER NOT NULL
+);
 """
 
 
@@ -272,6 +291,68 @@ class Datastore:
     def get_meta(self, key: str, default: str | None = None) -> str | None:
         row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else default
+
+    # -- embeddings ------------------------------------------------------
+    def upsert_embedding(self, *, document_id: str, vector: list[float], embedder: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                """
+                INSERT INTO embeddings (document_id, dim, vector, embedder)
+                VALUES (?,?,?,?)
+                ON CONFLICT(document_id) DO UPDATE SET
+                    dim=excluded.dim, vector=excluded.vector, embedder=excluded.embedder
+                """,
+                (document_id, len(vector), json.dumps(vector), embedder),
+            )
+
+    def iter_embeddings(self) -> Iterator[tuple[str, str, str | None, list[int], list[float]]]:
+        """Yield (document_id, diet_id, title, _, vector) for non-duplicate docs."""
+        rows = self.conn.execute(
+            """
+            SELECT e.document_id AS id, d.diet_id AS diet_id, d.title AS title,
+                   e.vector AS vector
+            FROM embeddings e JOIN documents d ON d.id = e.document_id
+            WHERE d.is_duplicate = 0
+            """
+        )
+        for r in rows:
+            yield r["id"], r["diet_id"], r["title"], [], json.loads(r["vector"])
+
+    def embedding_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) AS n FROM embeddings").fetchone()["n"]
+
+    # -- clusters --------------------------------------------------------
+    def replace_clustering(
+        self,
+        clusters: list[tuple[int, str | None, int]],       # (cluster_id, label, size)
+        assignments: list[tuple[str, int]],                 # (document_id, cluster_id)
+    ) -> None:
+        with self._tx() as conn:
+            conn.execute("DELETE FROM clusters")
+            conn.execute("DELETE FROM document_clusters")
+            conn.executemany(
+                "INSERT INTO clusters (cluster_id, label, size) VALUES (?,?,?)", clusters
+            )
+            conn.executemany(
+                "INSERT INTO document_clusters (document_id, cluster_id) VALUES (?,?)",
+                assignments,
+            )
+
+    def cluster_rows(self) -> list[sqlite3.Row]:
+        return list(self.conn.execute("SELECT * FROM clusters ORDER BY size DESC"))
+
+    def cluster_members(self, cluster_id: int) -> list[sqlite3.Row]:
+        """Members of a cluster with diet + title, for coverage and labels."""
+        return list(
+            self.conn.execute(
+                """
+                SELECT d.id AS id, d.diet_id AS diet_id, d.title AS title
+                FROM document_clusters dc JOIN documents d ON d.id = dc.document_id
+                WHERE dc.cluster_id = ?
+                """,
+                (cluster_id,),
+            )
+        )
 
     def diet_ids(self) -> list[str]:
         rows = self.conn.execute("SELECT DISTINCT diet_id FROM documents ORDER BY diet_id")

@@ -66,6 +66,37 @@ def test_write_js_payload(tmp_path):
     store.close()
 
 
+def test_blindspots_in_payload():
+    store = _store_with_two_diets()
+    # add two more modeled_ce docs so a cluster can be one-sided
+    for i in range(3):
+        did = f"ce-extra-{i}"
+        store.upsert_document(doc_id=did, diet_id="modeled_ce", source_id="s", stratum_id=None,
+            url=None, title=f"faith story {i}", published_utc=None,
+            fetched_utc="2026-07-23T00:00:00+00:00", word_count=80, minhash=None)
+        store.upsert_scores(document_id=did, scorer="dictionary", foundations={"sanctity": 0.5},
+                            sentiment=0.0, moral_word_ratio=0.1, matched_words=5)
+    # seed a persisted clustering directly (cluster 5 = modeled_ce-only)
+    store.replace_clustering(
+        clusters=[(5, "faith · story", 3)],
+        assignments=[(f"ce-extra-{i}", 5) for i in range(3)],
+    )
+    p = build_payload(store)
+    assert p["blindspots"], "expected a blindspot"
+    b = p["blindspots"][0]
+    assert b["dominant_diet"] == "modeled_ce"
+    assert b["other_diet"] == "self"
+    assert b["label"] == "faith · story"
+    assert b["representative_titles"]
+    store.close()
+
+
+def test_no_blindspots_when_unclustered():
+    store = _store_with_two_diets()
+    assert build_payload(store)["blindspots"] == []
+    store.close()
+
+
 def test_single_diet_has_no_comparison():
     store = Datastore(":memory:")
     store.upsert_document(

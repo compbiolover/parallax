@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from cluster.embed import Embedder, HashingEmbedder
 from scoring.aggregate import aggregate_profile, to_composition
 from scoring.dictionary import DictionaryScorer, DocumentScore
 from scoring.lexicon import build_lexicon
@@ -83,6 +84,20 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _cluster_text(item: FeedItem, text: str) -> str:
+    """Text used for the story embedding.
+
+    Headlines carry the story signal; full bodies share boilerplate and generic
+    vocabulary that washes out topical structure (empirically, body embeddings
+    collapse into one undifferentiated blob). Embed the title, backfilling with
+    the body lead only when the title is too short to embed reliably.
+    """
+    title = (item.title or "").strip()
+    if len(title.split()) >= 4:
+        return title
+    return f"{title} {text[:300]}".strip()
+
+
 def _document_text(item: FeedItem, cfg: PipelineConfig, robots, limiter) -> str | None:
     body: str | None = None
     if item.link:
@@ -108,6 +123,7 @@ def run(
     registry: Registry | None = None,
     config: PipelineConfig | None = None,
     scorer: DictionaryScorer | None = None,
+    embedder: Embedder | None = None,
 ) -> RunStats:
     """Ingest every RSS source with a URL, scoring and deduping into ``store``."""
     registry = registry or load_registry()
@@ -117,14 +133,17 @@ def run(
         scorer = DictionaryScorer(lexicon, assignment=cfg.assignment)
     else:
         lexicon_name = "injected"
+    if embedder is None:
+        embedder = HashingEmbedder()
     store.set_meta("lexicon", lexicon_name)
+    store.set_meta("embedder", getattr(embedder, "name", type(embedder).__name__))
     robots = RobotsCache(cfg.user_agent, cfg.timeout) if cfg.respect_robots else None
     limiter = RateLimiter(cfg.per_host_rpm)
     index = _seed_index(store, cfg.near_dup_threshold)
     stats = RunStats()
 
     for source in registry.ingestable(("rss",)):
-        _ingest_source(source, store, cfg, scorer, robots, limiter, index, stats)
+        _ingest_source(source, store, cfg, scorer, embedder, robots, limiter, index, stats)
     return stats
 
 
@@ -143,6 +162,7 @@ def _ingest_source(
     store: Datastore,
     cfg: PipelineConfig,
     scorer: DictionaryScorer,
+    embedder: Embedder,
     robots: RobotsCache | None,
     limiter: RateLimiter,
     index: NearDuplicateIndex,
@@ -198,6 +218,11 @@ def _ingest_source(
             moral_word_ratio=score.moral_word_ratio,
             matched_words=score.matched_words,
             liberty=score.liberty,
+        )
+        store.upsert_embedding(
+            document_id=doc_id,
+            vector=embedder.embed(_cluster_text(item, text)),
+            embedder=getattr(embedder, "name", type(embedder).__name__),
         )
 
         if is_dup:

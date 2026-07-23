@@ -117,8 +117,37 @@ function render(d) {
     ep.innerHTML += `<p>${escapeHtml(d.executive_summary)}</p>`;
   }
 
+  blindspots(app, d, colors);
+
   const cav = document.createElement("div"); cav.className = "caveat";
   cav.textContent = "⚠︎ " + d.caveat; app.appendChild(cav);
+}
+
+function blindspots(app, d, colors) {
+  const bs = d.blindspots || [];
+  const p = panel(app, "Blindspots — what each diet covers that the other doesn't");
+  p.style.marginTop = "18px";
+  if (!bs.length) {
+    p.innerHTML += `<p class="sub">No blindspots yet. Run <code>python -m cluster run</code> to cluster stories and detect coverage asymmetry.</p>`;
+    return;
+  }
+  const grid = document.createElement("div"); grid.className = "cards"; p.appendChild(grid);
+  d.diets.forEach(di => {
+    const col = document.createElement("div"); col.className = "panel card";
+    col.style.background = "transparent"; col.style.borderStyle = "dashed";
+    col.innerHTML = `<h2 style="color:${colors[di.id]}">${di.label} covers · other misses</h2>`;
+    const mine = bs.filter(b => b.dominant_diet === di.id);
+    if (!mine.length) { col.innerHTML += `<p class="sub">— none —</p>`; }
+    mine.forEach(b => {
+      const rep = (b.representative_titles || []).map(t => `<li>${escapeHtml(t)}</li>`).join("");
+      col.innerHTML += `<div style="margin-bottom:12px">
+        <div style="font-weight:600">${escapeHtml(b.label)}</div>
+        <div class="sub">${b.size} stories · ${Math.round(b.dominant_share*100)}% one-sided</div>
+        <ul style="margin:6px 0 0; padding-left:18px; color:var(--muted); font-size:13px">${rep}</ul>
+      </div>`;
+    });
+    grid.appendChild(col);
+  });
 }
 
 function panel(parent, title) {

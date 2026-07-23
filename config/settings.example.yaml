@@ -74,14 +74,14 @@ scoring:
 
 # --- Clustering / blindspot engine (Phase 2) -------------------------------
 cluster:
-  embedding_model: all-MiniLM-L6-v2   # bge/e5 for quality
-  umap:
-    n_neighbors: 15
-    n_components: 5
+  embedder:
+    kind: hashing                 # hashing (built-in, no deps) | sentence-transformers
+    dim: 512                      # hashing dimensionality
+    model: all-MiniLM-L6-v2       # sentence-transformers model (bge/e5 for quality)
   hdbscan:
-    min_cluster_size: 8           # defaults over-assign short news items to noise
+    min_cluster_size: 2           # small news samples over-assign to noise at higher values
   blindspot:
-    coverage_asymmetry_threshold: 0.9   # one diet heavy, other near-zero
+    coverage_asymmetry_threshold: 0.75  # one diet's share of a cluster to call it a blindspot
 
 # --- Comparison ------------------------------------------------------------
 compare:

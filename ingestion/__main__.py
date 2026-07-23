@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from itertools import combinations
 
+from cluster.embed import build_embedder
 from compare.divergence import jensen_shannon_divergence, log_ratios
 
 from .config import load_registry, load_settings
@@ -76,7 +77,8 @@ def main(argv: list[str] | None = None) -> int:
                 cfg.min_words = args.min_words
             if args.lexicon is not None:
                 cfg.lexicon_path = args.lexicon
-            stats = run(store, load_registry(), cfg)
+            embedder, _ = build_embedder(settings)
+            stats = run(store, load_registry(), cfg, embedder=embedder)
             _print_stats(stats)
             print(f"\nDatastore: {store.counts()}")
         elif args.command == "compare":
