@@ -251,15 +251,17 @@ diets:
           Talk radio is under-measured by text-only tools yet central to this
           diet. Ingested via podcast/audio feeds and transcribed (faster-whisper).
         sources:
-          - id: ce_dailywire_podcasts
-            name: "The Daily Wire — audio programs"
+          - id: ce_dailywire_mattwalsh
+            name: "The Matt Walsh Show (The Daily Wire)"
             medium: talk_radio
             role: "commentary talk audio"
             ingest:
               type: podcast_rss
-              url: null            # TODO: select representative program feed(s)
+              # Daily Wire flagship commentary program (resolved via iTunes
+              # lookup). 2215 episodes with audio enclosures; verified 2026-07-23.
+              url: "https://rss.pdrl.fm/1fc256/feeds.megaphone.fm/BVDWV7762869899"
             weight: 1.0
-            rationale: "Represents commentary talk audio; transcribe before scoring."
+            rationale: "Representative commentary talk audio; transcribe before scoring."
 
       - id: digital_outlets
         stratum_weight: 0.20
@@ -273,7 +275,7 @@ diets:
             role: "digital conservative outlet"
             ingest:
               type: rss
-              url: null            # TODO: verify feed URL
+              url: "https://www.dailywire.com/feeds/rss.xml"   # verified 2026-07-23 (50 items)
             weight: 1.0
             rationale: "High-reach digital conservative outlet."
           - id: ce_thefp
@@ -308,7 +310,9 @@ diets:
             role: "evangelical newsmagazine"
             ingest:
               type: rss
-              url: null            # TODO: verify feed URL
+              # WORLD's main news feed. wng.org also publishes podcast feeds
+              # (e.g. worldandeverything.xml) if audio is added later.
+              url: "https://wng.org/feeds/rss/topics.rss"   # verified 2026-07-23
             weight: 0.8
             rationale: "Explicitly Christian-worldview reporting; complements CT."
 
@@ -318,12 +322,14 @@ diets:
           Long-form podcasts and YouTube programs where framing is least
           filtered. Captions first (youtube-transcript-api), audio fallback.
         sources:
-          - id: ce_youtube_placeholder
-            name: "Representative long-form program (YouTube)"
-            medium: youtube
-            role: "long-form commentary"
+          - id: ce_relatable_stuckey
+            name: "Relatable with Allie Beth Stuckey"
+            medium: podcast
+            role: "long-form evangelical commentary"
             ingest:
-              type: youtube
-              url: null            # TODO: select representative channel(s)
+              type: podcast_rss
+              # Resolved from Apple Podcasts id 1359249098 via iTunes lookup.
+              # 1445 episodes with audio enclosures; verified 2026-07-23.
+              url: "https://feeds.megaphone.fm/BMDC9964487814"
             weight: 1.0
-            rationale: "Placeholder for long-form video framing; select per methodology."
+            rationale: "Explicitly evangelical long-form commentary; transcribe before scoring."
