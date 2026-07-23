@@ -78,9 +78,15 @@ cluster:
     kind: hashing                 # hashing (built-in, no deps) | sentence-transformers
     dim: 512                      # hashing dimensionality
     # sentence-transformers model (used when kind: sentence-transformers).
-    # Benchmarked (see LIMITATIONS.md): all-mpnet-base-v2 = best quality,
-    # gte-small = best quality-per-size, all-MiniLM-L6-v2 = fastest.
-    model: all-mpnet-base-v2
+    # Benchmarked on 396 stories / 151 same-story pairs (see LIMITATIONS.md):
+    # thenlper/gte-small (best simple choice, no prefix) ~ BAAI/bge-small-en-v1.5
+    # (needs query_prefix) > all-MiniLM-L6-v2 > all-mpnet-base-v2. Bigger != better.
+    model: thenlper/gte-small
+    # Instruction prefix prepended to every text. Required by instruction-tuned
+    # families to score well; leave empty for gte/MiniLM/mpnet.
+    #   bge: "Represent this sentence for searching relevant passages: "
+    #   e5:  "query: "
+    query_prefix: ""
   hdbscan:
     min_cluster_size: 2           # small news samples over-assign to noise at higher values
   blindspot:
