@@ -53,6 +53,23 @@ an estimate with uncertainty, never ground truth.**
     topic-level blindspot analysis (Phase 2) and the transformer/Claude taggers (Phase 3),
     not from pushing on the dictionary aggregate.
 
+## Blindspot engine (Phase 2)
+
+- **Clusters are only as good as the embedder.** The default embedder is a dependency-free
+  feature hasher over **headlines** (bodies share boilerplate that washes out topic
+  signal, so titles cluster far better). It captures obvious topical structure but produces
+  loose or spurious clusters on subtler stories. `sentence-transformers` (config:
+  `cluster.embedder.kind: sentence-transformers`) is the quality upgrade and is expected to
+  materially sharpen clusters and blindspots.
+- **Thin daily samples yield thin overlap.** A single day across a handful of feeds rarely
+  has many stories covered by multiple outlets in one diet and none in the other, so
+  blindspot lists can be short and some entries rest on 2 stories. Treat them as candidates,
+  not verdicts; they strengthen as coverage accumulates over time and across more sources.
+- **A blindspot is a coverage signal, not a moral judgment.** "One diet covers X, the other
+  doesn't" is descriptive. The tool reports both directions with equal prominence
+  (including the author's own blindspots) and never editorializes about which absence is
+  worse.
+
 ## Theory caveats
 
 - **The liberal/conservative foundation asymmetry** (Graham, Haidt & Nosek 2009) — that

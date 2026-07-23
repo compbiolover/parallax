@@ -83,8 +83,27 @@ def build_payload(store: Datastore) -> dict:
         "executive_summary": exec_row["text"] if exec_row else "",
         "summary_method": exec_row["method"] if exec_row else None,
         "lexicon": lexicon,
+        "blindspots": _blindspots(store),
         "caveat": _caveat(lexicon),
     }
+
+
+def _blindspots(store: Datastore) -> list[dict]:
+    """Serialize persisted blindspots (empty until `python -m cluster run`)."""
+    from cluster.blindspot import blindspots_from_store
+
+    return [
+        {
+            "label": b.label,
+            "dominant_diet": b.dominant_diet,
+            "other_diet": b.other_diet,
+            "counts": b.counts,
+            "size": b.size,
+            "dominant_share": b.dominant_share,
+            "representative_titles": b.representative_titles,
+        }
+        for b in blindspots_from_store(store)
+    ]
 
 
 def write_payload(store: Datastore, out: str | Path = DEFAULT_OUT) -> Path:

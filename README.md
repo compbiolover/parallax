@@ -74,32 +74,43 @@ Equality vs Proportionality (Atari & Haidt 2023).
 
 ## Status
 
-Phase 1 (MVP) is complete — extraction, dedup, dictionary scoring, a daily summary per
-diet, and a static radar/JSD dashboard. See `CLAUDE.md` for the full build spec and
-phased roadmap.
+Phase 1 (MVP) and Phase 2 (blindspot engine) are complete — extraction, dedup, dictionary
+scoring, a daily summary per diet, a static radar/JSD dashboard, and coverage-asymmetry
+blindspot detection. See `CLAUDE.md` for the full build spec and phased roadmap.
 
 ### Running the pipeline
 
 ```bash
-# 1. Fetch every RSS source with a URL, extract bodies, dedup, score, and store
-#    derived metrics to SQLite (raw text is never persisted):
+# 1. Fetch every RSS source with a URL, extract bodies, dedup, score, embed, and
+#    store derived metrics to SQLite (raw text is never persisted):
 python -m ingestion run --max-items 25
 
 # 2. Print each diet's foundation composition, the Jensen-Shannon divergence,
 #    and the per-foundation log-ratios:
 python -m ingestion compare
 
-# 3. Generate a charitable daily summary per diet + a cross-diet executive
+# 3. Cluster stories from the stored embeddings and detect blindspots — the
+#    clusters one diet covers heavily and the other barely touches, both
+#    directions (needs scikit-learn: pip install parallax[cluster]):
+python -m cluster run
+
+# 4. Generate a charitable daily summary per diet + a cross-diet executive
 #    summary (uses Claude when ANTHROPIC_API_KEY is set, else a deterministic,
 #    clearly-labeled numbers-only fallback):
 python -m summarize
 
-# 4. Export the dashboard data payload:
+# 5. Export the dashboard data payload:
 python -m dashboard.export
 
-# 5. View the dashboard (radar chart, JSD, log-ratio bars, summaries):
+# 6. View the dashboard (radar, JSD, log-ratio bars, summaries, blindspot lists):
 cd dashboard && python -m http.server   # then open http://localhost:8000
 ```
+
+Story clustering embeds each document at ingestion (text is discarded, so embeddings are
+persisted). The default embedder is a dependency-free hashing embedder over headlines;
+`cluster.embedder.kind: sentence-transformers` swaps in neural embeddings for sharper
+clusters (`pip install parallax[embeddings]`). See `LIMITATIONS.md` for what the current
+clusters do and don't support.
 
 By default scoring uses a **built-in demo lexicon** so the pipeline runs with zero
 external data — a placeholder, not a validated instrument. For real results, supply the
