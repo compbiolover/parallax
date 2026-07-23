@@ -59,23 +59,60 @@ foundations:
 diets:
   # ---------------------------------------------------------------------------
   # DIET 1 — the author's own diet ("self").
-  # Seeded with representative mainstream / center-left outlets as PLACEHOLDERS.
-  # The author should replace these with their actual diet; the pipeline is
-  # symmetric and surfaces this diet's blindspots with equal prominence.
+  # Mainstream / center-left diet, stratified by role. Feed URLs verified live
+  # 2026-07-23 (HTTP 200, valid RSS/Atom). This is an editable model: tune the
+  # source set and reweight by your real attention. Because the pipeline is
+  # symmetric, this diet's foundation skew and blindspots are surfaced with
+  # equal prominence.
   # ---------------------------------------------------------------------------
   - id: self
     label: "My diet"
     description: >
-      A model of the author's own media consumption. The entries below are
-      placeholders to be replaced with the author's actual sources. Because the
-      pipeline is symmetric, this diet's foundation skew and blindspots are
-      reported as prominently as the modeled diet's.
+      A model of the author's own media consumption: mainstream / center-left
+      national news, public broadcasting, and long-form magazines. Weights are a
+      first draft — adjust to reflect actual attention. Because the pipeline is
+      symmetric, this diet's foundation skew and blindspots are reported as
+      prominently as the modeled diet's.
     strata:
-      - id: national_news
-        stratum_weight: 1.0
+      - id: national_dailies
+        stratum_weight: 0.40
         rationale: >
-          National general-interest news the author reads regularly. Placeholder
-          set — replace with actual sources and reweight by real attention.
+          National general-interest dailies — the backbone of the diet. Heavy
+          syndication overlap across these and the wires; dedup matters.
+        sources:
+          - id: self_nyt_home
+            name: "The New York Times — Home Page"
+            medium: news
+            role: "national daily of record"
+            ingest:
+              type: rss
+              url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
+            weight: 1.0
+            rationale: "Highest-attention national daily; broad agenda-setting coverage."
+          - id: self_wapo_national
+            name: "The Washington Post — National"
+            medium: news
+            role: "national daily"
+            ingest:
+              type: rss
+              url: "https://feeds.washingtonpost.com/rss/national"
+            weight: 0.9
+            rationale: "Politics-heavy national coverage; strong care/fairness salience."
+          - id: self_guardian_us
+            name: "The Guardian — US"
+            medium: news
+            role: "center-left national daily"
+            ingest:
+              type: rss
+              url: "https://www.theguardian.com/us/rss"
+            weight: 0.8
+            rationale: "Explicit center-left framing; pronounced care/fairness emphasis."
+
+      - id: public_broadcast
+        stratum_weight: 0.35
+        rationale: >
+          Public and broadcast news — measured, institutional framing that
+          contrasts with the opinion-forward outlets in both diets.
         sources:
           - id: self_npr_news
             name: "NPR — News"
@@ -85,25 +122,59 @@ diets:
               type: rss
               url: "https://feeds.npr.org/1001/rss.xml"
             weight: 1.0
-            rationale: "Placeholder: broad national coverage, public-radio framing."
-          - id: self_apnews_top
-            name: "AP News — Top News"
+            rationale: "Broad national coverage; public-radio framing."
+          - id: self_npr_politics
+            name: "NPR — Politics"
             medium: news
-            role: "wire service"
+            role: "public-radio politics desk"
             ingest:
               type: rss
-              url: null            # TODO: verify current AP feed URL before use
-            weight: 1.0
-            rationale: "Placeholder: wire baseline; heavy syndication — dedup matters."
-          - id: self_guardian_us
-            name: "The Guardian — US"
+              url: "https://feeds.npr.org/1014/rss.xml"
+            weight: 0.7
+            rationale: "Politics vertical; sharpens the authority/fairness signal."
+          - id: self_pbs_newshour
+            name: "PBS NewsHour"
             medium: news
-            role: "center-left national daily"
+            role: "public-television news"
             ingest:
               type: rss
-              url: "https://www.theguardian.com/us/rss"
+              url: "https://www.pbs.org/newshour/feeds/rss/headlines"
+            weight: 0.7
+            rationale: "Measured broadcast framing; long-form segments."
+          - id: self_bbc_world
+            name: "BBC News — World"
+            medium: news
+            role: "international broadcaster"
+            ingest:
+              type: rss
+              url: "https://feeds.bbci.co.uk/news/world/rss.xml"
+            weight: 0.8
+            rationale: "Non-US vantage point; counterweight to domestic framing."
+
+      - id: long_form
+        stratum_weight: 0.25
+        rationale: >
+          Long-form magazines and explainer outlets — where framing and moral
+          argument are most explicit, so foundation signal is strongest here.
+        sources:
+          - id: self_atlantic
+            name: "The Atlantic"
+            medium: news
+            role: "long-form magazine"
+            ingest:
+              type: rss
+              url: "https://www.theatlantic.com/feed/all/"
             weight: 1.0
-            rationale: "Placeholder: center-left framing, strong care/fairness salience."
+            rationale: "Essayistic, argument-forward; high explicit-morality density."
+          - id: self_vox
+            name: "Vox"
+            medium: news
+            role: "explainer / analysis"
+            ingest:
+              type: rss
+              url: "https://www.vox.com/rss/index.xml"
+            weight: 0.8
+            rationale: "Explainer framing; foregrounds care/fairness reasoning."
 
   # ---------------------------------------------------------------------------
   # DIET 2 — modeled conservative-evangelical diet ("modeled_ce").
