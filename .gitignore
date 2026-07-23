@@ -1,3 +1,41 @@
+# ---- Data: never commit ----
+data/
+!data/.gitkeep
+corpus/
+audio/
+transcripts/
+*.sqlite
+*.db
+*.parquet
+*.jsonl
+*.csv
+
+# ---- Models & caches ----
+models/
+.cache/
+*.pt
+*.safetensors
+.embeddings/
+
+# ---- Secrets ----
+.env
+.env.*
+!.env.example
+*.key
+credentials.json
+
+# ---- TypeScript / dashboard ----
+node_modules/
+dist/
+build/
+.next/
+.astro/
+
+# ---- OS / editor ----
+.DS_Store
+.vscode/
+.idea/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
