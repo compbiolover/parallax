@@ -53,6 +53,7 @@ class ClusteringOutcome:
 
 
 def label_cluster(titles: list[str | None], top: int = 4) -> str:
+    """Simple frequency label (no sklearn) — the fallback labeler."""
     counter: Counter[str] = Counter()
     for t in titles:
         if not t:
@@ -62,6 +63,49 @@ def label_cluster(titles: list[str | None], top: int = 4) -> str:
                 counter[w] += 1
     terms = [w for w, _ in counter.most_common(top)]
     return " · ".join(terms) if terms else "(untitled cluster)"
+
+
+def label_clusters(cluster_titles: dict[int, list[str | None]], top: int = 3) -> dict[int, str]:
+    """Corpus-aware c-TF-IDF labels: terms *distinctive* to each cluster.
+
+    Treats each cluster's concatenated titles as one document and scores terms by
+    TF-IDF across clusters, so generic words shared by every cluster ("trump",
+    "new") are down-weighted in favor of what sets a cluster apart. Falls back to
+    the frequency labeler when sklearn is unavailable or the vocabulary is empty.
+    """
+    cids = [c for c, ts in cluster_titles.items() if any(t for t in ts)]
+    if not cids:
+        return {}
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+    except ImportError:
+        return {c: label_cluster(cluster_titles[c]) for c in cids}
+
+    docs = [" ".join(t for t in cluster_titles[c] if t) for c in cids]
+    try:
+        vec = TfidfVectorizer(
+            stop_words="english",
+            ngram_range=(1, 2),
+            token_pattern=r"[A-Za-z][A-Za-z]+",
+            min_df=1,
+        )
+        matrix = vec.fit_transform(docs)
+    except ValueError:  # empty vocabulary
+        return {c: label_cluster(cluster_titles[c]) for c in cids}
+
+    terms = vec.get_feature_names_out()
+    labels: dict[int, str] = {}
+    for i, c in enumerate(cids):
+        row = matrix[i].toarray().ravel()
+        ranked = row.argsort()[::-1][:top]
+        chosen = [terms[j] for j in ranked if row[j] > 0]
+        labels[c] = " · ".join(chosen) if chosen else label_cluster(cluster_titles[c])
+    return labels
+
+
+def _representative(titles: list[str]) -> list[str]:
+    """Most descriptive headlines first (longer titles carry more story detail)."""
+    return sorted((t for t in titles if t), key=len, reverse=True)
 
 
 def _members_by_cluster(result: ClusterResult) -> dict[int, list[int]]:
@@ -76,9 +120,14 @@ def detect_blindspots(
     result: ClusterResult,
     dominance: float = 0.8,
     min_size: int = 3,
+    labels: dict[int, str] | None = None,
 ) -> list[Blindspot]:
     """A cluster is a blindspot when one diet holds >= ``dominance`` of its
-    members (and the cluster has at least ``min_size`` members)."""
+    members (and the cluster has at least ``min_size`` members).
+
+    ``labels`` supplies precomputed (c-TF-IDF) labels; without it, each cluster
+    is labeled with the simple frequency fallback.
+    """
     diets = sorted(set(result.diets))
     out: list[Blindspot] = []
     for cid, idxs in _members_by_cluster(result).items():
@@ -92,11 +141,14 @@ def detect_blindspots(
             continue
         other = next((d for d in diets if d != dominant_diet), "—")
         titles = [result.titles[i] for i in idxs]
-        rep = [result.titles[i] for i in idxs if result.diets[i] == dominant_diet and result.titles[i]]
+        rep = _representative(
+            [result.titles[i] for i in idxs if result.diets[i] == dominant_diet]
+        )
+        label = labels.get(cid) if labels else label_cluster(titles)
         out.append(
             Blindspot(
                 cluster_id=cid,
-                label=label_cluster(titles),
+                label=label or "(untitled cluster)",
                 counts=dict(counts),
                 dominant_diet=dominant_diet,
                 other_diet=other,
@@ -133,7 +185,7 @@ def blindspots_from_store(
         if share < dominance:
             continue
         other = next((d for d in diets if d != dominant_diet), "—")
-        rep = [m["title"] for m in members if m["diet_id"] == dominant_diet and m["title"]]
+        rep = _representative([m["title"] for m in members if m["diet_id"] == dominant_diet])
         out.append(
             Blindspot(
                 cluster_id=cid,
@@ -160,8 +212,10 @@ def run_clustering(
     result = compute_clustering(store, min_cluster_size=min_cluster_size)
 
     members = _members_by_cluster(result)
+    cluster_titles = {cid: [result.titles[i] for i in idxs] for cid, idxs in members.items()}
+    labels = label_clusters(cluster_titles)
     cluster_rows = [
-        (cid, label_cluster([result.titles[i] for i in idxs]), len(idxs))
+        (cid, labels.get(cid) or "(untitled cluster)", len(idxs))
         for cid, idxs in members.items()
     ]
     assignments = [
@@ -171,7 +225,7 @@ def run_clustering(
     ]
     store.replace_clustering(cluster_rows, assignments)
 
-    blindspots = detect_blindspots(result, dominance, min_blindspot_size)
+    blindspots = detect_blindspots(result, dominance, min_blindspot_size, labels=labels)
     n_noise = sum(1 for lbl in result.labels if lbl == -1)
     return ClusteringOutcome(
         n_docs=result.n_docs,

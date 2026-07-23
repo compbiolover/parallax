@@ -8,6 +8,7 @@ from cluster.blindspot import (
     blindspots_from_store,
     detect_blindspots,
     label_cluster,
+    label_clusters,
     run_clustering,
 )
 from cluster.cluster import ClusterResult
@@ -54,6 +55,30 @@ def test_label_cluster_skips_stopwords():
     label = label_cluster(["The new climate policy debate", "A climate summit and policy"])
     assert "climate" in label
     assert "the" not in label.split(" · ")
+
+
+def test_label_clusters_ctfidf_prefers_distinctive_terms():
+    # "nuclear/saudi" and "climate/emissions" are distinctive; "trump" is shared
+    # across both clusters so c-TF-IDF should down-weight it.
+    labels = label_clusters({
+        0: ["Trump signs nuclear deal with Saudi Arabia", "Saudi nuclear enrichment concerns"],
+        1: ["Trump climate policy on emissions", "New climate emissions targets"],
+    })
+    assert "nuclear" in labels[0] or "saudi" in labels[0]
+    assert "climate" in labels[1] or "emissions" in labels[1]
+    assert "trump" not in labels[0]  # shared term down-weighted / dropped
+
+
+def test_run_clustering_uses_ctfidf_labels():
+    store = Datastore(":memory:")
+    _seed_topics(store, HashingEmbedder(dim=256))
+    run_clustering(store)
+    labels = [r["label"] for r in store.cluster_rows()]
+    # a cluster label should reflect one of the seeded topics, not generic filler
+    joined = " ".join(labels).lower()
+    assert any(k in joined for k in ("faith", "church", "climate", "vote", "election",
+                                     "prayer", "carbon", "renewable", "campaign", "scripture"))
+    store.close()
 
 
 def test_detect_blindspots_direction_and_symmetry():
