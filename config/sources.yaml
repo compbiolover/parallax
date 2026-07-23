@@ -107,6 +107,33 @@ diets:
               url: "https://www.theguardian.com/us/rss"
             weight: 0.8
             rationale: "Explicit center-left framing; pronounced care/fairness emphasis."
+          - id: self_politico_picks
+            name: "Politico — Picks"
+            medium: news
+            role: "digital politics outlet"
+            ingest:
+              type: rss
+              # Politico's flagship feed (feed index: https://www.politico.com/rss).
+              # Genuine and long-standing, but Politico's edge returns 403 to
+              # datacenter/bot IPs, so it could NOT be verified from CI on
+              # 2026-07-23 — verify from a residential IP before relying on it.
+              url: "https://www.politico.com/rss/politicopicks.xml"
+            weight: 0.7
+            rationale: "Inside-DC politics framing; heavy authority/fairness salience."
+          - id: self_ap_topnews
+            name: "AP News — Top News"
+            medium: news
+            role: "wire service"
+            ingest:
+              type: rss
+              # AP dropped official RSS. The community project
+              # https://github.com/rererecursive/associated-press-rss can
+              # regenerate feeds, but its public S3 host now 404s (dead as of
+              # 2026-07-23). Self-host that scraper and point this url at your
+              # instance to activate. Left null so ingestion skips it until then.
+              url: null
+            weight: 0.7
+            rationale: "Wire baseline; heavy syndication across the diet — dedup matters."
 
       - id: public_broadcast
         stratum_weight: 0.35
