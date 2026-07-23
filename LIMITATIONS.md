@@ -73,6 +73,29 @@ an estimate with uncertainty, never ground truth.**
   for real use. The residual loose size-2 clusters are a *data-volume* problem (more sources
   + accumulation lets you raise the min-cluster/min-blindspot thresholds), not an embedder
   one.
+
+- **Which sentence-transformer?** `all-MiniLM-L6-v2` is the fast classic default, not the
+  best available. Six models were benchmarked on the same 70 stories with a *model-agnostic*
+  metric: a hand-labeled gold set of 10 same-story pairs (e.g. the four US–Saudi nuclear-deal
+  headlines), scored by how well each model ranks those pairs above the other ~2,400 (average
+  precision, and downstream cluster noise):
+
+  | model | dim | params | avg. precision | cluster noise |
+  | --- | --- | --- | --- | --- |
+  | **all-mpnet-base-v2** | 768 | 109M | **0.895** | **15/70** |
+  | gte-small | 384 | 33M | 0.883 | 23/70 |
+  | all-MiniLM-L6-v2 | 384 | 23M | 0.869 | 20/70 |
+  | bge-small-en-v1.5 | 384 | 33M | 0.810 | 24/70 |
+  | e5-small-v2 | 384 | 33M | 0.790 | 35/70 |
+  | bge-base-en-v1.5 | 768 | 109M | 0.760 | 27/70 |
+
+  **`all-mpnet-base-v2` is the recommended quality default** (best precision *and* fewest
+  unclustered docs); **`gte-small` is the best quality-per-size** (near-mpnet precision at
+  MiniLM's footprint). Caveats: the gold set is small (10 pairs, so ROC-AUC saturates near
+  0.99 for every model and the ~0.02 precision gaps at the top are within noise), it is one
+  day's topic mix, and bge/e5 are tuned for instruction-prefixed retrieval so they may be
+  underrated by raw-encoding here. Treat the ordering as indicative, not final — re-run the
+  benchmark as the corpus grows.
 - **Thin daily samples yield thin overlap.** A single day across a handful of feeds rarely
   has many stories covered by multiple outlets in one diet and none in the other, so
   blindspot lists can be short and some entries rest on 2 stories. Treat them as candidates,

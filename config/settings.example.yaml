@@ -77,7 +77,10 @@ cluster:
   embedder:
     kind: hashing                 # hashing (built-in, no deps) | sentence-transformers
     dim: 512                      # hashing dimensionality
-    model: all-MiniLM-L6-v2       # sentence-transformers model (bge/e5 for quality)
+    # sentence-transformers model (used when kind: sentence-transformers).
+    # Benchmarked (see LIMITATIONS.md): all-mpnet-base-v2 = best quality,
+    # gte-small = best quality-per-size, all-MiniLM-L6-v2 = fastest.
+    model: all-mpnet-base-v2
   hdbscan:
     min_cluster_size: 2           # small news samples over-assign to noise at higher values
   blindspot:

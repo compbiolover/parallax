@@ -72,9 +72,14 @@ class HashingEmbedder:
 
 
 class SentenceTransformerEmbedder:
-    """Neural sentence embeddings (quality path). Requires sentence-transformers."""
+    """Neural sentence embeddings (quality path). Requires sentence-transformers.
 
-    def __init__(self, model: str = "all-MiniLM-L6-v2") -> None:
+    Default is ``all-mpnet-base-v2`` — the quality winner in the embedder
+    benchmark (see LIMITATIONS.md); ``all-MiniLM-L6-v2`` or ``gte-small`` are
+    lighter, near-equal alternatives.
+    """
+
+    def __init__(self, model: str = "all-mpnet-base-v2") -> None:
         from sentence_transformers import SentenceTransformer  # lazy
 
         self.model_name = model
@@ -101,7 +106,7 @@ def build_embedder(settings: dict | None = None) -> tuple[Embedder, str]:
     cfg = ((settings or {}).get("cluster", {}) or {}).get("embedder", {}) or {}
     kind = cfg.get("kind", "hashing")
     if kind == "sentence-transformers":
-        emb = SentenceTransformerEmbedder(cfg.get("model", "all-MiniLM-L6-v2"))
+        emb = SentenceTransformerEmbedder(cfg.get("model", "all-mpnet-base-v2"))
         return emb, emb.name
     emb = HashingEmbedder(int(cfg.get("dim", 512)))
     return emb, emb.name
