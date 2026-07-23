@@ -322,15 +322,14 @@ diets:
           Long-form podcasts and YouTube programs where framing is least
           filtered. Captions first (youtube-transcript-api), audio fallback.
         sources:
-          - id: ce_prageru_youtube
-            name: "PragerU (YouTube)"
-            medium: youtube
-            role: "long-form commentary"
+          - id: ce_relatable_stuckey
+            name: "Relatable with Allie Beth Stuckey"
+            medium: podcast
+            role: "long-form evangelical commentary"
             ingest:
-              type: youtube
-              # Channel RSS (stable channel_id form); verified 2026-07-23.
-              # Conservative-values long-form video; swap for a more explicitly
-              # evangelical channel if the methodology calls for it.
-              url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCZWlSUNDvCCS1hBiXV0zKcA"
+              type: podcast_rss
+              # Resolved from Apple Podcasts id 1359249098 via iTunes lookup.
+              # 1445 episodes with audio enclosures; verified 2026-07-23.
+              url: "https://feeds.megaphone.fm/BMDC9964487814"
             weight: 1.0
-            rationale: "Representative long-form video framing; captions first, audio fallback."
+            rationale: "Explicitly evangelical long-form commentary; transcribe before scoring."
