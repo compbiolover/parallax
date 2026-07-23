@@ -25,6 +25,19 @@ an estimate with uncertainty, never ground truth.**
   and Claude taggers diverge on an item, it is flagged low-confidence rather than forced
   into a label. Confidence bands are surfaced on every foundation score in the dashboard.
 
+## Implementation status (Phase 1)
+
+- **The bundled lexicon is a demo, not an instrument.** The Phase 1 dictionary scorer
+  ships a small hand-built seed lexicon (`scoring/seed_lexicon.py`) so the pipeline runs
+  out of the box. It is a few dozen stems with unit weights — it must **not** be read as
+  a validated measurement. Real scoring requires the full eMFD (continuous per-word
+  probabilities over ~10k words), loaded via `scoring.lexicon.load_emfd_csv`. Until then,
+  every foundation number the pipeline emits is illustrative only.
+- **Dictionary-only coverage.** The current scorer covers the five classic foundations;
+  liberty/oppression is unscored (`None`, never `0`) until the Claude tagger lands.
+- **Single tagger, no ensemble yet.** The ensemble-disagreement confidence signal
+  described below is a Phase 3 deliverable; Phase 1 has no confidence band.
+
 ## Theory caveats
 
 - **The liberal/conservative foundation asymmetry** (Graham, Haidt & Nosek 2009) — that

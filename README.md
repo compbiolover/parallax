@@ -74,8 +74,26 @@ Equality vs Proportionality (Atari & Haidt 2023).
 
 ## Status
 
-Phase 0 — corpus definition and repository scaffolding. See `CLAUDE.md` for the full
-build spec and phased roadmap.
+Phase 1 (MVP) — extraction + dedup + dictionary scoring are implemented. See `CLAUDE.md`
+for the full build spec and phased roadmap.
+
+### Running the pipeline
+
+```bash
+# Fetch every RSS source with a URL, extract bodies, dedup, score, and store
+# derived metrics to SQLite (raw text is never persisted):
+python -m ingestion run --max-items 25
+
+# Print each diet's foundation composition, the Jensen-Shannon divergence
+# between diets, and the per-foundation log-ratios:
+python -m ingestion compare
+```
+
+Scoring uses a **built-in demo lexicon** so the pipeline runs with zero external data.
+It is a placeholder, not a validated instrument — point the scorer at the full eMFD for
+real results (see `scoring/lexicon.py` and `LIMITATIONS.md`). The dictionary baseline
+covers the five classic foundations only; liberty/oppression arrives with the Claude
+tagger in Phase 3.
 
 ## Getting started
 
