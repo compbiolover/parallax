@@ -51,6 +51,17 @@ scoring:
     dictionary:
       enabled: true
       library: eMFDscore
+      # Path to an eMFD-format CSV (columns: word, <foundation>_p, <foundation>_sent).
+      # Unset -> the built-in demo seed lexicon (illustrative only). Point this at
+      # the real eMFD for trustworthy scores. Keep the file outside git (data/ is
+      # gitignored). Get it from the eMFDscore repo: dictionaries/emfd_scoring.csv.
+      lexicon_path: data/emfd_scoring.csv
+      # How a word's foundation weights aggregate:
+      #   argmax      - assign each word to its dominant foundation (default;
+      #                 required for the eMFD, whose per-word probabilities span
+      #                 all five foundations and otherwise wash out to base rates)
+      #   probability - sum raw per-foundation probabilities (base-rate dominated)
+      assignment: argmax
     transformer:
       enabled: false              # Phase 3
       model: mformer

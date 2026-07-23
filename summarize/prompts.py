@@ -20,8 +20,8 @@ deficits. Never mock, pathologize, or "dunk on" either diet.
 - SYMMETRY. Treat both diets identically. The author's own diet ("self") gets \
 the same scrutiny and its blindspots the same prominence as the modeled diet.
 - UNCERTAINTY IS FIRST-CLASS. The foundation numbers are noisy estimates from a \
-dictionary method (and, right now, a small demo lexicon). Describe tendencies, \
-never certainties. Do not overclaim.
+dictionary method over the configured lexicon (stated in the data below). \
+Describe tendencies, never certainties. Do not overclaim.
 - GROUND CLAIMS in the supplied headlines and numbers. Do not invent stories, \
 quotes, or figures that are not in the input.
 
@@ -54,9 +54,16 @@ def build_user_prompt(
     contexts: list[DietContext],
     comparison: ComparisonContext | None,
     max_headlines: int = 20,
+    lexicon: str | None = None,
 ) -> str:
     """Assemble the data block Claude summarizes."""
-    parts: list[str] = [
+    parts: list[str] = []
+    if lexicon:
+        note = f"Scores were produced by the '{lexicon}' lexicon."
+        if lexicon == "built-in demo seed":
+            note += " This is a DEMO lexicon — treat differences as illustrative."
+        parts.append(note + "\n")
+    parts += [
         "Summarize today's coverage for each media diet below, then write a "
         "cross-diet executive summary.\n",
         "For EACH diet, write one short paragraph headed exactly "

@@ -62,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--settings", help="path to settings.yaml")
     parser.add_argument("--max-items", type=int, help="max items per feed")
     parser.add_argument("--min-words", type=int, help="minimum document word count")
+    parser.add_argument("--lexicon", help="path to an eMFD-format CSV (overrides settings)")
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
@@ -73,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
                 cfg.max_items_per_feed = args.max_items
             if args.min_words is not None:
                 cfg.min_words = args.min_words
+            if args.lexicon is not None:
+                cfg.lexicon_path = args.lexicon
             stats = run(store, load_registry(), cfg)
             _print_stats(stats)
             print(f"\nDatastore: {store.counts()}")

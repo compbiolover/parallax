@@ -65,6 +65,11 @@ CREATE TABLE IF NOT EXISTS summaries (
     method        TEXT NOT NULL,         -- 'claude' | 'deterministic'
     text          TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,              -- provenance, e.g. 'lexicon'
+    value TEXT
+);
 """
 
 
@@ -254,6 +259,19 @@ class Datastore:
 
     def all_summaries(self) -> dict[str, sqlite3.Row]:
         return {r["scope"]: r for r in self.conn.execute("SELECT * FROM summaries")}
+
+    # -- provenance metadata --------------------------------------------
+    def set_meta(self, key: str, value: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+
+    def get_meta(self, key: str, default: str | None = None) -> str | None:
+        row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
 
     def diet_ids(self) -> list[str]:
         rows = self.conn.execute("SELECT DISTINCT diet_id FROM documents ORDER BY diet_id")

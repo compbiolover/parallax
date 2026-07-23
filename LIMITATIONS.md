@@ -37,6 +37,21 @@ an estimate with uncertainty, never ground truth.**
   liberty/oppression is unscored (`None`, never `0`) until the Claude tagger lands.
 - **Single tagger, no ensemble yet.** The ensemble-disagreement confidence signal
   described below is a Phase 3 deliverable; Phase 1 has no confidence band.
+- **The eMFD is supported, and reveals its own low discriminative power.** Point the
+  scorer at the real eMFD via `scoring.dictionary.lexicon_path`. Note two things the eMFD
+  forces:
+  - *Aggregation matters.* Every eMFD word carries probability mass on all five
+    foundations, so **summing raw probabilities makes every document collapse toward the
+    eMFD's base-rate distribution** and profiles stop discriminating between corpora.
+    Parallax defaults to `assignment: argmax` (each word counts toward its dominant
+    foundation only), which restores discrimination when diets genuinely differ.
+  - *Real news barely differs in aggregate.* On a sample of live mainstream vs.
+    conservative feeds, the two diets' aggregate eMFD profiles come out nearly identical
+    (JSD ≈ 0) — both emphasize care > fairness > authority > loyalty > sanctity in similar
+    proportions. A near-zero JSD does **not** mean the diets are identical; it means the
+    aggregate dictionary signal cannot tell them apart. Sharper signal is expected from
+    topic-level blindspot analysis (Phase 2) and the transformer/Claude taggers (Phase 3),
+    not from pushing on the dictionary aggregate.
 
 ## Theory caveats
 

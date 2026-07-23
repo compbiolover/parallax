@@ -40,7 +40,19 @@ def test_payload_shape():
     assert p["comparison"]["pair"] == ["modeled_ce", "self"]
     assert 0.0 <= p["comparison"]["jsd"] <= 1.0
     assert p["executive_summary"] == "exec summary"
-    assert "demo lexicon" in p["caveat"]
+    # No lexicon recorded -> treated as demo, strong caveat.
+    assert p["lexicon"] is None
+    assert "DEMO lexicon" in p["caveat"]
+    store.close()
+
+
+def test_caveat_softens_for_real_lexicon():
+    store = _store_with_two_diets()
+    store.set_meta("lexicon", "eMFD (emfd_scoring.csv)")
+    p = build_payload(store)
+    assert p["lexicon"] == "eMFD (emfd_scoring.csv)"
+    assert "DEMO" not in p["caveat"]
+    assert "eMFD (emfd_scoring.csv)" in p["caveat"]
     store.close()
 
 

@@ -82,22 +82,23 @@ class Summarizer:
 
     def summarize(self, store: Datastore) -> SummaryResult:
         contexts, comparison = gather(store)
+        lexicon = store.get_meta("lexicon")
         if not contexts:
             return SummaryResult({}, "", self.model, "deterministic", _now_iso())
 
         client = self._client or _build_client()
         if client is None:
-            return self._deterministic(contexts, comparison)
+            return self._deterministic(contexts, comparison, lexicon)
         try:
-            text = self._call_claude(client, contexts, comparison)
+            text = self._call_claude(client, contexts, comparison, lexicon)
         except Exception:
             # Never let an API hiccup leave the dashboard empty.
-            return self._deterministic(contexts, comparison)
+            return self._deterministic(contexts, comparison, lexicon)
         per_diet, executive = _parse_sections(text, contexts)
         return SummaryResult(per_diet, executive, self.model, "claude", _now_iso())
 
-    def _call_claude(self, client, contexts, comparison) -> str:
-        user = build_user_prompt(contexts, comparison)
+    def _call_claude(self, client, contexts, comparison, lexicon) -> str:
+        user = build_user_prompt(contexts, comparison, lexicon=lexicon)
         resp = client.messages.create(
             model=self.model,
             max_tokens=1500,
@@ -106,9 +107,9 @@ class Summarizer:
         )
         return "".join(block.text for block in resp.content if hasattr(block, "text"))
 
-    def _deterministic(self, contexts, comparison) -> SummaryResult:
+    def _deterministic(self, contexts, comparison, lexicon=None) -> SummaryResult:
         per_diet = {c.diet_id: _deterministic_diet(c) for c in contexts}
-        executive = _deterministic_executive(contexts, comparison)
+        executive = _deterministic_executive(contexts, comparison, lexicon)
         return SummaryResult(per_diet, executive, self.model, "deterministic", _now_iso())
 
     def persist(self, store: Datastore, result: SummaryResult) -> None:
@@ -183,18 +184,23 @@ def _deterministic_diet(ctx: DietContext) -> str:
     )
 
 
-def _deterministic_executive(contexts, comparison) -> str:
+def _deterministic_executive(contexts, comparison, lexicon=None) -> str:
+    from scoring.lexicon import is_demo_lexicon
+
     if comparison is None:
         return f"{_FALLBACK_NOTE}\n\nOnly one diet has scored documents; no comparison yet."
     over = sorted(comparison.log_ratios.items(), key=lambda kv: kv[1], reverse=True)
     a_over = over[0]
     b_over = over[-1]
+    if is_demo_lexicon(lexicon):
+        provenance = "Differences at this scale are provisional given the demo lexicon."
+    else:
+        provenance = f"Scores were produced by the {lexicon} lexicon; treat differences as estimates."
     return (
         f"{_FALLBACK_NOTE}\n\n"
         f"Jensen-Shannon divergence between {comparison.diet_a} and "
         f"{comparison.diet_b} is {comparison.jsd:.3f} (0 = identical emphasis, "
         f"1 = disjoint). Relative to {comparison.diet_b}, {comparison.diet_a} "
         f"over-indexes most on {a_over[0]} ({a_over[1]:+.2f} log-ratio) and "
-        f"under-indexes most on {b_over[0]} ({b_over[1]:+.2f}). Differences at "
-        f"this scale are provisional given the demo lexicon."
+        f"under-indexes most on {b_over[0]} ({b_over[1]:+.2f}). {provenance}"
     )

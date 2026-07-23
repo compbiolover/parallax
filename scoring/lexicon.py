@@ -64,6 +64,29 @@ class Lexicon:
         return len(self._exact) + len(self._prefixes)
 
 
+SEED_NAME = "built-in demo seed"
+
+
+def build_lexicon(path: str | Path | None = None) -> tuple[Lexicon, str]:
+    """Return ``(lexicon, provenance_name)`` for the pipeline.
+
+    With a readable ``path``, loads the eMFD CSV and names it after the file;
+    otherwise returns the built-in demo seed. The name is recorded in the
+    datastore so summaries and the dashboard can state which lexicon produced
+    the scores (and soften the demo caveat once the real eMFD is in use).
+    """
+    if path:
+        p = Path(path)
+        if p.exists():
+            return load_emfd_csv(p), f"eMFD ({p.name})"
+    return load_seed(), SEED_NAME
+
+
+def is_demo_lexicon(name: str | None) -> bool:
+    """True when the active lexicon is the built-in demo seed (or unknown)."""
+    return not name or name == SEED_NAME
+
+
 def load_seed() -> Lexicon:
     """Build the built-in demo lexicon."""
     lex = Lexicon()
