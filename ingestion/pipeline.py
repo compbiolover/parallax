@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from scoring.aggregate import aggregate_profile, to_composition
 from scoring.dictionary import DictionaryScorer, DocumentScore
+from scoring.lexicon import build_lexicon
 
 from .config import Registry, Source, load_registry, load_settings
 from .datastore import Datastore
@@ -44,18 +45,26 @@ class PipelineConfig:
     timeout: int = 30
     per_host_rpm: int = 20
     respect_robots: bool = True
+    lexicon_path: str | None = None  # eMFD CSV; None -> built-in demo seed
+    assignment: str = "argmax"       # 'argmax' | 'probability' (see DictionaryScorer)
 
     @classmethod
     def from_settings(cls, settings: dict) -> PipelineConfig:
         ing = settings.get("ingestion", {}) or {}
         dedup = (settings.get("dedup", {}) or {}).get("near_duplicate", {}) or {}
         rate = (ing.get("rate_limit", {}) or {})
+        dict_cfg = (
+            ((settings.get("scoring", {}) or {}).get("taggers", {}) or {}).get("dictionary", {})
+            or {}
+        )
         return cls(
             user_agent=ing.get("user_agent", DEFAULT_UA),
             timeout=int(ing.get("request_timeout_seconds", 30)),
             per_host_rpm=int(rate.get("per_host_requests_per_minute", 20)),
             respect_robots=bool(ing.get("respect_robots_txt", True)),
             near_dup_threshold=float(dedup.get("minhash_threshold", 0.85)),
+            lexicon_path=dict_cfg.get("lexicon_path"),
+            assignment=dict_cfg.get("assignment", "argmax"),
         )
 
 
@@ -103,7 +112,12 @@ def run(
     """Ingest every RSS source with a URL, scoring and deduping into ``store``."""
     registry = registry or load_registry()
     cfg = config or PipelineConfig()
-    scorer = scorer or DictionaryScorer()
+    if scorer is None:
+        lexicon, lexicon_name = build_lexicon(cfg.lexicon_path)
+        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment)
+    else:
+        lexicon_name = "injected"
+    store.set_meta("lexicon", lexicon_name)
     robots = RobotsCache(cfg.user_agent, cfg.timeout) if cfg.respect_robots else None
     limiter = RateLimiter(cfg.per_host_rpm)
     index = _seed_index(store, cfg.near_dup_threshold)

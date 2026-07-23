@@ -24,14 +24,25 @@ from ingestion.config import load_settings
 from ingestion.datastore import Datastore
 from ingestion.pipeline import diet_profiles
 from scoring.foundations import CLASSIC_FOUNDATIONS
+from scoring.lexicon import is_demo_lexicon
 
 DEFAULT_OUT = Path(__file__).resolve().parent / "public" / "data" / "latest.js"
 
-CAVEAT = (
-    "Scores come from a dictionary method over a small demo lexicon and cover "
-    "the five classic foundations only (no liberty). Read every number as a "
-    "noisy estimate, never ground truth. See LIMITATIONS.md."
-)
+
+def _caveat(lexicon: str | None) -> str:
+    base = (
+        "Scores come from a dictionary method and cover the five classic "
+        "foundations only (no liberty). Read every number as a noisy estimate, "
+        "never ground truth. See LIMITATIONS.md."
+    )
+    if is_demo_lexicon(lexicon):
+        return (
+            "Scores come from a dictionary method over a small DEMO lexicon "
+            "(illustrative only) and cover the five classic foundations only "
+            "(no liberty). Read every number as a noisy estimate, never ground "
+            "truth. See LIMITATIONS.md."
+        )
+    return f"{base} Lexicon: {lexicon}."
 
 
 def build_payload(store: Datastore) -> dict:
@@ -63,6 +74,7 @@ def build_payload(store: Datastore) -> dict:
         }
 
     exec_row = summaries.get("executive")
+    lexicon = store.get_meta("lexicon")
     return {
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "foundations": list(CLASSIC_FOUNDATIONS),
@@ -70,7 +82,8 @@ def build_payload(store: Datastore) -> dict:
         "comparison": comparison,
         "executive_summary": exec_row["text"] if exec_row else "",
         "summary_method": exec_row["method"] if exec_row else None,
-        "caveat": CAVEAT,
+        "lexicon": lexicon,
+        "caveat": _caveat(lexicon),
     }
 
 

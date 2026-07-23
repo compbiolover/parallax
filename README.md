@@ -101,11 +101,23 @@ python -m dashboard.export
 cd dashboard && python -m http.server   # then open http://localhost:8000
 ```
 
-Scoring uses a **built-in demo lexicon** so the pipeline runs with zero external data.
-It is a placeholder, not a validated instrument — point the scorer at the full eMFD for
-real results (see `scoring/lexicon.py` and `LIMITATIONS.md`). The dictionary baseline
-covers the five classic foundations only; liberty/oppression arrives with the Claude
-tagger in Phase 3.
+By default scoring uses a **built-in demo lexicon** so the pipeline runs with zero
+external data — a placeholder, not a validated instrument. For real results, supply the
+eMFD:
+
+```bash
+# 1. Drop the eMFD CSV in data/ (gitignored) — from the eMFDscore repo,
+#    dictionaries/emfd_scoring.csv (columns: word, <foundation>_p, <foundation>_sent).
+# 2. Either set scoring.dictionary.lexicon_path in config/settings.yaml, or:
+python -m ingestion run --lexicon data/emfd_scoring.csv
+```
+
+The active lexicon is recorded with the scores, so the dashboard caveat and summaries
+state which one produced the numbers. Because eMFD words carry probability across all
+five foundations, the scorer defaults to `assignment: argmax` (each word counts toward
+its dominant foundation); see `LIMITATIONS.md` for why, and for what the eMFD's low
+aggregate discrimination does and doesn't mean. The dictionary baseline covers the five
+classic foundations only; liberty/oppression arrives with the Claude tagger in Phase 3.
 
 ## Getting started
 

@@ -42,10 +42,28 @@ class DocumentScore:
 
 
 class DictionaryScorer:
-    """Score documents against a moral-foundations lexicon."""
+    """Score documents against a moral-foundations lexicon.
 
-    def __init__(self, lexicon: Lexicon | None = None) -> None:
+    ``assignment`` controls how a word's foundation weights are aggregated:
+
+    - ``"argmax"`` (default) — each matched word contributes to its single
+      dominant foundation only. This is the standard reduction for a
+      *probabilistic* lexicon like the eMFD, where every word carries mass on
+      all five foundations: summing the raw probabilities makes every document
+      collapse toward the lexicon's base-rate distribution, so profiles barely
+      discriminate between corpora. Argmax restores discrimination.
+    - ``"probability"`` — sum every foundation's weight for each word (the raw
+      bag-of-words probability aggregate). Kept for comparison/analysis.
+
+    For a single-foundation lexicon (the built-in seed, classic MFD word lists)
+    the two modes are identical.
+    """
+
+    def __init__(self, lexicon: Lexicon | None = None, assignment: str = "argmax") -> None:
         self.lexicon = lexicon if lexicon is not None else load_seed()
+        if assignment not in ("argmax", "probability"):
+            raise ValueError(f"unknown assignment mode: {assignment!r}")
+        self.assignment = assignment
 
     def score(self, text: str) -> DocumentScore:
         tokens = _TOKEN_RE.findall(text.lower())
@@ -59,8 +77,14 @@ class DictionaryScorer:
             if entry is None:
                 continue
             matched += 1
-            for foundation, weight in entry.foundations.items():
-                sums[foundation] += weight
+            if self.assignment == "argmax":
+                # Assign the word to its dominant foundation only. Ties break by
+                # canonical order via max()'s first-max behavior over the dict.
+                foundation = max(entry.foundations, key=entry.foundations.get)
+                sums[foundation] += entry.foundations[foundation]
+            else:
+                for foundation, weight in entry.foundations.items():
+                    sums[foundation] += weight
             sentiment_sum += entry.pole
 
         if word_count == 0:
