@@ -1,0 +1,29 @@
+# Pre-commit hooks for Parallax.
+#   Install once:  pre-commit install
+#   Run manually:  pre-commit run --all-files
+#
+# The gitleaks hook is the guardrail against committing API keys or the .env
+# file (see CLAUDE.md §1: "Never commit ... .env").
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7
+    hooks:
+      - id: ruff             # lint
+        args: ["--fix"]
+      - id: ruff-format      # format

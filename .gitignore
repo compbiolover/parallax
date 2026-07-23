@@ -1,5 +1,7 @@
 # ---- Data: never commit ----
-data/
+# Use data/* (not data/) so the .gitkeep placeholder can be re-included; git
+# cannot re-include a file whose parent directory is itself excluded.
+data/*
 !data/.gitkeep
 corpus/
 audio/
@@ -16,6 +18,9 @@ models/
 *.pt
 *.safetensors
 .embeddings/
+
+# ---- Local config (keep only the *.example.yaml tracked) ----
+config/settings.yaml
 
 # ---- Secrets ----
 .env
