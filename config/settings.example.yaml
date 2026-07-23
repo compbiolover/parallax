@@ -1,0 +1,94 @@
+# =============================================================================
+# Parallax settings — EXAMPLE
+# =============================================================================
+# Copy to config/settings.yaml (gitignored) and adjust. Secrets do NOT live
+# here — put API keys in .env (see .env.example). This file holds
+# non-secret operational configuration only.
+# =============================================================================
+
+# --- Source registry -------------------------------------------------------
+sources:
+  registry: config/sources.yaml
+
+# --- Datastore -------------------------------------------------------------
+# MVP: SQLite on local disk. Move to Postgres + pgvector when co-locating
+# embeddings becomes worthwhile.
+datastore:
+  kind: sqlite                    # sqlite | postgres
+  path: data/parallax.sqlite      # gitignored
+  # postgres_dsn: env:PARALLAX_POSTGRES_DSN   # resolved from .env when kind=postgres
+  rollups_dir: data/rollups       # daily Parquet rollups for cheap aggregation
+
+# --- Ingestion -------------------------------------------------------------
+ingestion:
+  user_agent: "parallax-research-bot/0.1 (+https://github.com/compbiolover/parallax)"
+  respect_robots_txt: true
+  request_timeout_seconds: 30
+  rate_limit:
+    per_host_requests_per_minute: 20
+  extraction:
+    primary: trafilatura
+    fallback: goose3
+  audio:
+    whisper_model: medium         # large-v3 for accuracy, medium for speed
+    compute_type: int8            # int8 on CPU for overnight batch
+    filter_silence: true          # Whisper hallucinates on long silences
+  youtube:
+    prefer_captions: true         # youtube-transcript-api first, yt-dlp fallback
+
+# --- Dedup -----------------------------------------------------------------
+dedup:
+  exact: content_hash
+  near_duplicate:
+    method: minhash               # minhash | embedding_cosine
+    minhash_threshold: 0.85
+    embedding_cosine_threshold: 0.92
+
+# --- Scoring ---------------------------------------------------------------
+scoring:
+  length_normalize: true          # REQUIRED — never disable (see LIMITATIONS.md)
+  taggers:
+    dictionary:
+      enabled: true
+      library: eMFDscore
+    transformer:
+      enabled: false              # Phase 3
+      model: mformer
+    claude:
+      enabled: false              # Phase 1+ for summaries; owns liberty/oppression
+      model: claude-opus-4-8
+  ensemble:
+    low_confidence_on_disagreement: true
+  split_fairness: false           # equality vs proportionality (Atari & Haidt 2023)
+
+# --- Clustering / blindspot engine (Phase 2) -------------------------------
+cluster:
+  embedding_model: all-MiniLM-L6-v2   # bge/e5 for quality
+  umap:
+    n_neighbors: 15
+    n_components: 5
+  hdbscan:
+    min_cluster_size: 8           # defaults over-assign short news items to noise
+  blindspot:
+    coverage_asymmetry_threshold: 0.9   # one diet heavy, other near-zero
+
+# --- Comparison ------------------------------------------------------------
+compare:
+  headline_metric: jensenshannon  # base-2, squared to divergence, bounded [0,1]
+  also_report:
+    - log_ratio                   # ln(P_i / Q_i); index form 100 = parity
+    - aitchison_clr               # compositionally correct Euclidean distance
+    - cosine                      # sanity check
+    - smoothed_kl                 # sanity check (add epsilon first)
+  zero_replacement_epsilon: 1.0e-6
+
+# --- Summarization ---------------------------------------------------------
+summarize:
+  model: claude-opus-4-8
+  require_verbatim_quotes: true   # every summary auditable against source
+  steelman_each_side: true
+
+# --- Output ----------------------------------------------------------------
+output:
+  dashboard_data_dir: dashboard/public/data   # generated JSON for the static site
+  show_confidence_bands: true

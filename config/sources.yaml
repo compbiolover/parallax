@@ -1,0 +1,231 @@
+# =============================================================================
+# Parallax source registry
+# =============================================================================
+# THE source model for both media diets. This file is the single source of
+# truth for what Parallax ingests, and it is versioned deliberately: every
+# conclusion the tool draws should be reproducible against a specific version
+# of this registry, and sensitivity-tested against the weighting choices below.
+#
+# GUARDRAILS (see CLAUDE.md §0):
+#   - The "modeled" diet is a documented model of OUTLETS AND PROGRAMS, not any
+#     real individual's consumption. No private communications, ever.
+#   - Model what is plausibly *consumed*, not merely what is *published*.
+#     Distinguish outlet bias from audience consumption.
+#   - Represent internal diversity; do not collapse a diet to one voice.
+#   - Honor robots.txt, rate limits, and each source's terms. Summarize and
+#     link; never republish.
+#
+# SCHEMA:
+#   version        int    Bumped on any change to the source set or weights.
+#   updated        date   ISO-8601 date of last change.
+#   diets[]
+#     id           str    Stable machine id ("self" | "modeled_ce").
+#     label        str    Human label for the dashboard.
+#     description  str    What this diet models and how it was constructed.
+#     strata[]            Sources grouped by medium/role for stratified weighting.
+#       id         str    Stratum id.
+#       stratum_weight  float  Relative weight of this stratum within the diet.
+#                              Weights within a diet are normalized at runtime.
+#       rationale  str    Why this stratum is included and how it is weighted.
+#       sources[]
+#         id          str   Stable machine id, unique within the file.
+#         name        str   Display name.
+#         medium      enum  news | cable | talk_radio | podcast | youtube | newsletter
+#         role        str   Editorial role this source plays in the diet.
+#         ingest            How to pull it.
+#           type      enum  rss | gdelt | mediacloud | podcast_rss | youtube
+#           url       str   Feed / channel URL. null = TODO, verify before use.
+#         weight      float Relative weight of this source within its stratum.
+#         rationale   str   Why this specific source, in one line.
+#         terms       str   Notes on robots.txt / ToS / rate limits if non-obvious.
+#
+# NOTE ON null URLs: a null `url` is an explicit TODO. Feed URLs must be
+# verified live (they move) before the source is activated in ingestion.
+# =============================================================================
+
+version: 1
+updated: 2026-07-23
+
+# Foundations this registry's downstream scoring targets. Kept here for
+# provenance; the scorer is the authority on the active label set.
+foundations:
+  - care/harm
+  - fairness/cheating         # optionally split: equality vs proportionality
+  - loyalty/betrayal
+  - authority/subversion
+  - sanctity/degradation
+  - liberty/oppression        # Claude-tagged; not covered by dictionary baseline
+
+diets:
+  # ---------------------------------------------------------------------------
+  # DIET 1 — the author's own diet ("self").
+  # Seeded with representative mainstream / center-left outlets as PLACEHOLDERS.
+  # The author should replace these with their actual diet; the pipeline is
+  # symmetric and surfaces this diet's blindspots with equal prominence.
+  # ---------------------------------------------------------------------------
+  - id: self
+    label: "My diet"
+    description: >
+      A model of the author's own media consumption. The entries below are
+      placeholders to be replaced with the author's actual sources. Because the
+      pipeline is symmetric, this diet's foundation skew and blindspots are
+      reported as prominently as the modeled diet's.
+    strata:
+      - id: national_news
+        stratum_weight: 1.0
+        rationale: >
+          National general-interest news the author reads regularly. Placeholder
+          set — replace with actual sources and reweight by real attention.
+        sources:
+          - id: self_npr_news
+            name: "NPR — News"
+            medium: news
+            role: "public-radio national desk"
+            ingest:
+              type: rss
+              url: "https://feeds.npr.org/1001/rss.xml"
+            weight: 1.0
+            rationale: "Placeholder: broad national coverage, public-radio framing."
+          - id: self_apnews_top
+            name: "AP News — Top News"
+            medium: news
+            role: "wire service"
+            ingest:
+              type: rss
+              url: null            # TODO: verify current AP feed URL before use
+            weight: 1.0
+            rationale: "Placeholder: wire baseline; heavy syndication — dedup matters."
+          - id: self_guardian_us
+            name: "The Guardian — US"
+            medium: news
+            role: "center-left national daily"
+            ingest:
+              type: rss
+              url: "https://www.theguardian.com/us/rss"
+            weight: 1.0
+            rationale: "Placeholder: center-left framing, strong care/fairness salience."
+
+  # ---------------------------------------------------------------------------
+  # DIET 2 — modeled conservative-evangelical diet ("modeled_ce").
+  # A documented MODEL of outlets/programs, stratified by medium and role to
+  # represent internal diversity (national cable, talk radio, digital, podcasts/
+  # YouTube, newsletters/aggregators) rather than collapsing to a single voice.
+  # Stratum weights are a first draft to be sensitivity-tested against Pew /
+  # Media Cloud attention data (see LIMITATIONS.md).
+  # ---------------------------------------------------------------------------
+  - id: modeled_ce
+    label: "Modeled conservative-evangelical diet"
+    description: >
+      A versioned model of a conservative-evangelical information environment.
+      Stratified by medium and role to capture internal diversity. This models
+      outlets and programs — NOT any individual's consumption. Weights are a
+      documented first draft, to be validated against external attention
+      benchmarks and sensitivity-tested.
+    strata:
+      - id: national_cable
+        stratum_weight: 0.30
+        rationale: >
+          Cable remains a large share of conservative news attention. Weighted
+          highest but not dominant, to avoid collapsing the diet to cable framing.
+        sources:
+          - id: ce_foxnews_latest
+            name: "Fox News — Latest"
+            medium: cable
+            role: "dominant national cable news"
+            ingest:
+              type: rss
+              url: "https://moxie.foxnews.com/google-publisher/latest.xml"
+            weight: 1.0
+            rationale: "Largest-reach conservative cable outlet; anchors the stratum."
+          - id: ce_foxnews_opinion
+            name: "Fox News — Opinion"
+            medium: cable
+            role: "cable opinion / commentary"
+            ingest:
+              type: rss
+              url: "https://moxie.foxnews.com/google-publisher/opinion.xml"
+            weight: 0.6
+            rationale: "Opinion desk carries more explicit foundation framing than hard news."
+
+      - id: talk_radio
+        stratum_weight: 0.20
+        rationale: >
+          Talk radio is under-measured by text-only tools yet central to this
+          diet. Ingested via podcast/audio feeds and transcribed (faster-whisper).
+        sources:
+          - id: ce_dailywire_podcasts
+            name: "The Daily Wire — audio programs"
+            medium: talk_radio
+            role: "commentary talk audio"
+            ingest:
+              type: podcast_rss
+              url: null            # TODO: select representative program feed(s)
+            weight: 1.0
+            rationale: "Represents commentary talk audio; transcribe before scoring."
+
+      - id: digital_outlets
+        stratum_weight: 0.20
+        rationale: >
+          Digital-native outlets spanning hard-news-adjacent to explicitly
+          faith-framed reporting. Captures written framing at scale.
+        sources:
+          - id: ce_dailywire_news
+            name: "The Daily Wire — News"
+            medium: news
+            role: "digital conservative outlet"
+            ingest:
+              type: rss
+              url: null            # TODO: verify feed URL
+            weight: 1.0
+            rationale: "High-reach digital conservative outlet."
+          - id: ce_thefp
+            name: "The Free Press"
+            medium: newsletter
+            role: "heterodox / center-right digital"
+            ingest:
+              type: rss
+              url: "https://www.thefp.com/feed"
+            weight: 0.7
+            rationale: "Adds internal diversity; heterodox rather than movement-aligned."
+
+      - id: faith_media
+        stratum_weight: 0.20
+        rationale: >
+          Explicitly evangelical/Christian outlets. Central to the sanctity and
+          loyalty framing this project studies; must not be omitted or collapsed
+          into generic "conservative."
+        sources:
+          - id: ce_christianitytoday
+            name: "Christianity Today"
+            medium: news
+            role: "flagship evangelical magazine"
+            ingest:
+              type: rss
+              url: "https://www.christianitytoday.com/rss/"
+            weight: 1.0
+            rationale: "Mainstream-evangelical framing; strong sanctity/loyalty salience."
+          - id: ce_worldnews
+            name: "WORLD News Group"
+            medium: news
+            role: "evangelical newsmagazine"
+            ingest:
+              type: rss
+              url: null            # TODO: verify feed URL
+            weight: 0.8
+            rationale: "Explicitly Christian-worldview reporting; complements CT."
+
+      - id: podcasts_youtube
+        stratum_weight: 0.10
+        rationale: >
+          Long-form podcasts and YouTube programs where framing is least
+          filtered. Captions first (youtube-transcript-api), audio fallback.
+        sources:
+          - id: ce_youtube_placeholder
+            name: "Representative long-form program (YouTube)"
+            medium: youtube
+            role: "long-form commentary"
+            ingest:
+              type: youtube
+              url: null            # TODO: select representative channel(s)
+            weight: 1.0
+            rationale: "Placeholder for long-form video framing; select per methodology."

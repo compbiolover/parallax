@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "parallax"
+version = "0.1.0"
+description = "A moral-foundations mirror for two media diets."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "compbiolover" }]
+keywords = ["moral-foundations", "media-analysis", "nlp", "mft"]
+
+# Core runtime dependencies are intentionally minimal at Phase 0. Heavier,
+# phase-specific stacks (transformers, whisper, umap, hdbscan) are pulled in
+# via optional-dependencies as the corresponding phases land, so a bare
+# install stays lightweight and reproducible.
+dependencies = [
+  "pyyaml>=6.0",
+  "httpx>=0.27",
+  "feedparser>=6.0",
+  "trafilatura>=1.9",
+]
+
+[project.optional-dependencies]
+# Phase 1 — MVP: extraction + dedup + dictionary scoring + Claude summaries.
+mvp = [
+  "datasketch>=1.6",       # MinHash near-dup detection
+  "eMFDscore>=1.2",        # dictionary baseline scorer
+  "scipy>=1.13",           # Jensen-Shannon divergence
+  "numpy>=1.26",
+  "anthropic>=0.34",       # Claude summarization
+]
+# Phase 2 — blindspot engine: embeddings + UMAP + HDBSCAN.
+cluster = [
+  "sentence-transformers>=3.0",
+  "umap-learn>=0.5",
+  "hdbscan>=0.8.33",
+]
+# Phase 3 — transformer tagger + compositional stats.
+scoring = [
+  "transformers>=4.42",
+  "torch>=2.2",
+  "scikit-bio>=0.6",       # CLR / Aitchison
+]
+# Phase 4 — multimedia ingestion.
+media = [
+  "faster-whisper>=1.0",
+  "youtube-transcript-api>=0.6",
+  "yt-dlp>=2024.7.0",
+]
+# Developer tooling.
+dev = [
+  "ruff>=0.5",
+  "pytest>=8.0",
+  "mypy>=1.10",
+  "pre-commit>=3.7",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["ingestion", "scoring", "cluster", "compare", "summarize"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
