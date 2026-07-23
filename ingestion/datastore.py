@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS foundation_scores (
     matched_words    INTEGER,
     PRIMARY KEY (document_id, scorer)
 );
+
+CREATE TABLE IF NOT EXISTS summaries (
+    scope         TEXT PRIMARY KEY,      -- diet id, or 'executive'
+    generated_utc TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    method        TEXT NOT NULL,         -- 'claude' | 'deterministic'
+    text          TEXT NOT NULL
+);
 """
 
 
@@ -208,6 +216,44 @@ class Datastore:
                 (diet_id, scorer),
             )
         )
+
+    def headlines_for_diet(self, diet_id: str, limit: int = 50) -> list[str]:
+        """Titles of non-duplicate documents for a diet, most recent first."""
+        rows = self.conn.execute(
+            """
+            SELECT title FROM documents
+            WHERE diet_id = ? AND is_duplicate = 0 AND title IS NOT NULL AND title != ''
+            ORDER BY COALESCE(published_utc, fetched_utc) DESC
+            LIMIT ?
+            """,
+            (diet_id, limit),
+        )
+        return [r["title"] for r in rows]
+
+    def doc_count(self, diet_id: str) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) AS n FROM documents WHERE diet_id = ? AND is_duplicate = 0",
+            (diet_id,),
+        ).fetchone()["n"]
+
+    # -- summaries -------------------------------------------------------
+    def upsert_summary(
+        self, *, scope: str, generated_utc: str, model: str, method: str, text: str
+    ) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                """
+                INSERT INTO summaries (scope, generated_utc, model, method, text)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(scope) DO UPDATE SET
+                    generated_utc=excluded.generated_utc, model=excluded.model,
+                    method=excluded.method, text=excluded.text
+                """,
+                (scope, generated_utc, model, method, text),
+            )
+
+    def all_summaries(self) -> dict[str, sqlite3.Row]:
+        return {r["scope"]: r for r in self.conn.execute("SELECT * FROM summaries")}
 
     def diet_ids(self) -> list[str]:
         rows = self.conn.execute("SELECT DISTINCT diet_id FROM documents ORDER BY diet_id")

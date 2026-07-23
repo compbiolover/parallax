@@ -74,19 +74,31 @@ Equality vs Proportionality (Atari & Haidt 2023).
 
 ## Status
 
-Phase 1 (MVP) — extraction + dedup + dictionary scoring are implemented. See `CLAUDE.md`
-for the full build spec and phased roadmap.
+Phase 1 (MVP) is complete — extraction, dedup, dictionary scoring, a daily summary per
+diet, and a static radar/JSD dashboard. See `CLAUDE.md` for the full build spec and
+phased roadmap.
 
 ### Running the pipeline
 
 ```bash
-# Fetch every RSS source with a URL, extract bodies, dedup, score, and store
-# derived metrics to SQLite (raw text is never persisted):
+# 1. Fetch every RSS source with a URL, extract bodies, dedup, score, and store
+#    derived metrics to SQLite (raw text is never persisted):
 python -m ingestion run --max-items 25
 
-# Print each diet's foundation composition, the Jensen-Shannon divergence
-# between diets, and the per-foundation log-ratios:
+# 2. Print each diet's foundation composition, the Jensen-Shannon divergence,
+#    and the per-foundation log-ratios:
 python -m ingestion compare
+
+# 3. Generate a charitable daily summary per diet + a cross-diet executive
+#    summary (uses Claude when ANTHROPIC_API_KEY is set, else a deterministic,
+#    clearly-labeled numbers-only fallback):
+python -m summarize
+
+# 4. Export the dashboard data payload:
+python -m dashboard.export
+
+# 5. View the dashboard (radar chart, JSD, log-ratio bars, summaries):
+cd dashboard && python -m http.server   # then open http://localhost:8000
 ```
 
 Scoring uses a **built-in demo lexicon** so the pipeline runs with zero external data.
