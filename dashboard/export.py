@@ -29,7 +29,12 @@ from scoring.lexicon import is_demo_lexicon
 DEFAULT_OUT = Path(__file__).resolve().parent / "public" / "data" / "latest.js"
 
 
-def _caveat(lexicon: str | None) -> str:
+def _caveat(lexicon: str | None, has_bands: bool = False) -> str:
+    band_note = (
+        " Whiskers on the radar show the dictionary-vs-transformer range — wider "
+        "means the two methods disagree more, so trust that foundation's number less."
+        if has_bands else ""
+    )
     base = (
         "Scores come from a dictionary method and cover the five classic "
         "foundations only (no liberty). Read every number as a noisy estimate, "
@@ -40,14 +45,38 @@ def _caveat(lexicon: str | None) -> str:
             "Scores come from a dictionary method over a small DEMO lexicon "
             "(illustrative only) and cover the five classic foundations only "
             "(no liberty). Read every number as a noisy estimate, never ground "
-            "truth. See LIMITATIONS.md."
+            "truth. See LIMITATIONS.md." + band_note
         )
-    return f"{base} Lexicon: {lexicon}."
+    return f"{base} Lexicon: {lexicon}.{band_note}"
+
+
+def _band_payload(store: Datastore) -> tuple[dict, str | None]:
+    """Per-diet confidence bands keyed by diet id, plus the transformer scorer
+    name that produced them (``None`` if the transformer never ran)."""
+    transformer_scorer = store.get_meta("transformer_scorer")
+    if not transformer_scorer:
+        return {}, None
+    from compare.confidence import all_diet_bands
+
+    raw = all_diet_bands(store, transformer_scorer)
+    payload = {
+        diet_id: {
+            f: {
+                "point": b.point, "low": b.low, "high": b.high,
+                "dictionary": b.dictionary, "transformer": b.transformer,
+                "disagreement": b.disagreement,
+            }
+            for f, b in bands.items()
+        }
+        for diet_id, bands in raw.items()
+    }
+    return payload, (transformer_scorer if payload else None)
 
 
 def build_payload(store: Datastore) -> dict:
     profiles = diet_profiles(store)
     summaries = store.all_summaries()
+    bands, transformer_scorer = _band_payload(store)
 
     diets = []
     for diet_id, profile in profiles.items():
@@ -58,6 +87,7 @@ def build_payload(store: Datastore) -> dict:
                 "label": diet_id,
                 "doc_count": store.doc_count(diet_id),
                 "profile": {f: profile.get(f, 0.0) for f in CLASSIC_FOUNDATIONS},
+                "band": bands.get(diet_id),  # None unless the transformer ran
                 "summary": srow["text"] if srow else "",
             }
         )
@@ -75,6 +105,7 @@ def build_payload(store: Datastore) -> dict:
 
     exec_row = summaries.get("executive")
     lexicon = store.get_meta("lexicon")
+    has_bands = transformer_scorer is not None
     return {
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "foundations": list(CLASSIC_FOUNDATIONS),
@@ -83,8 +114,12 @@ def build_payload(store: Datastore) -> dict:
         "executive_summary": exec_row["text"] if exec_row else "",
         "summary_method": exec_row["method"] if exec_row else None,
         "lexicon": lexicon,
+        "has_confidence_bands": has_bands,
+        "band_scorers": (
+            {"dictionary": lexicon, "transformer": transformer_scorer} if has_bands else None
+        ),
         "blindspots": _blindspots(store),
-        "caveat": _caveat(lexicon),
+        "caveat": _caveat(lexicon, has_bands),
     }
 
 

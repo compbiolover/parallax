@@ -77,13 +77,20 @@ Equality vs Proportionality (Atari & Haidt 2023).
 Phase 1 (MVP) and Phase 2 (blindspot engine) are complete — extraction, dedup, dictionary
 scoring, a daily summary per diet, a static radar/JSD dashboard, and coverage-asymmetry
 blindspot detection — plus **GDELT historical backfill** for weeks of per-outlet volume.
-See `CLAUDE.md` for the full build spec and phased roadmap.
+Phase 3 adds the **transformer tagger (Mformer)**, a **validation gold set**, and an
+**ensemble confidence signal** now wired to the dashboard: with the transformer run at
+ingestion, each foundation on the radar carries a dictionary-vs-transformer band (wider =
+more disagreement = lower confidence). See `CLAUDE.md` for the full build spec and roadmap.
 
 ### Running the pipeline
 
 ```bash
 # 1. Fetch every RSS source with a URL, extract bodies, dedup, score, embed, and
-#    store derived metrics to SQLite (raw text is never persisted):
+#    store derived metrics to SQLite (raw text is never persisted). Every article
+#    is scored by BOTH the dictionary and the transformer (Mformer) so the
+#    dashboard can show a dictionary-vs-transformer confidence band; add
+#    --no-transformer for the fast dictionary-only path (parallax[scoring] needed
+#    for the transformer, else it degrades to dictionary-only automatically):
 python -m ingestion run --max-items 25
 
 # 1b. Backfill weeks of history per outlet from GDELT (title-based, so it's fast

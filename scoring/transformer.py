@@ -29,6 +29,20 @@ from .foundations import CLASSIC_FOUNDATIONS
 
 DEFAULT_PREFIX = "joshnguyen/mformer-"
 
+# Friendly config aliases -> HF model prefix. "mformer" is the settings default.
+_MODEL_ALIASES = {None: DEFAULT_PREFIX, "": DEFAULT_PREFIX, "mformer": DEFAULT_PREFIX}
+
+
+def resolve_model_prefix(model: str | None) -> str:
+    """Map a settings ``scoring.taggers.transformer.model`` value to a HF prefix.
+
+    Accepts the ``mformer`` alias (the default) or a literal HF prefix like
+    ``joshnguyen/mformer-``; anything else is treated as a literal prefix.
+    """
+    if model in _MODEL_ALIASES:
+        return _MODEL_ALIASES[model]
+    return model
+
 
 def _positive_index(id2label: dict, foundation: str) -> int:
     """Index of the 'foundation present' class in a binary classifier's labels.

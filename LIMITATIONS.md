@@ -23,7 +23,10 @@ an estimate with uncertainty, never ground truth.**
   Claude tagger.
 - **Ensemble disagreement is the confidence signal.** When the dictionary, transformer,
   and Claude taggers diverge on an item, it is flagged low-confidence rather than forced
-  into a label. Confidence bands are surfaced on every foundation score in the dashboard.
+  into a label. When the transformer runs at ingestion, the dashboard draws a
+  dictionary-vs-transformer band (whiskers) on each foundation of the radar — wider means
+  the two methods disagree more, so trust that number less. The band shows *method
+  disagreement*, not a statistical confidence interval.
 
 ## Implementation status (Phase 1)
 
@@ -35,16 +38,21 @@ an estimate with uncertainty, never ground truth.**
   every foundation number the pipeline emits is illustrative only.
 - **Dictionary-only coverage.** The current scorer covers the five classic foundations;
   liberty/oppression is unscored (`None`, never `0`) until the Claude tagger lands.
-- **Ensemble confidence signal exists and is calibrated; dashboard bands are not wired
-  yet.** The dictionary + transformer ensemble (`scoring/ensemble.py`) flags an item
-  low-confidence when the taggers split. On the seed gold set this signal is strongly
-  meaningful: predictions where the taggers **agree** are 86% accurate; where they **split**,
-  27% (a +0.59 gap). Two honest caveats: (1) the ensemble's *point estimate* AUC (macro
-  0.86) sits **below the transformer alone** (0.95) — its contribution is the confidence
-  flag, not a better score, so the transformer remains the best single scorer; (2) the
-  confidence band is computed at evaluation time but is not yet surfaced on the dashboard,
-  which would require running the transformer at ingestion (a performance decision) — that
-  wiring is the remaining §5 step.
+- **Ensemble confidence signal exists, is calibrated, and is now on the dashboard.** The
+  dictionary + transformer ensemble (`scoring/ensemble.py`) flags an item low-confidence
+  when the taggers split. On the seed gold set this signal is strongly meaningful:
+  predictions where the taggers **agree** are 86% accurate; where they **split**, 27% (a
+  +0.59 gap). The transformer now runs on every article at ingestion (`ingestion run`,
+  toggle with `--transformer/--no-transformer`), and the exporter aggregates the
+  disagreement into a per-diet, per-foundation **band** drawn as whiskers on the radar
+  (`compare/confidence.py`). Two honest caveats remain: (1) the ensemble's *point estimate*
+  AUC (macro 0.86) sits **below the transformer alone** (0.95) — its contribution is the
+  confidence flag, not a better score, so the transformer remains the best single scorer;
+  (2) the band shows dictionary-vs-transformer **method disagreement**, not a statistical
+  confidence interval, and the two compositions are on the same simplex but built
+  differently (dictionary argmax rates vs transformer presence probabilities), so read the
+  band as "how much the methods argue here," not as error bars. Transformer scoring needs
+  `parallax[scoring]`; without it, ingestion degrades to dictionary-only and no band shows.
 - **The validation gold set is a starter.** `validation/gold/seed.json` is 42 hand-coded
   items by a single coder — enough to run the harness and fire the §5 trigger, but far
   short of the 200–400 multi-coder items §5 targets. Agreement numbers below are indicative

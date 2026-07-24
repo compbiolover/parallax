@@ -63,8 +63,17 @@ scoring:
       #   probability - sum raw per-foundation probabilities (base-rate dominated)
       assignment: argmax
     transformer:
-      enabled: false              # Phase 3
-      model: mformer
+      # Run the Mformer transformer tagger on every article at ingestion (in
+      # addition to the dictionary), so the dashboard can show a
+      # dictionary-vs-transformer confidence band per foundation. Needs
+      # parallax[scoring] (torch + transformers) and downloads ~5 RoBERTa models
+      # on first use; when the deps are missing the pipeline logs once and falls
+      # back to dictionary-only (no band). Override per-run with
+      # `--transformer/--no-transformer`.
+      enabled: true
+      model: mformer              # 'mformer' alias, or a literal HF model prefix
+      # revision: <commit-or-tag> # pin the HF revision (recommended for reproducibility)
+      max_length: 256
     claude:
       enabled: false              # Phase 1+ for summaries; owns liberty/oppression
       model: claude-opus-4-8

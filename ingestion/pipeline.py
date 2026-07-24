@@ -9,6 +9,7 @@ previously-stored signatures so dedup holds across runs.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -36,6 +37,8 @@ from .extract import (
     strip_html,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class PipelineConfig:
@@ -48,16 +51,23 @@ class PipelineConfig:
     respect_robots: bool = True
     lexicon_path: str | None = None  # eMFD CSV; None -> built-in demo seed
     assignment: str = "argmax"       # 'argmax' | 'probability' (see DictionaryScorer)
+    # Transformer tagger (Mformer) run alongside the dictionary at ingestion, so
+    # every article carries both estimates and the dashboard can show a
+    # dictionary-vs-transformer confidence band. Requires parallax[scoring]; when
+    # the deps are missing the pipeline logs once and continues dictionary-only.
+    transformer_enabled: bool = True
+    transformer_model: str | None = None    # 'mformer' alias or a HF prefix
+    transformer_revision: str | None = None  # pin the HF revision (recommended)
+    transformer_max_length: int = 256
 
     @classmethod
     def from_settings(cls, settings: dict) -> PipelineConfig:
         ing = settings.get("ingestion", {}) or {}
         dedup = (settings.get("dedup", {}) or {}).get("near_duplicate", {}) or {}
         rate = (ing.get("rate_limit", {}) or {})
-        dict_cfg = (
-            ((settings.get("scoring", {}) or {}).get("taggers", {}) or {}).get("dictionary", {})
-            or {}
-        )
+        taggers = ((settings.get("scoring", {}) or {}).get("taggers", {}) or {})
+        dict_cfg = taggers.get("dictionary", {}) or {}
+        tr_cfg = taggers.get("transformer", {}) or {}
         return cls(
             user_agent=ing.get("user_agent", DEFAULT_UA),
             timeout=int(ing.get("request_timeout_seconds", 30)),
@@ -66,6 +76,10 @@ class PipelineConfig:
             near_dup_threshold=float(dedup.get("minhash_threshold", 0.85)),
             lexicon_path=dict_cfg.get("lexicon_path"),
             assignment=dict_cfg.get("assignment", "argmax"),
+            transformer_enabled=bool(tr_cfg.get("enabled", True)),
+            transformer_model=tr_cfg.get("model"),
+            transformer_revision=tr_cfg.get("revision"),
+            transformer_max_length=int(tr_cfg.get("max_length", 256)),
         )
 
 
@@ -124,6 +138,7 @@ def run(
     config: PipelineConfig | None = None,
     scorer: DictionaryScorer | None = None,
     embedder: Embedder | None = None,
+    transformer: object | None = None,
 ) -> RunStats:
     """Ingest every RSS source with a URL, scoring and deduping into ``store``."""
     registry = registry or load_registry()
@@ -135,15 +150,20 @@ def run(
         lexicon_name = "injected"
     if embedder is None:
         embedder = HashingEmbedder()
+    if transformer is None:
+        transformer = _build_transformer(cfg)
     store.set_meta("lexicon", lexicon_name)
     store.set_meta("embedder", getattr(embedder, "name", type(embedder).__name__))
+    _store_transformer_meta(store, transformer)
     robots = RobotsCache(cfg.user_agent, cfg.timeout) if cfg.respect_robots else None
     limiter = RateLimiter(cfg.per_host_rpm)
     index = _seed_index(store, cfg.near_dup_threshold)
     stats = RunStats()
 
     for source in registry.ingestable(("rss",)):
-        _ingest_source(source, store, cfg, scorer, embedder, robots, limiter, index, stats)
+        _ingest_source(
+            source, store, cfg, scorer, embedder, robots, limiter, index, stats, transformer
+        )
     return stats
 
 
@@ -157,6 +177,7 @@ def backfill(
     days: int = 14,
     max_per_source: int = 250,
     extract_bodies: bool = False,
+    transformer: object | None = None,
 ) -> RunStats:
     """Backfill weeks of coverage per source from GDELT (title-based by default).
 
@@ -165,6 +186,10 @@ def backfill(
     score→dedup→embed→store path. Title-only unless ``extract_bodies`` is set
     (fetching bodies for a big historical set is slow); titles are what the
     clustering/blindspot engine needs, and the point of backfill is that volume.
+
+    The transformer tagger is **not** auto-run here: this is a bulk historical,
+    title-only job where five RoBERTas per headline would be very slow for little
+    gain (bands are body-scored from feed ``run``). Pass ``transformer`` to opt in.
     """
     from .gdelt import GdeltClient
 
@@ -213,8 +238,43 @@ def backfill(
                 store, source, scorer, embedder, index, stats,
                 title=art.title, link=art.url, published_utc=art.published_utc,
                 text=text, cluster_text=art.title, min_words=min_words,
+                transformer=transformer,
             )
     return stats
+
+
+def _build_transformer(cfg: PipelineConfig):
+    """Construct the Mformer transformer scorer, or return ``None`` (with a
+    single warning) when it's disabled or its heavy deps aren't installed.
+
+    Keeping the failure non-fatal preserves the zero-dependency ``ingestion run``
+    path: without ``parallax[scoring]`` you still get dictionary scores, just no
+    confidence band. Install the extra to have every article transformer-scored.
+    """
+    if not cfg.transformer_enabled:
+        return None
+    from scoring.transformer import TransformerScorer, resolve_model_prefix
+
+    try:
+        return TransformerScorer(
+            model_prefix=resolve_model_prefix(cfg.transformer_model),
+            max_length=cfg.transformer_max_length,
+            revision=cfg.transformer_revision,
+        )
+    except Exception as exc:  # missing torch/transformers, offline, etc.
+        logger.warning(
+            "transformer tagger unavailable (%s: %s) — scoring dictionary-only, "
+            "no confidence band. Install parallax[scoring] to enable it.",
+            type(exc).__name__, exc,
+        )
+        return None
+
+
+def _store_transformer_meta(store: Datastore, transformer) -> None:
+    """Record which scorer produced the transformer rows, so the exporter can
+    pair it against the dictionary for the confidence band (and clear stale
+    provenance when the transformer is off)."""
+    store.set_meta("transformer_scorer", transformer.name if transformer is not None else "")
 
 
 def _seed_index(store: Datastore, threshold: float) -> NearDuplicateIndex:
@@ -237,6 +297,7 @@ def _ingest_source(
     limiter: RateLimiter,
     index: NearDuplicateIndex,
     stats: RunStats,
+    transformer: object | None = None,
 ) -> None:
     try:
         items = parse_feed(source.url, cfg.user_agent)  # type: ignore[arg-type]
@@ -254,6 +315,7 @@ def _ingest_source(
             store, source, scorer, embedder, index, stats,
             title=item.title, link=item.link, published_utc=item.published_utc,
             text=text, cluster_text=_cluster_text(item, text), min_words=cfg.min_words,
+            transformer=transformer,
         )
 
 
@@ -271,11 +333,16 @@ def _ingest_one(
     text: str,
     cluster_text: str,
     min_words: int,
+    transformer: object | None = None,
 ) -> None:
     """Score, dedup, embed and store one document. Shared by feed ingest and
     GDELT backfill. Identity is the canonical article URL when present, so the
     same story reached via a feed (often utm-tagged) and via GDELT (clean url)
-    collapses to one document."""
+    collapses to one document.
+
+    When a ``transformer`` scorer is supplied, every stored document also gets a
+    second ``foundation_scores`` row (its ``P(present)`` per foundation), so the
+    dashboard can show the dictionary-vs-transformer confidence band."""
     doc_id = document_id(link, text)
     if store.has_document(doc_id):
         stats.exact_duplicates += 1
@@ -302,6 +369,12 @@ def _ingest_one(
         sentiment=score.sentiment, moral_word_ratio=score.moral_word_ratio,
         matched_words=score.matched_words, liberty=score.liberty,
     )
+    if transformer is not None:
+        probs = transformer.score(text)
+        store.upsert_scores(
+            document_id=doc_id, scorer=transformer.name, foundations=probs,
+            sentiment=0.0, moral_word_ratio=0.0, matched_words=0,
+        )
     store.upsert_embedding(
         document_id=doc_id,
         vector=embedder.embed(cluster_text),

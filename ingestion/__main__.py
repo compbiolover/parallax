@@ -69,6 +69,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="backfill: max GDELT articles per outlet (<=250)")
     parser.add_argument("--extract", action="store_true",
                         help="backfill: fetch article bodies for full scoring (slow)")
+    parser.add_argument("--transformer", dest="transformer", action="store_true", default=None,
+                        help="run: also transformer-score every article (confidence bands)")
+    parser.add_argument("--no-transformer", dest="transformer", action="store_false",
+                        help="run: skip the transformer tagger (dictionary-only, no bands)")
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
@@ -82,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
                 cfg.min_words = args.min_words
             if args.lexicon is not None:
                 cfg.lexicon_path = args.lexicon
+            if args.transformer is not None:
+                cfg.transformer_enabled = args.transformer
             embedder, _ = build_embedder(settings)
             if args.command == "run":
                 stats = run(store, load_registry(), cfg, embedder=embedder)
