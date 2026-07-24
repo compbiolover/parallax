@@ -370,11 +370,18 @@ def _ingest_one(
         matched_words=score.matched_words, liberty=score.liberty,
     )
     if transformer is not None:
-        probs = transformer.score(text)
-        store.upsert_scores(
-            document_id=doc_id, scorer=transformer.name, foundations=probs,
-            sentiment=0.0, moral_word_ratio=0.0, matched_words=0,
-        )
+        # A single flaky document (encoding, length edge, transient model error)
+        # must not abort the batch or leave the doc half-ingested — the dictionary
+        # row and embedding still land; that doc simply gets no confidence band.
+        try:
+            probs = transformer.score(text)
+            store.upsert_scores(
+                document_id=doc_id, scorer=transformer.name, foundations=probs,
+                sentiment=0.0, moral_word_ratio=0.0, matched_words=0,
+            )
+        except Exception as exc:
+            logger.warning("transformer scoring failed for %s (%s: %s) — dictionary-only",
+                           doc_id, type(exc).__name__, exc)
     store.upsert_embedding(
         document_id=doc_id,
         vector=embedder.embed(cluster_text),

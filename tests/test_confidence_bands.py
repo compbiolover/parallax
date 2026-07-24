@@ -69,6 +69,33 @@ def test_build_transformer_disabled_returns_none():
     assert _build_transformer(PipelineConfig(transformer_enabled=False)) is None
 
 
+class _RaisingTransformer:
+    name = "transformer/boom"
+
+    def score(self, text: str) -> dict[str, float]:
+        raise RuntimeError("model exploded")
+
+
+def test_transformer_failure_does_not_abort_or_half_ingest():
+    # A transformer that raises must not kill the run or leave the doc without an
+    # embedding — the dictionary row and embedding still land, just no band row.
+    from ingestion.dedup import NearDuplicateIndex
+
+    store = Datastore(":memory:")
+    stats = RunStats()
+    _ingest_one(
+        store, _source(), DictionaryScorer(), HashingEmbedder(dim=32),
+        NearDuplicateIndex(), stats,
+        title="A headline that should still ingest", link="https://x.com/c",
+        published_utc=None, text="care help harm compassion victim suffer people",
+        cluster_text="A headline", min_words=3, transformer=_RaisingTransformer(),
+    )
+    assert stats.stored == 1
+    assert store.scorer_names() == ["dictionary"]        # no transformer row
+    assert store.embedding_count() == 1                  # embedding still stored
+    store.close()
+
+
 # -- band math ------------------------------------------------------------
 
 def _store_with_paired_scores():
@@ -114,6 +141,35 @@ def test_diet_band_disagreement_uses_ensemble_vote_convention():
 def test_diet_band_none_without_transformer_rows():
     store = _store_with_paired_scores()
     assert diet_band(store, "self", "does-not-exist") is None
+    store.close()
+
+
+def test_diet_band_ignores_dictionary_only_backfill_docs():
+    # Both compositions must be built over the *paired* docs only. A dict-only
+    # doc (as GDELT backfill produces) would shift the dictionary composition if
+    # wrongly included, making the band conflate population with method.
+    store = Datastore(":memory:")
+    # paired doc: dictionary says care, transformer says loyalty
+    store.upsert_document(doc_id="p", diet_id="self", source_id="s", stratum_id=None,
+                          url=None, title="t", published_utc=None,
+                          fetched_utc="2026-07-24T00:00:00+00:00", word_count=90, minhash=None)
+    store.upsert_scores(document_id="p", scorer="dictionary", foundations={"care": 1.0},
+                        sentiment=0.0, moral_word_ratio=0.1, matched_words=5)
+    store.upsert_scores(document_id="p", scorer="transformer/stub", foundations={"loyalty": 1.0},
+                        sentiment=0.0, moral_word_ratio=0.0, matched_words=0)
+    # dict-only backfill doc that would drag the dict composition toward loyalty
+    store.upsert_document(doc_id="bf", diet_id="self", source_id="s", stratum_id=None,
+                          url=None, title="t2", published_utc=None,
+                          fetched_utc="2026-07-24T00:00:00+00:00", word_count=90, minhash=None)
+    store.upsert_scores(document_id="bf", scorer="dictionary", foundations={"loyalty": 1.0},
+                        sentiment=0.0, moral_word_ratio=0.1, matched_words=5)
+
+    bands = diet_band(store, "self", "transformer/stub")
+    # Paired-only: dict composition is pure care (1.0). If the backfill doc leaked
+    # in it would be care=0.5, loyalty=0.5.
+    assert bands["care"].dictionary == 1.0
+    assert bands["loyalty"].dictionary == 0.0
+    assert bands["loyalty"].transformer == 1.0
     store.close()
 
 

@@ -45,7 +45,10 @@ an estimate with uncertainty, never ground truth.**
   +0.59 gap). The transformer now runs on every article at ingestion (`ingestion run`,
   toggle with `--transformer/--no-transformer`), and the exporter aggregates the
   disagreement into a per-diet, per-foundation **band** drawn as whiskers on the radar
-  (`compare/confidence.py`). Two honest caveats remain: (1) the ensemble's *point estimate*
+  (`compare/confidence.py`). The band and both its compositions are computed over the same
+  paired document set — only documents scored by *both* taggers — so it never conflates a
+  method difference with the fact that GDELT backfill writes dictionary rows but no
+  transformer rows. Two honest caveats remain: (1) the ensemble's *point estimate*
   AUC (macro 0.86) sits **below the transformer alone** (0.95) — its contribution is the
   confidence flag, not a better score, so the transformer remains the best single scorer;
   (2) the band shows dictionary-vs-transformer **method disagreement**, not a statistical

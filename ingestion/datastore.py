@@ -250,16 +250,26 @@ class Datastore:
     def paired_scores_for_diet(
         self, diet_id: str, scorer_a: str, scorer_b: str,
         foundations: list[str] | None = None,
-    ) -> list[tuple[dict[str, float], dict[str, float]]]:
-        """Per non-duplicate document in a diet, the (scorer_a, scorer_b) foundation
-        maps — only for documents scored by *both*. Used to measure how often the
-        two taggers split on a foundation's presence (the confidence signal)."""
+    ) -> list[tuple[float, dict[str, float], dict[str, float]]]:
+        """Per non-duplicate document in a diet, ``(weight, scorer_a_map, scorer_b_map)``
+        — only for documents scored by *both*. Pairing keeps the two taggers on the
+        same document population (backfill writes dictionary rows but no transformer
+        rows), which both the confidence band and the disagreement share rely on.
+
+        ``founds`` is interpolated into the SELECT (SQLite can't bind identifiers),
+        so it is whitelisted against the known foundation columns to keep this from
+        becoming an injection point if a future caller passes a non-constant list.
+        """
         from scoring.foundations import CLASSIC_FOUNDATIONS
 
-        founds = foundations or list(CLASSIC_FOUNDATIONS)
+        allowed = set(CLASSIC_FOUNDATIONS)
+        founds = [f for f in (foundations or list(CLASSIC_FOUNDATIONS)) if f in allowed]
+        if not founds:
+            founds = list(CLASSIC_FOUNDATIONS)
         rows = self.conn.execute(
             f"""
-            SELECT {', '.join(f'a.{c} AS a_{c}' for c in founds)},
+            SELECT d.weight AS weight,
+                   {', '.join(f'a.{c} AS a_{c}' for c in founds)},
                    {', '.join(f'b.{c} AS b_{c}' for c in founds)}
             FROM foundation_scores a
             JOIN foundation_scores b ON a.document_id = b.document_id
@@ -273,7 +283,7 @@ class Datastore:
         for r in rows:
             a = {c: (r[f"a_{c}"] if r[f"a_{c}"] is not None else 0.0) for c in founds}
             b = {c: (r[f"b_{c}"] if r[f"b_{c}"] is not None else 0.0) for c in founds}
-            out.append((a, b))
+            out.append((float(r["weight"] or 1.0), a, b))
         return out
 
     def headlines_for_diet(self, diet_id: str, limit: int = 50) -> list[str]:
