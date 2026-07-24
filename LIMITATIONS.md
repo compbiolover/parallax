@@ -106,6 +106,19 @@ an estimate with uncertainty, never ground truth.**
   has many stories covered by multiple outlets in one diet and none in the other, so
   blindspot lists can be short and some entries rest on 2 stories. Treat them as candidates,
   not verdicts; they strengthen as coverage accumulates over time and across more sources.
+  The **GDELT backfill** (`python -m ingestion backfill`) is the fix — it pulls weeks of
+  per-outlet history so clusters rest on real volume. Caveats specific to GDELT:
+  - **Titles only.** GDELT returns article metadata, not bodies, so backfilled documents are
+    title-based by default. That is what the clustering needs, but their moral-foundation
+    scores (computed on the title) are weaker than body-scored feed documents — mixing the
+    two in one aggregate slightly muddies the MFT profile. Use `--extract` for full bodies
+    when the MFT numbers matter, or keep backfill for the blindspot engine and feed ingestion
+    for scoring.
+  - **~3-month window, imperfect coverage.** GDELT indexes the trailing ~3 months and does
+    not include every outlet's every article; some domains return little.
+  - **Rate limits.** The free endpoint throttles hard (≈1 request/5s) and throttles shared
+    IPs harder — a full-registry backfill is slow and can return partial results on a hot IP.
+    The client backs off and retries; if a source comes back empty, re-run later.
 - **A blindspot is a coverage signal, not a moral judgment.** "One diet covers X, the other
   doesn't" is descriptive. The tool reports both directions with equal prominence
   (including the author's own blindspots) and never editorializes about which absence is

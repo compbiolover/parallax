@@ -132,6 +132,8 @@ diets:
               # 2026-07-23). Self-host that scraper and point this url at your
               # instance to activate. Left null so ingestion skips it until then.
               url: null
+            # GDELT can still backfill AP historically by domain even without RSS.
+            domain: apnews.com
             weight: 0.7
             rationale: "Wire baseline; heavy syndication across the diet — dedup matters."
 
@@ -175,6 +177,7 @@ diets:
             ingest:
               type: rss
               url: "https://feeds.bbci.co.uk/news/world/rss.xml"
+            domain: bbc.com          # feed host is bbci.co.uk; articles live on bbc.com
             weight: 0.8
             rationale: "Non-US vantage point; counterweight to domestic framing."
 

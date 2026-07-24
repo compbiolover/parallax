@@ -21,7 +21,7 @@ from .config import Registry, Source, load_registry, load_settings
 from .datastore import Datastore
 from .dedup import (
     NearDuplicateIndex,
-    content_hash,
+    document_id,
     minhash_signature,
     signature_from_list,
     signature_list,
@@ -147,6 +147,76 @@ def run(
     return stats
 
 
+def backfill(
+    store: Datastore,
+    registry: Registry | None = None,
+    config: PipelineConfig | None = None,
+    scorer: DictionaryScorer | None = None,
+    embedder: Embedder | None = None,
+    gdelt: "GdeltClient | None" = None,
+    days: int = 14,
+    max_per_source: int = 250,
+    extract_bodies: bool = False,
+) -> RunStats:
+    """Backfill weeks of coverage per source from GDELT (title-based by default).
+
+    For each outlet with a resolvable domain, pull up to ``max_per_source``
+    articles over the trailing ``days`` and run them through the same
+    score→dedup→embed→store path. Title-only unless ``extract_bodies`` is set
+    (fetching bodies for a big historical set is slow); titles are what the
+    clustering/blindspot engine needs, and the point of backfill is that volume.
+    """
+    from .gdelt import GdeltClient
+
+    registry = registry or load_registry()
+    cfg = config or PipelineConfig()
+    if scorer is None:
+        lexicon, lexicon_name = build_lexicon(cfg.lexicon_path)
+        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment)
+    else:
+        lexicon_name = "injected"
+    if embedder is None:
+        embedder = HashingEmbedder()
+    client = gdelt or GdeltClient()
+    store.set_meta("lexicon", lexicon_name)
+    store.set_meta("embedder", getattr(embedder, "name", type(embedder).__name__))
+    robots = RobotsCache(cfg.user_agent, cfg.timeout) if (extract_bodies and cfg.respect_robots) else None
+    limiter = RateLimiter(cfg.per_host_rpm)
+    index = _seed_index(store, cfg.near_dup_threshold)
+    stats = RunStats()
+    # One GDELT query per unique (diet, domain) — several sources share a domain.
+    seen_domains: set[tuple[str, str]] = set()
+
+    for source in registry.backfillable():
+        key = (source.diet_id, source.domain or "")
+        if key in seen_domains:
+            continue
+        seen_domains.add(key)
+        try:
+            articles = client.search_domain(source.domain, timespan=f"{days}d", max_records=max_per_source)
+        except Exception:
+            stats.errors += 1
+            continue
+        for art in articles:
+            stats.fetched += 1
+            if extract_bodies:
+                body = extract_article(
+                    art.url, user_agent=cfg.user_agent, timeout=cfg.timeout,
+                    robots=robots, rate_limiter=limiter,
+                )
+                text = f"{art.title}\n\n{body}".strip() if body else art.title
+                min_words = cfg.min_words
+            else:
+                text = art.title
+                min_words = 3  # title-only: don't skip on the short-doc guard
+            _ingest_one(
+                store, source, scorer, embedder, index, stats,
+                title=art.title, link=art.url, published_utc=art.published_utc,
+                text=text, cluster_text=art.title, min_words=min_words,
+            )
+    return stats
+
+
 def _seed_index(store: Datastore, threshold: float) -> NearDuplicateIndex:
     index = NearDuplicateIndex(threshold=threshold)
     for doc_id, sig in store.iter_minhash_signatures():
@@ -180,57 +250,70 @@ def _ingest_source(
         if text is None:
             stats.errors += 1
             continue
-
-        doc_id = content_hash(text)
-        if store.has_document(doc_id):
-            stats.exact_duplicates += 1
-            continue
-
-        score: DocumentScore = scorer.score(text)
-        if score.word_count < cfg.min_words:
-            stats.skipped_short += 1
-            continue
-
-        mh = minhash_signature(text, k=5)
-        dup_of = index.find_duplicate(mh)
-        is_dup = dup_of is not None
-
-        store.upsert_document(
-            doc_id=doc_id,
-            diet_id=source.diet_id,
-            source_id=source.id,
-            stratum_id=source.stratum_id,
-            url=item.link,
-            title=item.title,
-            published_utc=item.published_utc,
-            fetched_utc=_now_iso(),
-            word_count=score.word_count,
-            minhash=signature_list(mh),
-            weight=source.diet_weight,
-            is_duplicate=is_dup,
-            duplicate_of=dup_of,
-        )
-        store.upsert_scores(
-            document_id=doc_id,
-            scorer=score.scorer,
-            foundations=score.foundations,
-            sentiment=score.sentiment,
-            moral_word_ratio=score.moral_word_ratio,
-            matched_words=score.matched_words,
-            liberty=score.liberty,
-        )
-        store.upsert_embedding(
-            document_id=doc_id,
-            vector=embedder.embed(_cluster_text(item, text)),
-            embedder=getattr(embedder, "name", type(embedder).__name__),
+        _ingest_one(
+            store, source, scorer, embedder, index, stats,
+            title=item.title, link=item.link, published_utc=item.published_utc,
+            text=text, cluster_text=_cluster_text(item, text), min_words=cfg.min_words,
         )
 
-        if is_dup:
-            stats.near_duplicates += 1
-        else:
-            index.add(doc_id, mh)
-            stats.stored += 1
-            stats.per_diet[source.diet_id] = stats.per_diet.get(source.diet_id, 0) + 1
+
+def _ingest_one(
+    store: Datastore,
+    source: Source,
+    scorer: DictionaryScorer,
+    embedder: Embedder,
+    index: NearDuplicateIndex,
+    stats: RunStats,
+    *,
+    title: str,
+    link: str | None,
+    published_utc: str | None,
+    text: str,
+    cluster_text: str,
+    min_words: int,
+) -> None:
+    """Score, dedup, embed and store one document. Shared by feed ingest and
+    GDELT backfill. Identity is the canonical article URL when present, so the
+    same story reached via a feed (often utm-tagged) and via GDELT (clean url)
+    collapses to one document."""
+    doc_id = document_id(link, text)
+    if store.has_document(doc_id):
+        stats.exact_duplicates += 1
+        return
+
+    score: DocumentScore = scorer.score(text)
+    if score.word_count < min_words:
+        stats.skipped_short += 1
+        return
+
+    mh = minhash_signature(text, k=5)
+    dup_of = index.find_duplicate(mh)
+    is_dup = dup_of is not None
+
+    store.upsert_document(
+        doc_id=doc_id, diet_id=source.diet_id, source_id=source.id,
+        stratum_id=source.stratum_id, url=link, title=title,
+        published_utc=published_utc, fetched_utc=_now_iso(),
+        word_count=score.word_count, minhash=signature_list(mh),
+        weight=source.diet_weight, is_duplicate=is_dup, duplicate_of=dup_of,
+    )
+    store.upsert_scores(
+        document_id=doc_id, scorer=score.scorer, foundations=score.foundations,
+        sentiment=score.sentiment, moral_word_ratio=score.moral_word_ratio,
+        matched_words=score.matched_words, liberty=score.liberty,
+    )
+    store.upsert_embedding(
+        document_id=doc_id,
+        vector=embedder.embed(cluster_text),
+        embedder=getattr(embedder, "name", type(embedder).__name__),
+    )
+
+    if is_dup:
+        stats.near_duplicates += 1
+    else:
+        index.add(doc_id, mh)
+        stats.stored += 1
+        stats.per_diet[source.diet_id] = stats.per_diet.get(source.diet_id, 0) + 1
 
 
 def diet_profiles(store: Datastore, scorer_name: str = "dictionary") -> dict[str, dict[str, float]]:

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from datasketch import MinHash, MinHashLSH
 
@@ -24,6 +25,14 @@ _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 DEFAULT_NUM_PERM = 128
 DEFAULT_SHINGLE = 5
+
+# Query params that identify a share/campaign, not the article — dropped so the
+# same article reached via a feed (often utm-tagged) and via GDELT (usually
+# clean) canonicalizes to one identity.
+_TRACKING_KEYS = {
+    "fbclid", "gclid", "mc_cid", "mc_eid", "igshid", "ref", "ref_src",
+    "cmpid", "cmp", "spm", "src", "smid", "smtyp", "_hsenc", "_hsmi",
+}
 
 
 def normalize_text(text: str) -> str:
@@ -35,6 +44,31 @@ def normalize_text(text: str) -> str:
 def content_hash(text: str) -> str:
     """Stable sha256 hex digest of the normalized text — the document id."""
     return hashlib.sha256(normalize_text(text).encode("utf-8")).hexdigest()
+
+
+def normalize_url(url: str) -> str:
+    """Canonicalize a URL to a stable identity key.
+
+    Drops scheme (http/https treated alike), fragment, tracking query params,
+    and any trailing slash; lowercases the host; sorts the surviving query so
+    param order doesn't matter. Content-bearing query params (e.g. ``?id=123``)
+    are kept. Used so the same article via a feed and via GDELT hashes to one id.
+    """
+    parts = urlsplit(url.strip())
+    host = parts.netloc.rsplit("@", 1)[-1].split(":")[0].lower()
+    path = parts.path.rstrip("/") or "/"
+    kept = [
+        (k, v)
+        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+        if not k.lower().startswith("utm_") and k.lower() not in _TRACKING_KEYS
+    ]
+    query = urlencode(sorted(kept))
+    return f"{host}{path}" + (f"?{query}" if query else "")
+
+
+def document_id(link: str | None, text: str) -> str:
+    """Stable id for a document: canonical URL when present, else content hash."""
+    return content_hash(normalize_url(link)) if link else content_hash(text)
 
 
 def _shingles(text: str, k: int) -> set[str]:
