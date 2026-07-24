@@ -46,6 +46,22 @@ transformer clears every binding foundation at ≥ 0.94. This is the empirical
 case for the transformer tagger, and the harness will re-check it as the gold
 set grows.
 
+## The ensemble confidence signal (`--scorer ensemble`)
+
+The dictionary + transformer ensemble flags an item **low-confidence** when the
+taggers split. That flag is the §5 payoff — and on the seed gold set it is
+strongly calibrated:
+
+| bucket | predictions | label-accuracy |
+| --- | --- | --- |
+| taggers **agree** (high-confidence) | 125 | **0.86** |
+| taggers **split** (low-confidence) | 85 | **0.27** |
+
+A **+0.59** accuracy gap: when the two methods agree, trust the label; when they
+disagree, don't. Note the ensemble's *point-estimate* AUC (macro 0.86) is below
+the transformer alone (0.95) — the ensemble's job is the confidence flag, not a
+better score.
+
 ## Guarding against confirmation bias
 
 - Pre-register what you expect each period, then check yourself.

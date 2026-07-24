@@ -115,6 +115,8 @@ cd dashboard && python -m http.server   # then open http://localhost:8000
 # and the §5 trigger (binding foundations below 0.7 AUC warrant the transformer):
 python -m validation --lexicon data/emfd_scoring.csv
 python -m validation --scorer transformer   # Mformer; needs parallax[scoring]
+python -m validation --scorer ensemble      # dictionary + transformer, with a
+                                            # disagreement-based confidence report
 ```
 
 Story clustering embeds each document at ingestion (text is discarded, so embeddings are
