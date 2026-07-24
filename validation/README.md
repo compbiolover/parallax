@@ -1,33 +1,54 @@
 # validation/
 
 The gold set and agreement metrics that keep every foundation number honest
-(see `CLAUDE.md` §5 and `LIMITATIONS.md`).
+(`CLAUDE.md` §5). This is where a scorer earns trust — or is shown not to have it.
 
-## Plan
+## Run it
 
-1. **Hand-coded gold set.** A stratified random sample of **200–400 articles**
-   across both diets and all foundations, coded using the Moral Foundations
-   Reddit Corpus (MFRC) annotation guidelines (incl. "Thin Morality" and
-   implicit/explicit flags).
-2. **Agreement metrics.** Krippendorff's alpha / Cohen's kappa between the human
-   coder and each automated method; per-foundation AUC and F1.
-3. **Expectation.** Binding foundations (loyalty, authority, sanctity) are
-   expected to be the weakest — quantify by how much.
+```bash
+python -m validation                                  # dictionary, built-in seed lexicon
+python -m validation --lexicon data/emfd_scoring.csv  # dictionary, real eMFD
+python -m validation --scorer transformer             # Mformer (needs parallax[scoring])
+```
 
-## Trigger for Phase 3
+Reports per-foundation **AUC / F1 / Cohen's kappa** against the hand-coded gold
+labels, a macro-AUC, and the **§5 trigger**: if a *binding* foundation (loyalty,
+authority, sanctity) scores below 0.7 AUC, the dictionary alone is not
+trustworthy there and the transformer/Claude taggers are warranted.
 
-If the gold set shows dictionary-only per-foundation AUC **below ~0.7** on the
-binding foundations, add the transformer tagger and ensemble all three methods.
+## Files
 
-## Confirmation-bias guards
+- `gold/seed.json` — the hand-coded gold set: short texts with binary presence
+  labels over the five classic foundations (virtue **or** vice counts as
+  present), MFRC-style. A **starter** set (§5 targets 200–400 items across both
+  diets and all foundations); expand it and add coders over time.
+- `gold.py` — schema + loader. `metrics.py` — agreement metrics, incl.
+  Krippendorff's alpha for inter-coder reliability (verified against his
+  canonical example). `evaluate.py` — scores the gold set and applies the trigger.
 
-- **Pre-register** what you expect to find each period before scoring, then
-  check yourself.
-- Run the identical pipeline on your own diet; display your blindspots with
-  equal prominence.
-- Periodically have the LLM critique the framing choices and flag where *your*
-  diet is the outlier.
+## The result that justified Phase 3
 
-Committed here: the gold-set schema, agreement notebooks, and results. **Not**
-committed: raw article text or transcripts (gitignored) — store only IDs,
-links, and hand-coded labels.
+On the seed gold set (42 items, single coder), the real eMFD dictionary vs the
+Mformer transformer tagger:
+
+| foundation | eMFD AUC | Mformer AUC |
+| --- | --- | --- |
+| care | 0.67 | 0.92 |
+| fairness | 0.78 | 0.98 |
+| loyalty *(binding)* | **0.63** | 0.94 |
+| authority *(binding)* | 0.84 | 0.96 |
+| sanctity *(binding)* | **0.63** | 0.96 |
+| **macro-AUC** | **0.71** | **0.95** |
+
+The dictionary fires the §5 trigger on **loyalty and sanctity** — exactly the
+binding foundations the literature (and §5) predict it handles worst. The
+transformer clears every binding foundation at ≥ 0.94. This is the empirical
+case for the transformer tagger, and the harness will re-check it as the gold
+set grows.
+
+## Guarding against confirmation bias
+
+- Pre-register what you expect each period, then check yourself.
+- The identical pipeline runs on the author's own diet; blindspots shown equally.
+- Committed here: the gold-set labels, schema, and metrics — **not** raw article
+  text or transcripts (gitignored). Gold texts are short hand-coded excerpts.

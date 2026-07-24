@@ -3,7 +3,7 @@
     python -m cluster run
     python -m cluster run --min-cluster-size 3 --dominance 0.8
 
-Requires scikit-learn (``pip install parallax[cluster]``) and documents that
+Requires scikit-learn (a core dependency) and documents that
 were ingested after embeddings were added (older rows have no vector).
 """
 

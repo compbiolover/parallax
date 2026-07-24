@@ -6,8 +6,8 @@ HDBSCAN density clustering. Each resulting cluster is a story; noise points get
 label -1.
 
 scikit-learn is imported lazily so the ``cluster`` package stays importable
-(and ingestion, which only needs the embedder, stays light) when sklearn is not
-installed. Install it with ``pip install parallax[cluster]``.
+(and ingestion, which only needs the embedder, stays light); it is a core
+dependency.
 """
 
 from __future__ import annotations
