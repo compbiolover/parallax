@@ -44,6 +44,22 @@ def test_weighting_shifts_score_but_split_still_flagged():
     assert es.low_confidence is True             # still a split -> flagged
 
 
+def test_scores_returns_continuous_per_foundation():
+    ens = EnsembleScorer([Tagger("a", _const(0.9)), Tagger("b", _const(0.7))])
+    scores = ens.scores("x")
+    assert set(scores) == set(CLASSIC_FOUNDATIONS)
+    assert scores["care"] == pytest.approx(0.8)
+
+
+def test_label_tie_break_matches_metrics_strict_threshold():
+    # An exact 0.5 must label 0, matching validation.metrics (`s > threshold`),
+    # so the calibration report and the F1/kappa report never disagree on it.
+    ens = EnsembleScorer([Tagger("a", _const(1.0)), Tagger("b", _const(0.0))])
+    es = ens.score("x")["care"]
+    assert es.score == pytest.approx(0.5)
+    assert es.label == 0
+
+
 def test_dictionary_prob_adapter_is_presence_binary():
     class _DS:
         def score(self, text):
@@ -64,9 +80,8 @@ def test_empty_ensemble_rejected():
 def test_confidence_calibration_rewards_agreement():
     # tagger A is always right; tagger B is right only on care -> care is
     # high-confidence & correct, others are low-confidence.
-    gold = GoldSet(version=1, coders=["t"], items=[
-        GoldItem("a", "t1", {"care": 1, "fairness": 1, "loyalty": 1, "authority": 1, "sanctity": 1}),
-    ])
+    all_present = {"care": 1, "fairness": 1, "loyalty": 1, "authority": 1, "sanctity": 1}
+    gold = GoldSet(version=1, coders=["t"], items=[GoldItem("a", "t1", all_present)])
     a = _const(0.9)                              # says present everywhere (matches gold)
     b = _map({"care": 0.9})                      # present only on care
     ens = EnsembleScorer([Tagger("a", a), Tagger("b", b)])

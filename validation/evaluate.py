@@ -31,6 +31,17 @@ def evaluate(
 ) -> dict[str, dict]:
     """Per-foundation agreement between ``score_fn`` and the gold labels."""
     scored = [score_fn(item.text) for item in goldset.items]
+    return evaluate_scored(goldset, scored, foundations, threshold)
+
+
+def evaluate_scored(
+    goldset: GoldSet,
+    scored: Sequence[dict[str, float]],
+    foundations: Sequence[str] = CLASSIC_FOUNDATIONS,
+    threshold: float = 0.0,
+) -> dict[str, dict]:
+    """Agreement from already-computed continuous scores, aligned with
+    ``goldset.items`` — lets a caller score each item once and reuse it."""
     results: dict[str, dict] = {}
     for f in foundations:
         gold = goldset.gold_column(f)
@@ -88,11 +99,18 @@ def confidence_calibration(goldset: GoldSet, ensemble) -> dict:
     ``low_confidence`` (taggers split), and compare label accuracy across the two
     buckets. A meaningful signal is more accurate when confident.
     """
+    scored = [ensemble.score(item.text) for item in goldset.items]
+    return confidence_calibration_scored(goldset, scored)
+
+
+def confidence_calibration_scored(goldset: GoldSet, scored: Sequence[dict]) -> dict:
+    """Calibration from already-computed EnsembleScore maps (one per gold item,
+    aligned with ``goldset.items``) — the reuse path so the ensemble scores each
+    item once for both the agreement report and this calibration."""
     high_correct = high_total = low_correct = low_total = 0
-    for item in goldset.items:
-        scored = ensemble.score(item.text)
+    for item, es_map in zip(goldset.items, scored):
         for f in CLASSIC_FOUNDATIONS:
-            es = scored[f]
+            es = es_map[f]
             correct = int(es.label == item.labels.get(f, 0))
             if es.low_confidence:
                 low_total += 1

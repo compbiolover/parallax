@@ -38,7 +38,7 @@ class Tagger:
 @dataclass(frozen=True)
 class EnsembleScore:
     score: float                 # weighted mean presence probability [0, 1]
-    label: int                   # 1 if score >= 0.5 else 0
+    label: int                   # 1 if score > 0.5 else 0 (matches metrics' threshold)
     confidence: float            # weighted fraction of taggers agreeing with label
     low_confidence: bool         # taggers split on presence
     votes: dict[str, int] = field(default_factory=dict)   # per-tagger 0/1
@@ -62,8 +62,12 @@ class EnsembleScorer:
             probs = {t.name: float(per_tagger[t.name].get(f, 0.0) or 0.0) for t in self.taggers}
             votes = {name: (1 if p > 0.5 else 0) for name, p in probs.items()}
             score = sum(t.weight * probs[t.name] for t in self.taggers) / self._weight_total
-            label = 1 if score >= 0.5 else 0
-            agree = sum(t.weight for t in self.taggers if votes[t.name] == label) / self._weight_total
+            # Strict ``>`` matches validation.metrics.foundation_agreement, so the
+            # calibration report's labels and format_report's F1/kappa never disagree
+            # on an item that lands exactly on 0.5.
+            label = 1 if score > 0.5 else 0
+            agreeing = sum(t.weight for t in self.taggers if votes[t.name] == label)
+            agree = agreeing / self._weight_total
             out[f] = EnsembleScore(
                 score=score,
                 label=label,
