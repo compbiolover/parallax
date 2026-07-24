@@ -80,19 +80,32 @@ class SentenceTransformerEmbedder:
     instruction-tuned families need it to score well (bge: "Represent this
     sentence for searching relevant passages: "; e5: "query: "). Plain models
     (gte, MiniLM, mpnet) take no prefix.
+
+    ``model`` is fetched from the Hugging Face hub, so it is a supply-chain
+    surface: prefer a trusted source and **pin ``revision``** (a commit hash or
+    tag) for reproducibility. This code never sets ``trust_remote_code``, so a
+    model cannot execute bundled code on load. The pinned revision is recorded in
+    ``name`` for provenance.
     """
 
-    def __init__(self, model: str = "thenlper/gte-small", query_prefix: str = "") -> None:
+    def __init__(
+        self,
+        model: str = "thenlper/gte-small",
+        query_prefix: str = "",
+        revision: str | None = None,
+    ) -> None:
         from sentence_transformers import SentenceTransformer  # lazy
 
         self.model_name = model
         self.query_prefix = query_prefix
-        self._model = SentenceTransformer(model)
+        self.revision = revision
+        self._model = SentenceTransformer(model, revision=revision)
         self.dim = int(self._model.get_sentence_embedding_dimension())
 
     @property
     def name(self) -> str:
-        return f"sentence-transformers/{self.model_name}"
+        suffix = f"@{self.revision}" if self.revision else ""
+        return f"sentence-transformers/{self.model_name}{suffix}"
 
     def embed(self, text: str) -> list[float]:
         vec = self._model.encode(self.query_prefix + text, normalize_embeddings=True)
@@ -113,6 +126,7 @@ def build_embedder(settings: dict | None = None) -> tuple[Embedder, str]:
         emb = SentenceTransformerEmbedder(
             cfg.get("model", "thenlper/gte-small"),
             query_prefix=cfg.get("query_prefix", ""),
+            revision=cfg.get("revision"),
         )
         return emb, emb.name
     emb = HashingEmbedder(int(cfg.get("dim", 512)))

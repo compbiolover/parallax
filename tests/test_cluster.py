@@ -125,6 +125,50 @@ def test_run_clustering_end_to_end_separates_topics():
     store.close()
 
 
+def test_iter_embeddings_filters_by_embedder():
+    store = Datastore(":memory:")
+    for i, emb in [(0, "hashing(d=8)"), (1, "hashing(d=8)"), (2, "sentence-transformers/x")]:
+        store.upsert_document(doc_id=f"d{i}", diet_id="self", source_id="s", stratum_id=None,
+            url=None, title="t", published_utc=None,
+            fetched_utc="2026-07-23T00:00:00+00:00", word_count=10, minhash=None)
+        store.upsert_embedding(document_id=f"d{i}", vector=[0.0] * 8, embedder=emb)
+    assert len(list(store.iter_embeddings())) == 3
+    assert len(list(store.iter_embeddings(embedder="hashing(d=8)"))) == 2
+    assert set(store.embedder_names()) == {"hashing(d=8)", "sentence-transformers/x"}
+    store.close()
+
+
+def test_clustering_clusters_only_active_embedder():
+    # Two embedders with different dims in one DB; meta marks one active.
+    store = Datastore(":memory:")
+    emb = HashingEmbedder(dim=64)
+    _seed_topics(store, emb)  # writes embedder "hashing(d=64)"
+    # inject a stray doc from a different embedder/dim
+    store.upsert_document(doc_id="stray", diet_id="self", source_id="s", stratum_id=None,
+        url=None, title="stray", published_utc=None,
+        fetched_utc="2026-07-23T00:00:00+00:00", word_count=10, minhash=None)
+    store.upsert_embedding(document_id="stray", vector=[0.0] * 384, embedder="other(d=384)")
+    store.set_meta("embedder", emb.name)
+    outcome = run_clustering(store)  # must not crash; ignores the stray dim-384 doc
+    assert outcome.n_docs == 16  # only the 16 seeded same-embedder docs
+    store.close()
+
+
+def test_clustering_raises_on_mixed_dims_without_active_embedder():
+    from cluster.cluster import compute_clustering
+    store = Datastore(":memory:")
+    for i, (dim, emb) in enumerate([(8, "a"), (16, "b")]):
+        store.upsert_document(doc_id=f"d{i}", diet_id="self", source_id="s", stratum_id=None,
+            url=None, title="t", published_utc=None,
+            fetched_utc="2026-07-23T00:00:00+00:00", word_count=10, minhash=None)
+        store.upsert_embedding(document_id=f"d{i}", vector=[0.0] * dim, embedder=emb)
+    # no meta['embedder'] -> no filter -> mixed dims -> clear error, not a numpy crash
+    import pytest
+    with pytest.raises(ValueError, match="mixed dimensions"):
+        compute_clustering(store, min_cluster_size=2)
+    store.close()
+
+
 def test_too_few_docs_is_all_noise():
     store = Datastore(":memory:")
     emb = HashingEmbedder(dim=32)

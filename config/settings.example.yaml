@@ -82,6 +82,10 @@ cluster:
     # thenlper/gte-small (best simple choice, no prefix) ~ BAAI/bge-small-en-v1.5
     # (needs query_prefix) > all-MiniLM-L6-v2 > all-mpnet-base-v2. Bigger != better.
     model: thenlper/gte-small
+    # Pin a Hugging Face revision (commit hash or tag) for reproducibility and
+    # supply-chain safety — the model is downloaded from the hub. Unset = latest.
+    # (Weights load without trust_remote_code, so a model can't run bundled code.)
+    revision:
     # Instruction prefix prepended to every text. Required by instruction-tuned
     # families to score well; leave empty for gte/MiniLM/mpnet.
     #   bge: "Represent this sentence for searching relevant passages: "

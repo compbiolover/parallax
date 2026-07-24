@@ -305,18 +305,32 @@ class Datastore:
                 (document_id, len(vector), json.dumps(vector), embedder),
             )
 
-    def iter_embeddings(self) -> Iterator[tuple[str, str, str | None, list[int], list[float]]]:
-        """Yield (document_id, diet_id, title, _, vector) for non-duplicate docs."""
-        rows = self.conn.execute(
-            """
+    def iter_embeddings(
+        self, embedder: str | None = None
+    ) -> Iterator[tuple[str, str, str | None, list[int], list[float]]]:
+        """Yield (document_id, diet_id, title, _, vector) for non-duplicate docs.
+
+        When ``embedder`` is given, only rows produced by that embedder are
+        yielded — embeddings from different embedders live in incompatible vector
+        spaces (and often different dimensions), so clustering must not mix them.
+        """
+        sql = """
             SELECT e.document_id AS id, d.diet_id AS diet_id, d.title AS title,
                    e.vector AS vector
             FROM embeddings e JOIN documents d ON d.id = e.document_id
             WHERE d.is_duplicate = 0
-            """
-        )
-        for r in rows:
+        """
+        params: tuple[str, ...] = ()
+        if embedder is not None:
+            sql += " AND e.embedder = ?"
+            params = (embedder,)
+        for r in self.conn.execute(sql, params):
             yield r["id"], r["diet_id"], r["title"], [], json.loads(r["vector"])
+
+    def embedder_names(self) -> list[str]:
+        """Distinct embedder names present in the embeddings table."""
+        rows = self.conn.execute("SELECT DISTINCT embedder FROM embeddings ORDER BY embedder")
+        return [r["embedder"] for r in rows]
 
     def embedding_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) AS n FROM embeddings").fetchone()["n"]
