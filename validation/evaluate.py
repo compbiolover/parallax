@@ -79,3 +79,45 @@ def format_report(results: dict[str, dict], label: str) -> str:
 
 def _fmt(value: float | None) -> str:
     return f"{value:.2f}" if value is not None else "n/a"
+
+
+def confidence_calibration(goldset: GoldSet, ensemble) -> dict:
+    """Is the ensemble's confidence signal meaningful?
+
+    Bucket every (item, foundation) prediction by whether the ensemble marked it
+    ``low_confidence`` (taggers split), and compare label accuracy across the two
+    buckets. A meaningful signal is more accurate when confident.
+    """
+    high_correct = high_total = low_correct = low_total = 0
+    for item in goldset.items:
+        scored = ensemble.score(item.text)
+        for f in CLASSIC_FOUNDATIONS:
+            es = scored[f]
+            correct = int(es.label == item.labels.get(f, 0))
+            if es.low_confidence:
+                low_total += 1
+                low_correct += correct
+            else:
+                high_total += 1
+                high_correct += correct
+    return {
+        "high_confidence": {"n": high_total, "accuracy": high_correct / high_total if high_total else None},
+        "low_confidence": {"n": low_total, "accuracy": low_correct / low_total if low_total else None},
+    }
+
+
+def format_calibration(cal: dict) -> str:
+    hi, lo = cal["high_confidence"], cal["low_confidence"]
+
+    def line(name: str, b: dict) -> str:
+        acc = f"{b['accuracy']:.2f}" if b["accuracy"] is not None else "n/a"
+        return f"  {name:18} n={b['n']:>4}  label-accuracy={acc}"
+
+    out = ["Confidence calibration (taggers agree = high, split = low):",
+           line("high-confidence", hi), line("low-confidence", lo)]
+    if hi["accuracy"] is not None and lo["accuracy"] is not None:
+        gap = hi["accuracy"] - lo["accuracy"]
+        verdict = "meaningful — confident predictions are more accurate" if gap > 0 else \
+                  "not separating — confidence gives no accuracy lift here"
+        out.append(f"  → {verdict} (gap {gap:+.2f}).")
+    return "\n".join(out)
