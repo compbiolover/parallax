@@ -76,7 +76,8 @@ Equality vs Proportionality (Atari & Haidt 2023).
 
 Phase 1 (MVP) and Phase 2 (blindspot engine) are complete — extraction, dedup, dictionary
 scoring, a daily summary per diet, a static radar/JSD dashboard, and coverage-asymmetry
-blindspot detection. See `CLAUDE.md` for the full build spec and phased roadmap.
+blindspot detection — plus **GDELT historical backfill** for weeks of per-outlet volume.
+See `CLAUDE.md` for the full build spec and phased roadmap.
 
 ### Running the pipeline
 
@@ -84,6 +85,11 @@ blindspot detection. See `CLAUDE.md` for the full build spec and phased roadmap.
 # 1. Fetch every RSS source with a URL, extract bodies, dedup, score, embed, and
 #    store derived metrics to SQLite (raw text is never persisted):
 python -m ingestion run --max-items 25
+
+# 1b. Backfill weeks of history per outlet from GDELT (title-based, so it's fast
+#     and needs no API key) — this is the volume that makes blindspots reliable:
+python -m ingestion backfill --days 14 --max-per-source 250
+#     (add --extract to also fetch article bodies for full scoring; slower)
 
 # 2. Print each diet's foundation composition, the Jensen-Shannon divergence,
 #    and the per-foundation log-ratios:

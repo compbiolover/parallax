@@ -15,7 +15,7 @@ from compare.divergence import jensen_shannon_divergence, log_ratios
 
 from .config import load_registry, load_settings
 from .datastore import Datastore
-from .pipeline import PipelineConfig, RunStats, diet_profiles, run
+from .pipeline import PipelineConfig, RunStats, backfill, diet_profiles, run
 
 
 def _db_path(args: argparse.Namespace, settings: dict) -> str:
@@ -58,18 +58,23 @@ def _print_compare(store: Datastore) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingestion", description="Parallax Phase 1 pipeline")
-    parser.add_argument("command", choices=["run", "compare"], help="what to do")
+    parser.add_argument("command", choices=["run", "backfill", "compare"], help="what to do")
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
-    parser.add_argument("--max-items", type=int, help="max items per feed")
+    parser.add_argument("--max-items", type=int, help="max items per feed (run)")
     parser.add_argument("--min-words", type=int, help="minimum document word count")
     parser.add_argument("--lexicon", help="path to an eMFD-format CSV (overrides settings)")
+    parser.add_argument("--days", type=int, default=14, help="backfill window in days")
+    parser.add_argument("--max-per-source", type=int, default=250,
+                        help="backfill: max GDELT articles per outlet (<=250)")
+    parser.add_argument("--extract", action="store_true",
+                        help="backfill: fetch article bodies for full scoring (slow)")
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
     store = Datastore(_db_path(args, settings))
     try:
-        if args.command == "run":
+        if args.command in ("run", "backfill"):
             cfg = PipelineConfig.from_settings(settings)
             if args.max_items is not None:
                 cfg.max_items_per_feed = args.max_items
@@ -78,7 +83,15 @@ def main(argv: list[str] | None = None) -> int:
             if args.lexicon is not None:
                 cfg.lexicon_path = args.lexicon
             embedder, _ = build_embedder(settings)
-            stats = run(store, load_registry(), cfg, embedder=embedder)
+            if args.command == "run":
+                stats = run(store, load_registry(), cfg, embedder=embedder)
+            else:
+                print(f"Backfilling {args.days}d of history from GDELT "
+                      f"(≤{args.max_per_source}/source, "
+                      f"{'bodies' if args.extract else 'titles only'})…")
+                stats = backfill(store, load_registry(), cfg, embedder=embedder,
+                                 days=args.days, max_per_source=args.max_per_source,
+                                 extract_bodies=args.extract)
             _print_stats(stats)
             print(f"\nDatastore: {store.counts()}")
         elif args.command == "compare":
