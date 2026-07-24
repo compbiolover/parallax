@@ -22,6 +22,7 @@ dependencies = [
   "datasketch>=1.6",       # MinHash near-dup detection
   "numpy>=1.26",
   "scipy>=1.13",           # Jensen-Shannon divergence
+  "scikit-learn>=1.3",     # clustering (SVD+HDBSCAN) and validation metrics
 ]
 
 [project.optional-dependencies]
@@ -33,17 +34,13 @@ llm = [
 ]
 # eMFDscore installs from GitHub, not PyPI:
 #   pip install "git+https://github.com/medianeuroscience/emfdscore.git"
-# Phase 2 — blindspot engine. scikit-learn provides TruncatedSVD + HDBSCAN;
-# the default embedder is dependency-free (numpy). UMAP is an optional upgrade
-# over TruncatedSVD for dimensionality reduction.
-cluster = [
-  "scikit-learn>=1.3",
-]
 # Optional neural embeddings (quality path over the built-in hashing embedder).
+# scikit-learn (SVD+HDBSCAN) is a core dependency, so the blindspot engine needs
+# nothing extra; this only adds neural sentence embeddings.
 embeddings = [
   "sentence-transformers>=3.0",
 ]
-# Phase 3 — transformer tagger + compositional stats.
+# Phase 3 — transformer tagger (Mformer) + compositional stats.
 scoring = [
   "transformers>=4.42",
   "torch>=2.2",

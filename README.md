@@ -97,7 +97,7 @@ python -m ingestion compare
 
 # 3. Cluster stories from the stored embeddings and detect blindspots — the
 #    clusters one diet covers heavily and the other barely touches, both
-#    directions (needs scikit-learn: pip install parallax[cluster]):
+#    directions (scikit-learn is a core dependency):
 python -m cluster run
 
 # 4. Generate a charitable daily summary per diet + a cross-diet executive
@@ -110,6 +110,11 @@ python -m dashboard.export
 
 # 6. View the dashboard (radar, JSD, log-ratio bars, summaries, blindspot lists):
 cd dashboard && python -m http.server   # then open http://localhost:8000
+
+# Validate a scorer against the hand-coded gold set — per-foundation AUC/F1/kappa
+# and the §5 trigger (binding foundations below 0.7 AUC warrant the transformer):
+python -m validation --lexicon data/emfd_scoring.csv
+python -m validation --scorer transformer   # Mformer; needs parallax[scoring]
 ```
 
 Story clustering embeds each document at ingestion (text is discarded, so embeddings are

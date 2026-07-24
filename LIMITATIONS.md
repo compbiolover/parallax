@@ -35,8 +35,21 @@ an estimate with uncertainty, never ground truth.**
   every foundation number the pipeline emits is illustrative only.
 - **Dictionary-only coverage.** The current scorer covers the five classic foundations;
   liberty/oppression is unscored (`None`, never `0`) until the Claude tagger lands.
-- **Single tagger, no ensemble yet.** The ensemble-disagreement confidence signal
-  described below is a Phase 3 deliverable; Phase 1 has no confidence band.
+- **No ensemble yet.** The dictionary and the transformer tagger both exist, but the
+  ensemble-disagreement confidence signal (§5) is still to come; there is no confidence
+  band on a score yet.
+- **The validation gold set is a starter.** `validation/gold/seed.json` is 42 hand-coded
+  items by a single coder — enough to run the harness and fire the §5 trigger, but far
+  short of the 200–400 multi-coder items §5 targets. Agreement numbers below are indicative
+  and will move as the gold set grows. With one coder, inter-coder reliability
+  (Krippendorff's alpha) is not yet meaningful.
+- **Measured: the dictionary is weak on the binding foundations; the transformer fixes
+  it.** On the seed gold set, the real eMFD dictionary scores AUC 0.63 on both **loyalty**
+  and **sanctity** — firing the §5 trigger — while the Mformer transformer tagger clears
+  every binding foundation at ≥ 0.94 (macro-AUC 0.71 → 0.95). This is exactly the §5
+  prediction, now empirical: dictionary numbers on the binding foundations should be
+  treated with particular caution, and the transformer tagger (`--scorer transformer`,
+  `pip install parallax[scoring]`) is the more trustworthy source there.
 - **The eMFD is supported, and reveals its own low discriminative power.** Point the
   scorer at the real eMFD via `scoring.dictionary.lexicon_path`. Note two things the eMFD
   forces:
