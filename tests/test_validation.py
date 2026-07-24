@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scoring.transformer import TransformerScorer
+from scoring.transformer import TransformerScorer, _positive_index
 from validation.evaluate import binding_trigger, evaluate
 from validation.gold import GOLD_DIR, GoldItem, GoldSet, load_gold
 from validation.metrics import foundation_agreement, krippendorff_alpha
@@ -81,6 +81,15 @@ def test_evaluate_and_binding_trigger():
 
 
 # -- transformer scorer (stubbed, no model download) -----------------------
+
+def test_positive_index_robust_across_label_conventions():
+    # Mformer convention: {0:'not care', 1:'care'} -> positive is 1
+    assert _positive_index({0: "not care", 1: "care"}, "care") == 1
+    # reversed order still resolves to the foundation-named class
+    assert _positive_index({0: "sanctity", 1: "not sanctity"}, "sanctity") == 0
+    # generic labels (no "not", no foundation name) -> conventional positive 1, never 0
+    assert _positive_index({0: "LABEL_0", 1: "LABEL_1"}, "care") == 1
+
 
 def test_transformer_scorer_stub_shape():
     ts = TransformerScorer(predict_fn=lambda foundation, text: 0.8 if foundation == "care" else 0.1)
