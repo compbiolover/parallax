@@ -21,7 +21,7 @@ from .config import Registry, Source, load_registry, load_settings
 from .datastore import Datastore
 from .dedup import (
     NearDuplicateIndex,
-    content_hash,
+    document_id,
     minhash_signature,
     signature_from_list,
     signature_list,
@@ -273,9 +273,10 @@ def _ingest_one(
     min_words: int,
 ) -> None:
     """Score, dedup, embed and store one document. Shared by feed ingest and
-    GDELT backfill. Identity is the article URL when present, so the same story
-    reached via a feed and via GDELT collapses to one document."""
-    doc_id = content_hash(link or text)
+    GDELT backfill. Identity is the canonical article URL when present, so the
+    same story reached via a feed (often utm-tagged) and via GDELT (clean url)
+    collapses to one document."""
+    doc_id = document_id(link, text)
     if store.has_document(doc_id):
         stats.exact_duplicates += 1
         return

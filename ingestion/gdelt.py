@@ -28,7 +28,10 @@ from datetime import datetime, timezone
 
 API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 DEFAULT_UA = "parallax-research-bot/0.1 (+https://github.com/compbiolover/parallax)"
-_RATE_LIMIT_MARKERS = ("please limit", "your query", "rate limit")
+# GDELT's throttle notice is specifically "Please limit requests to one every 5
+# sec". Keep this narrow so genuine query-syntax errors (also plain text) aren't
+# misread as rate limits and pointlessly retried.
+_RATE_LIMIT_MARKERS = ("please limit",)
 
 
 @dataclass(frozen=True)

@@ -42,6 +42,12 @@ def test_parse_articles_empty_and_nonjson():
     assert parse_articles("<html>garbage</html>") == []
 
 
+def test_query_error_is_not_treated_as_rate_limit():
+    # A GDELT query-syntax error is plain text but not the throttle notice —
+    # it should parse to [] (no retry), not raise RateLimited.
+    assert parse_articles("Your query was not valid. Please check the syntax.") == []
+
+
 # -- client throttle + retry ----------------------------------------------
 
 def test_client_throttles_between_calls():
@@ -99,6 +105,29 @@ class _FakeGdelt:
     def search_domain(self, domain, timespan="14d", max_records=250, language="english"):
         self.queried.append(domain)
         return self.per_domain.get(domain, [])
+
+
+def test_feed_and_backfill_of_same_url_collapse_to_one_doc():
+    from ingestion.dedup import NearDuplicateIndex
+    from ingestion.pipeline import RunStats, _ingest_one
+    from scoring.dictionary import DictionaryScorer
+    from cluster.embed import HashingEmbedder
+
+    reg = load_registry()
+    source = reg.backfillable()[0]
+    store = Datastore(":memory:")
+    scorer, embedder, index = DictionaryScorer(), HashingEmbedder(dim=32), NearDuplicateIndex()
+    stats = RunStats()
+    # feed form: utm-tagged; backfill form: clean, http, trailing slash
+    _ingest_one(store, source, scorer, embedder, index, stats,
+                title="Nuclear deal signed with Saudi Arabia today", link="https://x.com/a?utm_source=rss",
+                published_utc=None, text="body one two three four five six", cluster_text="Nuclear deal", min_words=3)
+    _ingest_one(store, source, scorer, embedder, index, stats,
+                title="Nuclear deal signed with Saudi Arabia today", link="http://x.com/a/",
+                published_utc=None, text="only a title", cluster_text="Nuclear deal", min_words=3)
+    assert stats.stored == 1
+    assert stats.exact_duplicates == 1  # second collapsed onto the first via URL identity
+    store.close()
 
 
 def test_backfill_stores_titles_and_dedups_domains():
