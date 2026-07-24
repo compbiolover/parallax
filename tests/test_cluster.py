@@ -8,6 +8,7 @@ from cluster.blindspot import (
     blindspots_from_store,
     detect_blindspots,
     label_cluster,
+    label_clusters,
     run_clustering,
 )
 from cluster.cluster import ClusterResult
@@ -56,6 +57,30 @@ def test_label_cluster_skips_stopwords():
     assert "the" not in label.split(" · ")
 
 
+def test_label_clusters_ctfidf_prefers_distinctive_terms():
+    # "nuclear/saudi" and "climate/emissions" are distinctive; "trump" is shared
+    # across both clusters so c-TF-IDF should down-weight it.
+    labels = label_clusters({
+        0: ["Trump signs nuclear deal with Saudi Arabia", "Saudi nuclear enrichment concerns"],
+        1: ["Trump climate policy on emissions", "New climate emissions targets"],
+    })
+    assert "nuclear" in labels[0] or "saudi" in labels[0]
+    assert "climate" in labels[1] or "emissions" in labels[1]
+    assert "trump" not in labels[0]  # shared term down-weighted / dropped
+
+
+def test_run_clustering_uses_ctfidf_labels():
+    store = Datastore(":memory:")
+    _seed_topics(store, HashingEmbedder(dim=256))
+    run_clustering(store)
+    labels = [r["label"] for r in store.cluster_rows()]
+    # a cluster label should reflect one of the seeded topics, not generic filler
+    joined = " ".join(labels).lower()
+    assert any(k in joined for k in ("faith", "church", "climate", "vote", "election",
+                                     "prayer", "carbon", "renewable", "campaign", "scripture"))
+    store.close()
+
+
 def test_detect_blindspots_direction_and_symmetry():
     # cluster 0: both diets (not a blindspot); 1: modeled_ce only; 2: self only
     labels = [0, 0, 0, 0, 1, 1, 1, 2, 2, 2]
@@ -97,6 +122,50 @@ def test_run_clustering_end_to_end_separates_topics():
     assert "modeled_ce" in dirs and "self" in dirs
     # persisted assignment can be re-read without sklearn
     assert len(blindspots_from_store(store)) == len(outcome.blindspots)
+    store.close()
+
+
+def test_iter_embeddings_filters_by_embedder():
+    store = Datastore(":memory:")
+    for i, emb in [(0, "hashing(d=8)"), (1, "hashing(d=8)"), (2, "sentence-transformers/x")]:
+        store.upsert_document(doc_id=f"d{i}", diet_id="self", source_id="s", stratum_id=None,
+            url=None, title="t", published_utc=None,
+            fetched_utc="2026-07-23T00:00:00+00:00", word_count=10, minhash=None)
+        store.upsert_embedding(document_id=f"d{i}", vector=[0.0] * 8, embedder=emb)
+    assert len(list(store.iter_embeddings())) == 3
+    assert len(list(store.iter_embeddings(embedder="hashing(d=8)"))) == 2
+    assert set(store.embedder_names()) == {"hashing(d=8)", "sentence-transformers/x"}
+    store.close()
+
+
+def test_clustering_clusters_only_active_embedder():
+    # Two embedders with different dims in one DB; meta marks one active.
+    store = Datastore(":memory:")
+    emb = HashingEmbedder(dim=64)
+    _seed_topics(store, emb)  # writes embedder "hashing(d=64)"
+    # inject a stray doc from a different embedder/dim
+    store.upsert_document(doc_id="stray", diet_id="self", source_id="s", stratum_id=None,
+        url=None, title="stray", published_utc=None,
+        fetched_utc="2026-07-23T00:00:00+00:00", word_count=10, minhash=None)
+    store.upsert_embedding(document_id="stray", vector=[0.0] * 384, embedder="other(d=384)")
+    store.set_meta("embedder", emb.name)
+    outcome = run_clustering(store)  # must not crash; ignores the stray dim-384 doc
+    assert outcome.n_docs == 16  # only the 16 seeded same-embedder docs
+    store.close()
+
+
+def test_clustering_raises_on_mixed_dims_without_active_embedder():
+    from cluster.cluster import compute_clustering
+    store = Datastore(":memory:")
+    for i, (dim, emb) in enumerate([(8, "a"), (16, "b")]):
+        store.upsert_document(doc_id=f"d{i}", diet_id="self", source_id="s", stratum_id=None,
+            url=None, title="t", published_utc=None,
+            fetched_utc="2026-07-23T00:00:00+00:00", word_count=10, minhash=None)
+        store.upsert_embedding(document_id=f"d{i}", vector=[0.0] * dim, embedder=emb)
+    # no meta['embedder'] -> no filter -> mixed dims -> clear error, not a numpy crash
+    import pytest
+    with pytest.raises(ValueError, match="mixed dimensions"):
+        compute_clustering(store, min_cluster_size=2)
     store.close()
 
 

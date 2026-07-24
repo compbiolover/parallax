@@ -40,9 +40,16 @@ def compute_clustering(
     svd_components: int = 30,
     random_state: int = 42,
 ) -> ClusterResult:
-    """Load embeddings and cluster them. Returns per-document labels."""
+    """Load embeddings and cluster them. Returns per-document labels.
+
+    Only embeddings from the active embedder (``meta['embedder']``) are
+    clustered — vectors from different embedders live in incompatible spaces.
+    If the datastore mixes embedders and none is recorded as active, a clear
+    error is raised rather than crashing deep in numpy on ragged vectors.
+    """
+    active = store.get_meta("embedder")
     ids, diets, titles, vectors = [], [], [], []
-    for doc_id, diet_id, title, _unused, vec in store.iter_embeddings():
+    for doc_id, diet_id, title, _unused, vec in store.iter_embeddings(embedder=active):
         ids.append(doc_id)
         diets.append(diet_id)
         titles.append(title)
@@ -51,6 +58,14 @@ def compute_clustering(
     if len(ids) < max(2, min_cluster_size):
         # Too few documents to cluster meaningfully — everything is noise.
         return ClusterResult(ids, diets, titles, [-1] * len(ids))
+
+    dims = {len(v) for v in vectors}
+    if len(dims) > 1:
+        raise ValueError(
+            f"Embeddings have mixed dimensions {sorted(dims)} from embedders "
+            f"{store.embedder_names()} — the datastore mixes multiple embedders. "
+            "Re-ingest after changing the embedder, or use a fresh datastore."
+        )
 
     X = np.asarray(vectors, dtype=np.float32)
     X = _reduce(X, svd_components, random_state)

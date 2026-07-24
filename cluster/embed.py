@@ -72,21 +72,43 @@ class HashingEmbedder:
 
 
 class SentenceTransformerEmbedder:
-    """Neural sentence embeddings (quality path). Requires sentence-transformers."""
+    """Neural sentence embeddings (quality path). Requires sentence-transformers.
 
-    def __init__(self, model: str = "all-MiniLM-L6-v2") -> None:
+    Default is ``thenlper/gte-small`` — the best simple performer in the embedder
+    benchmark (top-tier quality, no prompt needed, MiniLM-sized; see
+    LIMITATIONS.md). ``query_prefix`` prepends an instruction to every text:
+    instruction-tuned families need it to score well (bge: "Represent this
+    sentence for searching relevant passages: "; e5: "query: "). Plain models
+    (gte, MiniLM, mpnet) take no prefix.
+
+    ``model`` is fetched from the Hugging Face hub, so it is a supply-chain
+    surface: prefer a trusted source and **pin ``revision``** (a commit hash or
+    tag) for reproducibility. This code never sets ``trust_remote_code``, so a
+    model cannot execute bundled code on load. The pinned revision is recorded in
+    ``name`` for provenance.
+    """
+
+    def __init__(
+        self,
+        model: str = "thenlper/gte-small",
+        query_prefix: str = "",
+        revision: str | None = None,
+    ) -> None:
         from sentence_transformers import SentenceTransformer  # lazy
 
         self.model_name = model
-        self._model = SentenceTransformer(model)
+        self.query_prefix = query_prefix
+        self.revision = revision
+        self._model = SentenceTransformer(model, revision=revision)
         self.dim = int(self._model.get_sentence_embedding_dimension())
 
     @property
     def name(self) -> str:
-        return f"sentence-transformers/{self.model_name}"
+        suffix = f"@{self.revision}" if self.revision else ""
+        return f"sentence-transformers/{self.model_name}{suffix}"
 
     def embed(self, text: str) -> list[float]:
-        vec = self._model.encode(text, normalize_embeddings=True)
+        vec = self._model.encode(self.query_prefix + text, normalize_embeddings=True)
         return [float(x) for x in vec]
 
 
@@ -101,7 +123,11 @@ def build_embedder(settings: dict | None = None) -> tuple[Embedder, str]:
     cfg = ((settings or {}).get("cluster", {}) or {}).get("embedder", {}) or {}
     kind = cfg.get("kind", "hashing")
     if kind == "sentence-transformers":
-        emb = SentenceTransformerEmbedder(cfg.get("model", "all-MiniLM-L6-v2"))
+        emb = SentenceTransformerEmbedder(
+            cfg.get("model", "thenlper/gte-small"),
+            query_prefix=cfg.get("query_prefix", ""),
+            revision=cfg.get("revision"),
+        )
         return emb, emb.name
     emb = HashingEmbedder(int(cfg.get("dim", 512)))
     return emb, emb.name

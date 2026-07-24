@@ -59,8 +59,49 @@ an estimate with uncertainty, never ground truth.**
   feature hasher over **headlines** (bodies share boilerplate that washes out topic
   signal, so titles cluster far better). It captures obvious topical structure but produces
   loose or spurious clusters on subtler stories. `sentence-transformers` (config:
-  `cluster.embedder.kind: sentence-transformers`) is the quality upgrade and is expected to
-  materially sharpen clusters and blindspots.
+  `cluster.embedder.kind: sentence-transformers`) is the quality upgrade. Benchmarked on 70
+  live stories (identical SVD→HDBSCAN pipeline, coherence = mean intra-cluster cosine
+  similarity in sentence-transformer space, an independent semantic yardstick):
+
+  | embedder | coherence | lift over random pairs | noise | one-sided clusters |
+  | --- | --- | --- | --- | --- |
+  | hashing (default) | 0.121 | +0.048 | 39% | 7 (some spurious) |
+  | all-MiniLM-L6-v2 | **0.366** | **+0.293** | **26%** | 8 (cleaner; nuclear-deal story 3→4) |
+
+  Sentence-transformers roughly **tripled cluster coherence and cut noise by a third**,
+  and recovered a story the hashing embedder missed — worth the heavier `torch` dependency
+  for real use. The residual loose size-2 clusters are a *data-volume* problem (more sources
+  + accumulation lets you raise the min-cluster/min-blindspot thresholds), not an embedder
+  one.
+
+- **Which sentence-transformer?** `all-MiniLM-L6-v2` is the fast classic default, not the
+  best available. Models were benchmarked with a *model-agnostic* metric: a hand-labeled gold
+  set of same-story pairs scored by average precision (how well a model ranks same-story pairs
+  above all others). The benchmark was run twice — and the bigger run **overturned** the
+  first, a useful lesson about small samples. On **396 stories / 151 gold pairs across 28
+  stories** (US–Saudi nuclear deal, Trump's 80-country tariffs, Houthi Red Sea attacks,
+  Nolan's *Odyssey*, …), with each model given its proper prompt:
+
+  | model (prompt) | dim | params | avg. precision |
+  | --- | --- | --- | --- |
+  | **bge-small-en-v1.5** (instruction) | 384 | 33M | **0.727** |
+  | **thenlper/gte-small** (none) | 384 | 33M | 0.716 |
+  | bge-base-en-v1.5 (instruction) | 768 | 109M | 0.710 |
+  | all-MiniLM-L6-v2 (none) | 384 | 23M | 0.709 |
+  | e5-small-v2 ("query:") | 384 | 33M | 0.688 |
+  | all-mpnet-base-v2 (none) | 768 | 109M | 0.677 |
+  | bge-small-en-v1.5 (raw, no prompt) | 384 | 33M | 0.670 |
+  | e5-small-v2 (raw) | 384 | 33M | 0.643 |
+
+  Lessons: (1) **the small gold set lied** — on 70 stories / 10 pairs, `all-mpnet-base-v2`
+  looked best (0.895); on the 6× corpus it falls to 6th, and the small-sample caveat we flagged
+  is exactly what bit. (2) **The instruction prompt is worth ~0.05 AP** for bge/e5 — omitting it
+  (as the first run did) understated them; `query_prefix` now supports it. (3) **Bigger ≠
+  better** (bge-base < bge-small, mpnet mid-pack). **`thenlper/gte-small` is the recommended
+  default** — within noise of the top score, needs no prompt, MiniLM-sized; `bge-small-en-v1.5`
+  with its instruction edges it if you configure the prompt. Still caveats: one corpus, one
+  day's window, and every model leaves ~30–37% of docs as cluster noise — that residue is a
+  data-volume lever, not an embedder one. Re-run as the corpus grows.
 - **Thin daily samples yield thin overlap.** A single day across a handful of feeds rarely
   has many stories covered by multiple outlets in one diet and none in the other, so
   blindspot lists can be short and some entries rest on 2 stories. Treat them as candidates,
