@@ -241,6 +241,51 @@ class Datastore:
             )
         )
 
+    def scorer_names(self) -> list[str]:
+        """Distinct scorer names present in foundation_scores (e.g. 'dictionary',
+        'transformer/...'). Lets the exporter detect whether bands are possible."""
+        rows = self.conn.execute("SELECT DISTINCT scorer FROM foundation_scores ORDER BY scorer")
+        return [r["scorer"] for r in rows]
+
+    def paired_scores_for_diet(
+        self, diet_id: str, scorer_a: str, scorer_b: str,
+        foundations: list[str] | None = None,
+    ) -> list[tuple[float, dict[str, float], dict[str, float]]]:
+        """Per non-duplicate document in a diet, ``(weight, scorer_a_map, scorer_b_map)``
+        — only for documents scored by *both*. Pairing keeps the two taggers on the
+        same document population (backfill writes dictionary rows but no transformer
+        rows), which both the confidence band and the disagreement share rely on.
+
+        ``founds`` is interpolated into the SELECT (SQLite can't bind identifiers),
+        so it is whitelisted against the known foundation columns to keep this from
+        becoming an injection point if a future caller passes a non-constant list.
+        """
+        from scoring.foundations import CLASSIC_FOUNDATIONS
+
+        allowed = set(CLASSIC_FOUNDATIONS)
+        founds = [f for f in (foundations or list(CLASSIC_FOUNDATIONS)) if f in allowed]
+        if not founds:
+            founds = list(CLASSIC_FOUNDATIONS)
+        rows = self.conn.execute(
+            f"""
+            SELECT d.weight AS weight,
+                   {', '.join(f'a.{c} AS a_{c}' for c in founds)},
+                   {', '.join(f'b.{c} AS b_{c}' for c in founds)}
+            FROM foundation_scores a
+            JOIN foundation_scores b ON a.document_id = b.document_id
+            JOIN documents d ON d.id = a.document_id
+            WHERE d.diet_id = ? AND d.is_duplicate = 0
+              AND a.scorer = ? AND b.scorer = ?
+            """,
+            (diet_id, scorer_a, scorer_b),
+        )
+        out = []
+        for r in rows:
+            a = {c: (r[f"a_{c}"] if r[f"a_{c}"] is not None else 0.0) for c in founds}
+            b = {c: (r[f"b_{c}"] if r[f"b_{c}"] is not None else 0.0) for c in founds}
+            out.append((float(r["weight"] or 1.0), a, b))
+        return out
+
     def headlines_for_diet(self, diet_id: str, limit: int = 50) -> list[str]:
         """Titles of non-duplicate documents for a diet, most recent first."""
         rows = self.conn.execute(

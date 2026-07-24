@@ -95,6 +95,13 @@ function render(d) {
   // Radar panel
   const rp = panel(top, "Foundation emphasis (composition)");
   radar(rp, d.foundations, d.diets, colors);
+  if (d.has_confidence_bands) {
+    const cap = document.createElement("div"); cap.className = "sub";
+    cap.style.marginTop = "8px"; cap.style.fontSize = "12px";
+    cap.innerHTML = "Whiskers = dictionary vs transformer range · wider = more disagreement (lower confidence). " +
+      "Dot = ensemble point.";
+    rp.appendChild(cap);
+  }
 
   // Diverging bars (log-ratios)
   if (d.comparison) {
@@ -156,9 +163,20 @@ function panel(parent, title) {
 }
 function escapeHtml(s) { const e = document.createElement("div"); e.textContent = s; return e.innerHTML; }
 
+// The value plotted per foundation: the ensemble point when a band exists,
+// else the dictionary composition. Returns {v, low, high} (low/high null = no band).
+function radarValue(di, f) {
+  const b = di.band && di.band[f];
+  if (b) return { v: b.point, low: b.low, high: b.high };
+  return { v: di.profile[f] || 0, low: null, high: null };
+}
+
 function radar(el, foundations, diets, colors) {
   const size = 320, r = size/2 - 46, cx = size/2, cy = size/2, N = foundations.length;
-  const maxVal = Math.max(0.001, d3.max(diets, di => d3.max(foundations, f => di.profile[f] || 0)));
+  // Scale to the largest plotted value, band highs included, so whiskers fit.
+  const maxVal = Math.max(0.001, d3.max(diets, di => d3.max(foundations, f => {
+    const rv = radarValue(di, f); return Math.max(rv.v, rv.high || 0);
+  })));
   const svg = d3.select(el).append("svg").attr("viewBox", `0 0 ${size} ${size}`);
   const angle = i => (Math.PI * 2 * i / N) - Math.PI/2;
   const pt = (i, v) => [cx + Math.cos(angle(i)) * r * (v/maxVal), cy + Math.sin(angle(i)) * r * (v/maxVal)];
@@ -176,10 +194,19 @@ function radar(el, foundations, diets, colors) {
       .attr("dominant-baseline", "middle").attr("font-size", 11).text(f);
   });
   diets.forEach(di => {
-    const pts = foundations.map((f, i) => pt(i, di.profile[f] || 0));
+    const rvs = foundations.map((f, i) => ({ i, ...radarValue(di, f) }));
+    const pts = rvs.map(rv => pt(rv.i, rv.v));
     svg.append("polygon").attr("points", pts.map(p => p.join(",")).join(" "))
       .attr("fill", colors[di.id]).attr("fill-opacity", 0.18)
       .attr("stroke", colors[di.id]).attr("stroke-width", 2);
+    // Confidence whiskers: a radial segment from low to high on each axis.
+    rvs.forEach(rv => {
+      if (rv.low === null || rv.high <= rv.low) return;
+      const [x1, y1] = pt(rv.i, rv.low), [x2, y2] = pt(rv.i, rv.high);
+      svg.append("line").attr("x1", x1).attr("y1", y1).attr("x2", x2).attr("y2", y2)
+        .attr("stroke", colors[di.id]).attr("stroke-width", 3).attr("stroke-opacity", 0.5)
+        .attr("stroke-linecap", "round");
+    });
     pts.forEach(p => svg.append("circle").attr("cx", p[0]).attr("cy", p[1]).attr("r", 2.5).attr("fill", colors[di.id]));
   });
 }
