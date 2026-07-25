@@ -108,3 +108,48 @@ def test_single_diet_has_no_comparison():
                         foundations={"care": 0.5}, sentiment=0.0, moral_word_ratio=0.1, matched_words=5)
     assert build_payload(store)["comparison"] is None
     store.close()
+
+
+# -- snapshot history in the payload ---------------------------------------
+
+def test_history_is_empty_until_a_snapshot_is_recorded():
+    store = _store_with_two_diets()
+    p = build_payload(store)
+    assert p["history"] == []
+    assert p["history_window_days"] is None
+    store.close()
+
+
+def test_exporting_never_records_a_snapshot(tmp_path):
+    """Export is a read. Recording is the daily runner's `snapshot` step, so
+    rebuilding the payload can't invent history."""
+    store = _store_with_two_diets()
+    build_payload(store)
+    write_payload(store, tmp_path / "latest.js")
+    assert store.snapshot_count() == 0
+    store.close()
+
+
+def test_history_carries_dated_points_and_the_window():
+    from compare.history import record_snapshot
+
+    store = _store_with_two_diets()
+    for day in ("2026-07-23", "2026-07-24"):
+        record_snapshot(store, day, window_days=5)
+    p = build_payload(store)
+    assert [s["date"] for s in p["history"]] == ["2026-07-23", "2026-07-24"]
+    assert p["history_window_days"] == 5
+    # The series' all-time basis is the headline number, up to the 6-decimal
+    # rounding snapshots are stored at.
+    assert p["history"][-1]["jsd_cumulative"] == round(p["comparison"]["jsd"], 6)
+    store.close()
+
+
+def test_history_limit_caps_what_is_serialized():
+    from compare.history import record_snapshot
+
+    store = _store_with_two_diets()
+    for day in ("2026-07-21", "2026-07-22", "2026-07-23"):
+        record_snapshot(store, day)
+    assert len(build_payload(store, history_limit=2)["history"]) == 2
+    store.close()

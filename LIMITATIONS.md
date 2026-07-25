@@ -28,6 +28,36 @@ an estimate with uncertainty, never ground truth.**
   the two methods disagree more, so trust that number less. The band shows *method
   disagreement*, not a statistical confidence interval.
 
+## What the divergence time series does and does not show
+
+The dashboard plots recorded snapshots on two bases. Both inherit every caveat above —
+they are the same noisy estimates, dated. Read movement, not decimals.
+
+- **The all-time series is heavily damped, by construction.** It averages every document
+  ever ingested, so it moves less the longer the project runs. A flat all-time line is
+  weak evidence that nothing changed; it is mostly evidence that the corpus is large.
+- **The trailing-window series is noisy, and on thin days it is only noise.** A week with
+  few documents can swing it hard. Check the document count in the hover readout before
+  reading anything into a spike.
+- **No confidence interval is drawn on the series.** Day-to-day wobble of the same
+  magnitude as the radar's method-disagreement bands should be treated as indistinguishable
+  from zero. The series has no error bars because we do not have a defensible way to put
+  them there yet.
+- **Reconstructed points are not observations.** `--backfill` recomputes past days from
+  publication dates in the current store, which includes articles fetched long after the
+  fact. They are what the corpus now says about that date, not what a run that day would
+  have produced. The chart shades them; do not read the shaded region as a record of
+  what was actually measured at the time.
+- **Snapshots are not re-derived when scoring changes.** A row records the numbers as
+  scored on the day it was written. Swapping the lexicon or the transformer makes older
+  rows incomparable with newer ones, and nothing currently detects that. After changing a
+  scorer, treat the series as starting over — or rebuild it with
+  `python -m compare.history --backfill N --overwrite`.
+- **The corpus is not a stable panel.** Sources are added and feeds break. A move in
+  either series can reflect a change in what was collected rather than a change in how
+  either diet framed anything. The source registry is versioned so this is at least
+  auditable after the fact.
+
 ## Implementation status (Phase 1)
 
 - **The bundled lexicon is a demo, not an instrument.** The Phase 1 dictionary scorer

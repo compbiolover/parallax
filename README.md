@@ -60,7 +60,7 @@ Language split: **Python** owns ingestion, NLP, scoring, and comparison.
 | `ingestion/`   | RSS, GDELT, Media Cloud, podcast audio, YouTube.                       |
 | `scoring/`     | Moral-foundations scoring (dictionary + transformer + Claude).        |
 | `cluster/`     | Embeddings, UMAP + HDBSCAN, blindspot detection.                      |
-| `compare/`     | JSD, CLR/Aitchison distance, per-foundation log-ratios.               |
+| `compare/`     | JSD, CLR/Aitchison distance, log-ratios, dated snapshot history.      |
 | `summarize/`   | Map-reduce LLM summarization.                                         |
 | `dashboard/`   | TypeScript + D3.js static site.                                      |
 | `daily/`       | One-command snapshot orchestrator (`make daily`).                     |
@@ -81,7 +81,9 @@ blindspot detection — plus **GDELT historical backfill** for weeks of per-outl
 Phase 3 adds the **transformer tagger (Mformer)**, a **validation gold set**, and an
 **ensemble confidence signal** now wired to the dashboard: with the transformer run at
 ingestion, each foundation on the radar carries a dictionary-vs-transformer band (wider =
-more disagreement = lower confidence). See `CLAUDE.md` for the full build spec and roadmap.
+more disagreement = lower confidence). Runs now also leave a **dated snapshot** behind, so
+the dashboard plots divergence over time instead of only ever showing today — the first
+piece of Phase 5's cadence work. See `CLAUDE.md` for the full build spec and roadmap.
 
 ### The daily snapshot (one command)
 
@@ -90,8 +92,8 @@ make daily          # or: python -m daily
 ```
 
 That runs the whole chain — **ingest → GDELT backfill → cluster → summarize →
-export** — and leaves a refreshed dashboard. Then `make dashboard` and open
-<http://localhost:8000>.
+snapshot → export** — and leaves a refreshed dashboard. Then `make dashboard` and
+open <http://localhost:8000>.
 
 Steps are **isolated**: if one fails (GDELT throttling, no API key), the rest
 still run so the dashboard reflects whatever data landed, the report names what
@@ -124,6 +126,38 @@ Run it every morning with cron:
 ```cron
 0 6 * * *  cd /path/to/parallax && /path/to/.venv/bin/python -m daily >> data/daily.log 2>&1
 ```
+
+### Divergence over time
+
+Each run records one dated snapshot — compositions, JSD, log-ratios, and document
+counts — so the numbers accumulate into a series instead of overwriting yesterday.
+Re-running on the same day replaces that day's row rather than adding one, so the
+series stays at one point per day however often the pipeline runs.
+
+Every snapshot is computed on **two bases**, because they answer different questions:
+
+| Basis | What it profiles | How to read it |
+| ----- | ---------------- | -------------- |
+| **Trailing window** (7 days by default) | Only documents dated in the window | The basis that can actually respond to an event. Noisier, and on thin days it *is* noise. |
+| **All-time** | Every document dated on or before that day | The headline number the radar reports. Heavily damped — it moves less the longer the project runs. |
+
+Neither is the truer number, and the dashboard labels both rather than picking one.
+
+```bash
+python -m compare.history                      # print the recorded series
+python -m compare.history --backfill 30        # reconstruct 30 past days
+python -m daily --window-days 14               # widen the trailing window
+python -m dashboard.export --history-limit 90  # ship 90 days to the dashboard
+```
+
+`--backfill` reconstructs past days from publication dates already in the store, so
+the chart is useful on day one rather than after a month of runs. It computes the
+same arithmetic on a different corpus, though: a reconstructed row for last Tuesday
+includes articles published then but fetched since (GDELT backfill pulls weeks of
+history), which a live run that day could not have seen. Reconstructed rows are
+therefore *what the corpus now says about that date*, not what the dashboard would
+have shown — the chart shades them, and reconstruction will not overwrite a live row
+unless you pass `--overwrite`.
 
 ### Running the steps individually
 

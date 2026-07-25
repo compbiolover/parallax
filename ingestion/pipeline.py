@@ -396,13 +396,24 @@ def _ingest_one(
         stats.per_diet[source.diet_id] = stats.per_diet.get(source.diet_id, 0) + 1
 
 
-def diet_profiles(store: Datastore, scorer_name: str = "dictionary") -> dict[str, dict[str, float]]:
-    """Build a normalized foundation composition per diet from stored scores."""
+def diet_profiles(
+    store: Datastore,
+    scorer_name: str = "dictionary",
+    since: str | None = None,
+    until: str | None = None,
+) -> dict[str, dict[str, float]]:
+    """Build a normalized foundation composition per diet from stored scores.
+
+    ``since``/``until`` (``YYYY-MM-DD``, half-open) restrict the profile to
+    documents dated in that window, which is how ``compare.history`` builds a
+    trailing-window series. Unbounded — the default — profiles the whole corpus,
+    which is what the dashboard's headline numbers report.
+    """
     from scoring.foundations import CLASSIC_FOUNDATIONS
 
     profiles: dict[str, dict[str, float]] = {}
     for diet_id in store.diet_ids():
-        rows = store.scores_for_diet(diet_id, scorer_name)
+        rows = store.scores_for_diet(diet_id, scorer_name, since=since, until=until)
         scores = [
             DocumentScore(
                 foundations={f: (row[f] or 0.0) for f in CLASSIC_FOUNDATIONS},

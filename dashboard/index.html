@@ -103,6 +103,9 @@ function render(d) {
     rp.appendChild(cap);
   }
 
+  // JSD over time
+  jsdSeries(app, d);
+
   // Diverging bars (log-ratios)
   if (d.comparison) {
     const bp = panel(app, `Over / under-indexing — ${d.comparison.pair[0]} vs ${d.comparison.pair[1]} (log-ratio)`);
@@ -128,6 +131,107 @@ function render(d) {
 
   const cav = document.createElement("div"); cav.className = "caveat";
   cav.textContent = "⚠︎ " + d.caveat; app.appendChild(cav);
+}
+
+// Divergence over time. Two series off the same snapshots, because they answer
+// different questions: the trailing window can actually respond to a week of
+// coverage, while the all-time line is the one the headline number reports and
+// is heavily damped by every article ever ingested. Neither is the truer number.
+function jsdSeries(app, d) {
+  const hist = (d.history || []).filter(s => s.jsd_window !== null || s.jsd_cumulative !== null);
+  const p = panel(app, "Divergence over time");
+  p.style.marginTop = "18px";
+  if (hist.length < 2) {
+    p.innerHTML += `<p class="sub">Not enough history yet — every <code>python -m daily</code> run
+      records one dated point. To fill in past days from publication dates already in the store:
+      <code>python -m compare.history --backfill 30</code>.</p>`;
+    return;
+  }
+
+  const wd = d.history_window_days || 7;
+  const W = 900, H = 250, m = { t: 12, r: 18, b: 28, l: 46 };
+  const pts = hist.map(s => ({
+    date: new Date(s.date + "T00:00:00Z"), label: s.date, src: s.source,
+    win: s.jsd_window, cum: s.jsd_cumulative,
+  }));
+  const maxY = Math.max(0.05, d3.max(pts, q => Math.max(q.win || 0, q.cum || 0)));
+  const x = d3.scaleUtc().domain(d3.extent(pts, q => q.date)).range([m.l, W - m.r]);
+  const y = d3.scaleLinear().domain([0, maxY * 1.15]).nice().range([H - m.b, m.t]);
+  const svg = d3.select(p).append("svg").attr("viewBox", `0 0 ${W} ${H}`);
+
+  // Reconstructed days sit behind the first live run: same arithmetic, but a
+  // corpus that has since been backfilled. Shade them rather than pretend the
+  // whole line was observed as it happened.
+  const firstLive = pts.findIndex(q => q.src === "live");
+  if (firstLive > 0) {
+    const edge = x(pts[firstLive].date);
+    svg.append("rect").attr("x", x(pts[0].date)).attr("y", m.t)
+      .attr("width", Math.max(0, edge - x(pts[0].date)))
+      .attr("height", H - m.b - m.t).attr("fill", "var(--line)").attr("fill-opacity", 0.9);
+    svg.append("line").attr("x1", edge).attr("x2", edge).attr("y1", m.t).attr("y2", H - m.b)
+      .attr("stroke", "var(--muted)").attr("stroke-dasharray", "2 3");
+    svg.append("text").attr("x", x(pts[0].date) + 8).attr("y", m.t + 13)
+      .attr("font-size", 10).text("← reconstructed from stored dates");
+    svg.append("text").attr("x", edge + 8).attr("y", m.t + 13)
+      .attr("font-size", 10).text("recorded live →");
+  }
+
+  y.ticks(4).forEach(t => {
+    svg.append("line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", y(t)).attr("y2", y(t))
+      .attr("stroke", "var(--line)");
+    svg.append("text").attr("x", m.l - 8).attr("y", y(t)).attr("text-anchor", "end")
+      .attr("dominant-baseline", "middle").attr("font-size", 11).text(t.toFixed(2));
+  });
+  x.ticks(Math.min(6, pts.length)).forEach(t => {
+    svg.append("text").attr("x", x(t)).attr("y", H - 10).attr("text-anchor", "middle")
+      .attr("font-size", 11).text(d3.utcFormat("%b %-d")(t));
+  });
+
+  const line = key => d3.line().defined(q => q[key] !== null && q[key] !== undefined)
+    .x(q => x(q.date)).y(q => y(q[key]));
+  svg.append("path").datum(pts).attr("fill", "none").attr("stroke", "var(--muted)")
+    .attr("stroke-width", 1.5).attr("stroke-dasharray", "4 3").attr("d", line("cum"));
+  svg.append("path").datum(pts).attr("fill", "none").attr("stroke", "var(--ink)")
+    .attr("stroke-width", 2).attr("d", line("win"));
+
+  // Hover readout: a guide line plus exact values, so the chart is legible
+  // without asking anyone to eyeball a pixel against an axis.
+  const guide = svg.append("line").attr("y1", m.t).attr("y2", H - m.b)
+    .attr("stroke", "var(--muted)").attr("stroke-width", 1).attr("opacity", 0);
+  const dotW = svg.append("circle").attr("r", 3.5).attr("fill", "var(--ink)").attr("opacity", 0);
+  const dotC = svg.append("circle").attr("r", 3).attr("fill", "var(--muted)").attr("opacity", 0);
+  const out = document.createElement("div");
+  out.className = "sub"; out.style.margin = "4px 0 0"; out.style.minHeight = "18px";
+  const latest = pts[pts.length - 1];
+  const fmt = q => `<b>${q.label}</b> · ${wd}-day ${q.win === null ? "—" : q.win.toFixed(3)} ·
+    all-time ${q.cum === null ? "—" : q.cum.toFixed(3)}${q.src === "reconstructed" ? " · reconstructed" : ""}`;
+  out.innerHTML = fmt(latest);
+  p.appendChild(out);
+
+  const bisect = d3.bisector(q => q.date).center;
+  svg.append("rect").attr("x", m.l).attr("y", m.t).attr("width", W - m.r - m.l)
+    .attr("height", H - m.b - m.t).attr("fill", "transparent")
+    .on("pointermove", function (ev) {
+      const q = pts[bisect(pts, x.invert(d3.pointer(ev, this)[0] + m.l))];
+      if (!q) return;
+      guide.attr("x1", x(q.date)).attr("x2", x(q.date)).attr("opacity", 0.5);
+      dotW.attr("cx", x(q.date)).attr("cy", y(q.win || 0)).attr("opacity", q.win === null ? 0 : 1);
+      dotC.attr("cx", x(q.date)).attr("cy", y(q.cum || 0)).attr("opacity", q.cum === null ? 0 : 1);
+      out.innerHTML = fmt(q);
+    })
+    .on("pointerleave", () => {
+      guide.attr("opacity", 0); dotW.attr("opacity", 0); dotC.attr("opacity", 0);
+      out.innerHTML = fmt(latest);
+    });
+
+  const cap = document.createElement("div");
+  cap.className = "sub"; cap.style.marginTop = "6px"; cap.style.fontSize = "12px";
+  cap.innerHTML = `<span style="border-bottom:2px solid var(--ink)">solid</span> = trailing ${wd} days,
+    the basis that can respond to an event ·
+    <span style="border-bottom:2px dashed var(--muted)">dashed</span> = all-time, the headline number,
+    damped by the whole corpus. Both are the same noisy estimates the radar shows — read movement,
+    not decimals.`;
+  p.appendChild(cap);
 }
 
 function blindspots(app, d, colors) {
@@ -215,7 +319,9 @@ function bars(el, foundations, ratios, color) {
   const w = 900, rowH = 34, h = foundations.length * rowH + 20, cx = w/2;
   const vals = foundations.map(f => ratios[f] || 0);
   const maxAbs = Math.max(0.3, d3.max(vals, Math.abs));
-  const x = d3.scaleLinear().domain([-maxAbs, maxAbs]).range([20, w-20]);
+  // Leave room at both ends for the value labels, which sit outside the bar —
+  // at range [20, w-20] the widest bar pushed its own label off the viewBox.
+  const x = d3.scaleLinear().domain([-maxAbs, maxAbs]).range([70, w-70]);
   const svg = d3.select(el).append("svg").attr("viewBox", `0 0 ${w} ${h}`);
   svg.append("line").attr("x1", x(0)).attr("x2", x(0)).attr("y1", 6).attr("y2", h-14).attr("stroke", "var(--line)");
   foundations.forEach((f, i) => {

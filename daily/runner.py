@@ -1,6 +1,6 @@
 """The daily snapshot: one call that refreshes everything the dashboard reads.
 
-Five steps, in dependency order:
+Six steps, in dependency order:
 
 1. **ingest**    — fetch every RSS source, extract, dedup, score (dictionary +
                    transformer), embed.
@@ -10,7 +10,9 @@ Five steps, in dependency order:
 3. **cluster**   — embeddings -> clusters -> coverage-asymmetry blindspots.
 4. **summarize** — per-diet + cross-diet summaries (Claude, or the deterministic
                    fallback when no API key is set).
-5. **export**    — write the dashboard payload.
+5. **snapshot**  — record today's compositions and divergence so the run leaves
+                   a dated point behind instead of only overwriting yesterday.
+6. **export**    — write the dashboard payload.
 
 Two properties matter for something meant to run unattended every morning:
 
@@ -32,10 +34,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from compare.history import DEFAULT_SERIES_LIMIT, DEFAULT_WINDOW_DAYS
 from ingestion.datastore import Datastore
 
-# Step names, in execution order.
-STEPS = ("ingest", "backfill", "cluster", "summarize", "export")
+# Step names, in execution order. ``snapshot`` runs before ``export`` so the
+# payload carries today's point rather than lagging a day behind.
+STEPS = ("ingest", "backfill", "cluster", "summarize", "snapshot", "export")
 
 
 @dataclass
@@ -66,6 +70,10 @@ class DailyConfig:
     # summarize
     model: str | None = None              # None -> summarizer default
 
+    # snapshot
+    window_days: int = DEFAULT_WINDOW_DAYS
+    history_limit: int = DEFAULT_SERIES_LIMIT
+
     def enabled(self, step: str) -> bool:
         return step in self.steps
 
@@ -75,11 +83,14 @@ class DailyConfig:
         on top of this (see ``daily.__main__``)."""
         daily = (settings.get("daily", {}) or {})
         bf = (daily.get("backfill", {}) or {})
+        snap = (daily.get("snapshot", {}) or {})
         cfg = cls(
             backfill_days=int(bf.get("days", 14)),
             backfill_max_per_source=int(bf.get("max_per_source", 250)),
             backfill_extract_bodies=bool(bf.get("extract_bodies", False)),
             backfill_transformer=bool(bf.get("transformer", False)),
+            window_days=int(snap.get("window_days", DEFAULT_WINDOW_DAYS)),
+            history_limit=int(snap.get("history_limit", DEFAULT_SERIES_LIMIT)),
         )
         if not bf.get("enabled", True):
             cfg.steps = tuple(s for s in cfg.steps if s != "backfill")
@@ -185,10 +196,19 @@ def _step_summarize(store, cfg: DailyConfig) -> str:
     return f"via {result.method} (model={result.model}), {len(result.per_diet)} diets"
 
 
+def _step_snapshot(store, cfg: DailyConfig) -> str:
+    from compare.history import record_snapshot
+
+    snap = record_snapshot(store, window_days=cfg.window_days)
+    jsd = snap.window.jsd
+    moved = f"window JSD {jsd:.3f}" if jsd is not None else "window JSD n/a (one diet)"
+    return f"recorded {snap.snapshot_date} ({moved}), {store.snapshot_count()} in history"
+
+
 def _step_export(store, cfg: DailyConfig) -> str:
     from dashboard.export import DEFAULT_OUT, write_payload
 
-    out = write_payload(store, cfg.out or DEFAULT_OUT)
+    out = write_payload(store, cfg.out or DEFAULT_OUT, cfg.history_limit)
     return f"wrote {out}"
 
 
@@ -229,6 +249,7 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None) ->
             "backfill": lambda: _step_backfill(store, cfg, pcfg, registry, embedder, transformer),
             "cluster": lambda: _step_cluster(store, cfg),
             "summarize": lambda: _step_summarize(store, cfg),
+            "snapshot": lambda: _step_snapshot(store, cfg),
             "export": lambda: _step_export(store, cfg),
         }
         for name in STEPS:

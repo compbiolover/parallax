@@ -11,4 +11,8 @@ Interpretable companions:
 
 Profiles are length-normalized, aggregated per period, then normalized to a
 composition summing to 1 before any distance is computed.
+
+``history`` dates all of the above: one snapshot per UTC day, on both a
+cumulative and a trailing-window basis, so the divergence becomes a series
+rather than only ever the latest number.
 """
