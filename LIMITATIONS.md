@@ -47,8 +47,31 @@ reports that division, with heavier caveats than anything else on the dashboard.
   argument scored as containing *no fairness*. That is worth stating plainly because of what
   it implies: a word list can encode a political asymmetry while looking like a neutral
   instrument, and the failure is invisible unless you go looking. The correction added
-  merit/desert terms; whether the eMFD carries the same skew is **not yet tested**, and it
-  would affect every real run.
+  merit/desert terms, and `validation/lexicon_audit.py` now checks any lexicon for the
+  same failure so it cannot come back unnoticed.
+- **The eMFD does not repeat the seed's bug, but it does lean the same way.** Audited
+  against the real eMFD (3,270 terms, `assignment: argmax`): merit vocabulary is present,
+  and merit-framed text does produce fairness signal, so the categorical failure does not
+  reproduce. What the audit does find is a structural tilt. Per occurrence, proportionality
+  vocabulary yields about **0.64x** the fairness that equality vocabulary does, because
+  half of the merit terms the eMFD contains are assigned to some other foundation and
+  contribute nothing to fairness: *accountable* to authority, *contribution* to loyalty,
+  *effort* to care. Equality terms mostly land on fairness (7 of 10) where merit terms
+  split evenly (8 of 16). Median yield differs by roughly eightfold (0.275 against 0.033).
+  This is a property of the dictionary, not of the diets it measures.
+- **That lexicon-level tilt has not been shown to propagate to documents.** Four matched
+  text pairs scored with the real eMFD gave proportionality/equality fairness ratios of
+  0.83, 2.51, 0.13, and 0.70. The median (0.77) points the same way as the lexicon
+  measurement, but the spread is far wider than the effect, and one pair reversed it
+  entirely. The texts were also written by the same person running the test, which is a
+  confound rather than a control. So: the tilt in the dictionary is real and measurable;
+  its consequence for real coverage is not established either way, and should not be
+  asserted from these numbers.
+- **The audit's sample is small and depends on an unvalidated list.** It sees only where
+  `scoring/fairness_split.py`'s hand-built terms intersect the lexicon: 10 equality and 16
+  proportionality terms for the eMFD. It measures that intersection, not "the eMFD's
+  fairness vocabulary" in any absolute sense. Re-run it whenever the term lists change:
+  `python -m validation.lexicon_audit --lexicon data/emfd_scoring.csv`.
 - **Unsplit is recorded as unsplit.** Documents without enough evidence get NULL, never an
   even split, and coverage is reported next to every share. A 70/30 split over 4% of
   documents is not a finding.

@@ -101,8 +101,23 @@ Building this turned up a bug worth mentioning, because it is the kind that hide
 The built-in seed lexicon's fairness vocabulary contained no proportionality terms at all,
 so a merit-framed argument scored as containing *no fairness*. That systematically
 under-measured whichever diet frames fairness as proportion: the symmetry requirement
-failing quietly inside a word list. It is fixed for the seed. Whether the eMFD carries the
-same skew has not been tested.
+failing quietly inside a word list.
+
+Since a word list can carry a political asymmetry while looking like a neutral instrument,
+that check is now a command rather than a memory:
+
+```bash
+make audit-lexicon                                            # the built-in seed
+python -m validation.lexicon_audit --lexicon data/emfd_scoring.csv
+```
+
+It reports whether either half of fairness is missing outright, which is the seed's
+original failure, and how much fairness each half's vocabulary contributes per occurrence.
+Run against the real eMFD, the categorical bug does not reproduce: merit vocabulary is
+there and merit-framed text does score fairness. A milder tilt in the same direction does
+show up, because half the merit terms the eMFD contains are assigned to other foundations
+(*accountable* to authority, *contribution* to loyalty, *effort* to care) and contribute
+nothing to fairness. `LIMITATIONS.md` has the numbers and what they do and don't support.
 
 ## Status
 
