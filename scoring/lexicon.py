@@ -17,6 +17,7 @@ rows match exactly unless they carry a trailing ``*``.
 from __future__ import annotations
 
 import csv
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +63,16 @@ class Lexicon:
 
     def __len__(self) -> int:
         return len(self._exact) + len(self._prefixes)
+
+    def items(self) -> Iterator[tuple[str, Entry]]:
+        """Every (term, entry) pair, exact matches first then wildcard stems.
+
+        Lets tooling inspect the vocabulary that was actually loaded rather than
+        re-parsing the source file, so an audit sees the same lexicon the scorer
+        does (see ``validation/lexicon_audit.py``).
+        """
+        yield from self._exact.items()
+        yield from self._prefixes
 
 
 SEED_NAME = "built-in demo seed"

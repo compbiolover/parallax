@@ -21,6 +21,9 @@ history:  ## Print the recorded snapshot series (JSD over time)
 validate:  ## Score the gold set and report agreement (§5 trigger)
 	$(PY) -m validation --scorer ensemble
 
+audit-lexicon:  ## Check a lexicon for equality/proportionality asymmetry
+	$(PY) -m validation.lexicon_audit $(if $(LEXICON),--lexicon $(LEXICON))
+
 test:  ## Run the test suite
 	$(PY) -m pytest -q
 
