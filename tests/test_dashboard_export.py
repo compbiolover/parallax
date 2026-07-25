@@ -153,3 +153,30 @@ def test_history_limit_caps_what_is_serialized():
         record_snapshot(store, day)
     assert len(build_payload(store, history_limit=2)["history"]) == 2
     store.close()
+
+
+# -- fairness split in the payload -----------------------------------------
+
+def test_fairness_split_absent_when_nothing_was_partitioned():
+    store = _store_with_two_diets()
+    assert build_payload(store)["fairness_split"] is None
+    store.close()
+
+
+def test_fairness_split_carries_shares_and_coverage():
+    store = _store_with_two_diets()
+    store.upsert_scores(
+        document_id="self-doc", scorer="dictionary",
+        foundations={"care": 0.3, "fairness": 0.2, "loyalty": 0.2,
+                     "authority": 0.1, "sanctity": 0.1},
+        sentiment=0.0, moral_word_ratio=0.2, matched_words=18,
+        equality=0.15, proportionality=0.05,
+    )
+    fs = build_payload(store)["fairness_split"]
+    assert fs["diets"]["self"]["leans"] == "equality"
+    assert fs["diets"]["self"]["docs_split"] == 1
+    assert fs["diets"]["self"]["coverage"] == 1.0
+    # The other diet was never split — reported, but with nothing behind it.
+    assert fs["diets"]["modeled_ce"]["docs_split"] == 0
+    assert fs["diets"]["modeled_ce"]["thin"]
+    store.close()

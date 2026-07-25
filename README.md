@@ -70,8 +70,38 @@ Language split: **Python** owns ingestion, NLP, scoring, and comparison.
 ## Moral foundations modeled
 
 care/harm, fairness/cheating, loyalty/betrayal, authority/subversion,
-sanctity/degradation, and liberty/oppression — with fairness optionally split into
+sanctity/degradation, and liberty/oppression — with fairness split into
 Equality vs Proportionality (Atari & Haidt 2023).
+
+### Fairness, split two ways
+
+MFQ-2 divides Fairness into **equality** (equal treatment, equal outcomes) and
+**proportionality** (reward tracking merit and contribution). The distinction earns its
+place here: both diets argue about fairness constantly, and a five-way tagger reports that
+as one number, which hides the more interesting fact that they often mean different things
+by it. One asks who is being left out; the other asks whether reward is tracking
+contribution. Each is a coherent account of fairness and neither reduces to the other.
+
+The dashboard shows the division per diet, with coverage next to it. Read it with more
+suspicion than anything else on the page — **no validated dictionary implements this
+split**, so Parallax partitions fairness using a hand-built term list, and the prediction
+it tests (equality on the left, proportionality on the right) replicates poorly when
+measured in language. See `LIMITATIONS.md`.
+
+```yaml
+scoring:
+  taggers:
+    dictionary:
+      split_fairness: true
+      fairness_min_evidence: 2   # split-terms required before partitioning at all
+```
+
+Building this turned up a bug worth mentioning, because it is the kind that hides well: the
+built-in seed lexicon's fairness vocabulary contained no proportionality terms at all, so a
+merit-framed argument scored as containing *no fairness*. That systematically under-measured
+whichever diet frames fairness as proportion — the symmetry requirement failing quietly
+inside a word list. It is fixed for the seed; whether the eMFD carries the same skew has not
+been tested.
 
 ## Status
 

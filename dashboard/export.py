@@ -122,6 +122,7 @@ def build_payload(store: Datastore, history_limit: int | None = DEFAULT_SERIES_L
         # described accurately for the points it actually applies to going forward.
         "history": history,
         "history_window_days": history[-1]["window_days"] if history else None,
+        "fairness_split": _fairness_payload(store),
         "executive_summary": exec_row["text"] if exec_row else "",
         "summary_method": exec_row["method"] if exec_row else None,
         "lexicon": lexicon,
@@ -131,6 +132,36 @@ def build_payload(store: Datastore, history_limit: int | None = DEFAULT_SERIES_L
         ),
         "blindspots": _blindspots(store),
         "caveat": _caveat(lexicon, has_bands),
+    }
+
+
+def _fairness_payload(store: Datastore) -> dict | None:
+    """Equality-vs-proportionality shares per diet, or ``None`` if nothing split.
+
+    Coverage travels with the shares so the dashboard can show how much of each
+    diet the partition actually rests on, rather than presenting a ratio from a
+    handful of documents as if it described the whole diet.
+    """
+    from compare.fairness import all_diet_fairness, gap
+
+    profiles = all_diet_fairness(store)
+    split = {d: p for d, p in profiles.items() if p.docs_split}
+    if not split:
+        return None
+    return {
+        "diets": {
+            diet_id: {
+                "equality": p.equality,
+                "proportionality": p.proportionality,
+                "docs_split": p.docs_split,
+                "docs_total": p.docs_total,
+                "coverage": p.coverage,
+                "thin": p.thin,
+                "leans": p.leans,
+            }
+            for diet_id, p in profiles.items()
+        },
+        "gap": gap(profiles),
     }
 
 

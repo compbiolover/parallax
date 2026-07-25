@@ -62,6 +62,17 @@ scoring:
       #                 all five foundations and otherwise wash out to base rates)
       #   probability - sum raw per-foundation probabilities (base-rate dominated)
       assignment: argmax
+      # Partition `fairness` into equality vs proportionality (MFQ-2, Atari &
+      # Haidt 2023). No validated dictionary implements this split, so it runs
+      # off a hand-built term list in scoring/fairness_split.py — treat it as an
+      # exploratory refinement, not an instrument. It never alters the five
+      # classic foundation scores; it only divides the fairness one.
+      # `fairness_min_evidence` is how many split-terms a document must contain
+      # before it is partitioned at all; below that it stays unsplit (recorded
+      # as NULL, which is deliberately not the same as an even split). Raise it
+      # for firmer partitions over fewer documents.
+      split_fairness: true
+      fairness_min_evidence: 2
     transformer:
       # Run the Mformer transformer tagger on every article at ingestion (in
       # addition to the dictionary), so the dashboard can show a

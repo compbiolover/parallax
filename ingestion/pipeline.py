@@ -51,6 +51,11 @@ class PipelineConfig:
     respect_robots: bool = True
     lexicon_path: str | None = None  # eMFD CSV; None -> built-in demo seed
     assignment: str = "argmax"       # 'argmax' | 'probability' (see DictionaryScorer)
+    # Partition fairness into equality vs proportionality (MFQ-2). Cheap — it is
+    # a second pass over tokens already in memory — but unvalidated, so it is
+    # opt-out rather than load-bearing: the classic five are unaffected either way.
+    split_fairness: bool = True
+    fairness_min_evidence: int = 2
     # Transformer tagger (Mformer) run alongside the dictionary at ingestion, so
     # every article carries both estimates and the dashboard can show a
     # dictionary-vs-transformer confidence band. Requires parallax[scoring]; when
@@ -76,6 +81,8 @@ class PipelineConfig:
             near_dup_threshold=float(dedup.get("minhash_threshold", 0.85)),
             lexicon_path=dict_cfg.get("lexicon_path"),
             assignment=dict_cfg.get("assignment", "argmax"),
+            split_fairness=bool(dict_cfg.get("split_fairness", True)),
+            fairness_min_evidence=int(dict_cfg.get("fairness_min_evidence", 2)),
             transformer_enabled=bool(tr_cfg.get("enabled", True)),
             transformer_model=tr_cfg.get("model"),
             transformer_revision=tr_cfg.get("revision"),
@@ -145,7 +152,8 @@ def run(
     cfg = config or PipelineConfig()
     if scorer is None:
         lexicon, lexicon_name = build_lexicon(cfg.lexicon_path)
-        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment)
+        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment,
+                                  splitter=_build_splitter(cfg))
     else:
         lexicon_name = "injected"
     if embedder is None:
@@ -197,7 +205,8 @@ def backfill(
     cfg = config or PipelineConfig()
     if scorer is None:
         lexicon, lexicon_name = build_lexicon(cfg.lexicon_path)
-        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment)
+        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment,
+                                  splitter=_build_splitter(cfg))
     else:
         lexicon_name = "injected"
     if embedder is None:
@@ -241,6 +250,15 @@ def backfill(
                 transformer=transformer,
             )
     return stats
+
+
+def _build_splitter(cfg: PipelineConfig):
+    """The fairness equality/proportionality partitioner, or ``None`` if disabled."""
+    if not cfg.split_fairness:
+        return None
+    from scoring.fairness_split import FairnessSplitter
+
+    return FairnessSplitter(min_evidence=cfg.fairness_min_evidence)
 
 
 def _build_transformer(cfg: PipelineConfig):
@@ -368,6 +386,7 @@ def _ingest_one(
         document_id=doc_id, scorer=score.scorer, foundations=score.foundations,
         sentiment=score.sentiment, moral_word_ratio=score.moral_word_ratio,
         matched_words=score.matched_words, liberty=score.liberty,
+        equality=score.equality, proportionality=score.proportionality,
     )
     if transformer is not None:
         # A single flaky document (encoding, length edge, transient model error)

@@ -106,6 +106,9 @@ function render(d) {
   // JSD over time
   jsdSeries(app, d);
 
+  // Equality vs proportionality (MFQ-2)
+  fairnessSplit(app, d, colors);
+
   // Diverging bars (log-ratios)
   if (d.comparison) {
     const bp = panel(app, `Over / under-indexing — ${d.comparison.pair[0]} vs ${d.comparison.pair[1]} (log-ratio)`);
@@ -231,6 +234,84 @@ function jsdSeries(app, d) {
     <span style="border-bottom:2px dashed var(--muted)">dashed</span> = all-time, the headline number,
     damped by the whole corpus. Both are the same noisy estimates the radar shows — read movement,
     not decimals.`;
+  p.appendChild(cap);
+}
+
+// Equality vs proportionality — the MFQ-2 split of fairness. The radar reports
+// fairness as one number, which can make two diets look similar exactly where
+// they disagree: both talk about fairness constantly and mean different things.
+// Shares are *within* fairness, so a diet that writes more doesn't read as
+// caring more about either half.
+function fairnessSplit(app, d, colors) {
+  const fs = d.fairness_split;
+  const p = panel(app, "Fairness — equality vs proportionality");
+  p.style.marginTop = "18px";
+  if (!fs || !fs.diets) {
+    p.innerHTML += `<p class="sub">No documents carried enough evidence to split fairness.
+      This is unvalidated and off by default in spirit — see <code>scoring/fairness_split.py</code>.</p>`;
+    return;
+  }
+
+  const W = 900, rowH = 54, ids = Object.keys(fs.diets).sort();
+  const H = ids.length * rowH + 34;
+  const L = 150, R = 60;
+  const svg = d3.select(p).append("svg").attr("viewBox", `0 0 ${W} ${H}`);
+  const x = d3.scaleLinear().domain([0, 1]).range([L, W - R]);
+
+  // Midline: an even split. Reading distance from it is the whole point.
+  svg.append("line").attr("x1", x(0.5)).attr("x2", x(0.5)).attr("y1", 18).attr("y2", H - 20)
+    .attr("stroke", "var(--muted)").attr("stroke-dasharray", "2 3");
+  svg.append("text").attr("x", x(0.5)).attr("y", 12).attr("text-anchor", "middle")
+    .attr("font-size", 10).text("even");
+  svg.append("text").attr("x", L).attr("y", 12).attr("font-size", 11).text("← equality");
+  svg.append("text").attr("x", W - R).attr("y", 12).attr("text-anchor", "end")
+    .attr("font-size", 11).text("proportionality →");
+
+  ids.forEach((id, i) => {
+    const v = fs.diets[id], y = 30 + i * rowH, h = 22;
+    const eqW = Math.max(0, x(v.equality) - x(0));
+    // Thin coverage is drawn thin: hatch-free but faded, with the count adjacent.
+    const op = v.thin ? 0.28 : 0.85;
+    svg.append("rect").attr("x", x(0)).attr("y", y).attr("width", eqW).attr("height", h)
+      .attr("fill", colors[id] || "var(--muted)").attr("fill-opacity", op)
+      .attr("rx", 3);
+    svg.append("rect").attr("x", x(v.equality)).attr("y", y)
+      .attr("width", Math.max(0, x(1) - x(v.equality))).attr("height", h)
+      .attr("fill", colors[id] || "var(--muted)").attr("fill-opacity", op * 0.3)
+      .attr("rx", 3);
+    svg.append("text").attr("x", L - 10).attr("y", y + h / 2).attr("text-anchor", "end")
+      .attr("dominant-baseline", "middle").attr("font-size", 12).attr("fill", "var(--ink)")
+      .text(id);
+    if (v.equality > 0.08) {
+      svg.append("text").attr("x", x(0) + 8).attr("y", y + h / 2)
+        .attr("dominant-baseline", "middle").attr("font-size", 11).attr("fill", "var(--ink)")
+        .text(`${Math.round(v.equality * 100)}%`);
+    }
+    if (v.proportionality > 0.08) {
+      svg.append("text").attr("x", x(1) - 8).attr("y", y + h / 2).attr("text-anchor", "end")
+        .attr("dominant-baseline", "middle").attr("font-size", 11).attr("fill", "var(--ink)")
+        .text(`${Math.round(v.proportionality * 100)}%`);
+    }
+    svg.append("text").attr("x", L).attr("y", y + h + 13).attr("font-size", 10)
+      .text(`${v.docs_split} of ${v.docs_total} documents split (${Math.round(v.coverage * 100)}%)`
+            + (v.thin ? " — too thin to read" : ""));
+  });
+
+  const cap = document.createElement("div");
+  cap.className = "sub"; cap.style.marginTop = "8px"; cap.style.fontSize = "12px";
+  const g = fs.gap;
+  const thinNote = g && g.thin ? ", on coverage too thin to rely on" : "";
+  const lead = g
+    ? `<b>${g.pair[0]}</b> leans ${g.equality_gap >= 0 ? "more" : "less"} on equality than `
+      + `<b>${g.pair[1]}</b> by ${Math.abs(Math.round(g.equality_gap * 100))} points`
+      + `${thinNote}. `
+    : "";
+  cap.innerHTML = lead +
+    `Theory predicts equality on the left and proportionality on the right — that is the
+     hypothesis being tested here, not an assumption baked in. Treat a match as weak evidence:
+     the partition uses a hand-built term list with no validation behind it, the
+     liberal/conservative asymmetry replicates poorly when measured in language specifically,
+     and proportionality is reported to bridge the divide rather than mark it.`;
   p.appendChild(cap);
 }
 
