@@ -1,8 +1,10 @@
 """CLI: ``python -m daily`` runs the whole snapshot in one command.
 
-    python -m daily                      # full: ingest + backfill + cluster + summarize + export
+    python -m daily                      # full: ingest -> backfill -> cluster -> summarize
+                                         #       -> snapshot -> export
     python -m daily --skip backfill      # fast path: today's feeds only
     python -m daily --only cluster export
+    python -m daily --only snapshot export   # re-record today's point, rebuild the payload
     python -m daily --backfill-days 3 --max-per-source 100
 
 Exits non-zero if any step failed, so cron/systemd notices — the remaining steps
@@ -49,6 +51,10 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--dominance", type=float, default=0.75)
     p.add_argument("--min-blindspot-size", type=int, default=2)
     p.add_argument("--model", help="Claude model id for summaries")
+    p.add_argument("--window-days", type=int,
+                   help="trailing window for the snapshot's windowed basis (default 7)")
+    p.add_argument("--history-limit", type=int,
+                   help="most recent N snapshots to serialize into the payload")
     p.add_argument("--quiet", action="store_true", help="only print the final report")
     return p.parse_args(argv)
 
@@ -85,6 +91,10 @@ def build_config(args: argparse.Namespace, settings: dict) -> DailyConfig:
         cfg.backfill_extract_bodies = args.backfill_extract
     if args.backfill_transformer is not None:
         cfg.backfill_transformer = args.backfill_transformer
+    if args.window_days is not None:
+        cfg.window_days = args.window_days
+    if args.history_limit is not None:
+        cfg.history_limit = args.history_limit
     return cfg
 
 

@@ -142,3 +142,11 @@ daily:
     max_per_source: 250
     extract_bodies: false         # fetch article bodies too (much slower)
     transformer: false            # title-only bulk; bands come from feed ingest
+
+  # Each run records one dated snapshot (one row per UTC date — same-day re-runs
+  # replace it). `window_days` is the trailing window behind the responsive
+  # series; the all-time series is always recorded alongside it. `history_limit`
+  # caps how many recent snapshots get serialized into the dashboard payload.
+  snapshot:
+    window_days: 7
+    history_limit: 365

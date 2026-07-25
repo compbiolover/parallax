@@ -5,8 +5,12 @@ bare ``.json`` so the static page renders when opened directly from disk
 (``file://``), where ``fetch`` of a sibling JSON is blocked by the browser.
 
 The payload is aggregate-only — compositions, divergence, log-ratios, document
-counts, and the generated summaries. No raw text, consistent with the §0
-content-handling guardrail.
+counts, the recorded snapshot history, and the generated summaries. No raw text,
+consistent with the §0 content-handling guardrail.
+
+Reading is all this module does. Recording a snapshot is a separate act (the
+daily runner's ``snapshot`` step, or ``python -m compare.history --record``), so
+exporting a payload never mutates the datastore.
 
     python -m dashboard.export --db data/parallax.sqlite
     python -m dashboard.export --out dashboard/public/data/latest.js
@@ -20,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from compare.divergence import index_form, jensen_shannon_divergence, log_ratios
+from compare.history import DEFAULT_SERIES_LIMIT, load_series
 from ingestion.config import load_settings
 from ingestion.datastore import Datastore
 from ingestion.pipeline import diet_profiles
@@ -73,7 +78,7 @@ def _band_payload(store: Datastore) -> tuple[dict, str | None]:
     return payload, (transformer_scorer if payload else None)
 
 
-def build_payload(store: Datastore) -> dict:
+def build_payload(store: Datastore, history_limit: int | None = DEFAULT_SERIES_LIMIT) -> dict:
     profiles = diet_profiles(store)
     summaries = store.all_summaries()
     bands, transformer_scorer = _band_payload(store)
@@ -106,11 +111,17 @@ def build_payload(store: Datastore) -> dict:
     exec_row = summaries.get("executive")
     lexicon = store.get_meta("lexicon")
     has_bands = transformer_scorer is not None
+    history = load_series(store, history_limit)
     return {
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "foundations": list(CLASSIC_FOUNDATIONS),
         "diets": diets,
         "comparison": comparison,
+        # Dated history. ``history_window_days`` is the trailing window behind the
+        # windowed series; it comes off the newest row, so a settings change is
+        # described accurately for the points it actually applies to going forward.
+        "history": history,
+        "history_window_days": history[-1]["window_days"] if history else None,
         "executive_summary": exec_row["text"] if exec_row else "",
         "summary_method": exec_row["method"] if exec_row else None,
         "lexicon": lexicon,
@@ -141,10 +152,14 @@ def _blindspots(store: Datastore) -> list[dict]:
     ]
 
 
-def write_payload(store: Datastore, out: str | Path = DEFAULT_OUT) -> Path:
+def write_payload(
+    store: Datastore,
+    out: str | Path = DEFAULT_OUT,
+    history_limit: int | None = DEFAULT_SERIES_LIMIT,
+) -> Path:
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    payload = build_payload(store)
+    payload = build_payload(store, history_limit)
     body = json.dumps(payload, indent=2)
     if out.suffix == ".js":
         out.write_text(f"window.PARALLAX_DATA = {body};\n", encoding="utf-8")
@@ -158,13 +173,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
     parser.add_argument("--out", default=str(DEFAULT_OUT), help="output .js (or .json) path")
+    parser.add_argument("--history-limit", type=int, default=DEFAULT_SERIES_LIMIT,
+                        help="most recent N snapshots to serialize (0 = all)")
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
     db = args.db or (settings.get("datastore", {}) or {}).get("path", "data/parallax.sqlite")
     store = Datastore(db)
     try:
-        out = write_payload(store, args.out)
+        out = write_payload(store, args.out, args.history_limit or None)
         print(f"Wrote dashboard payload -> {out}")
     finally:
         store.close()

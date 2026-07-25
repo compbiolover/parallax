@@ -164,7 +164,7 @@ def test_failed_transformer_build_is_not_retried_by_ingest(monkeypatch):
         return ""
 
     monkeypatch.setattr(runner, "_step_ingest", fake_ingest)
-    for name in ("backfill", "cluster", "summarize", "export"):
+    for name in ("backfill", "cluster", "summarize", "snapshot", "export"):
         monkeypatch.setattr(runner, f"_step_{name}", lambda *a, **k: "")
     monkeypatch.setattr(runner, "_build_embedder", lambda settings: object())
     monkeypatch.setattr(runner, "_build_transformer", lambda pcfg: None)  # build fails
@@ -176,3 +176,39 @@ def test_failed_transformer_build_is_not_retried_by_ingest(monkeypatch):
         store.close()
     assert seen["transformer"] is None
     assert seen["enabled"] is False   # run() won't rebuild
+
+
+# -- snapshot step ---------------------------------------------------------
+
+def test_snapshot_runs_before_export():
+    # The payload has to carry today's point, not lag a day behind it.
+    assert STEPS.index("snapshot") < STEPS.index("export")
+
+
+def test_snapshot_step_records_a_dated_row():
+    """Unstubbed: the real step, against a real store."""
+    store = Datastore(":memory:")
+    try:
+        for diet, care in (("self", 0.5), ("modeled_ce", 0.1)):
+            store.upsert_document(
+                doc_id=f"{diet}-d", diet_id=diet, source_id="s", stratum_id=None,
+                url=None, title="t", published_utc=None,
+                fetched_utc="2026-07-25T00:00:00+00:00", word_count=200, minhash=None,
+            )
+            store.upsert_scores(
+                document_id=f"{diet}-d", scorer="dictionary",
+                foundations={"care": care, "fairness": 0.1, "loyalty": 0.2,
+                             "authority": 0.1, "sanctity": 0.1},
+                sentiment=0.0, moral_word_ratio=0.2, matched_words=20,
+            )
+        detail = runner._step_snapshot(store, DailyConfig())
+        assert store.snapshot_count() == 1
+        assert "1 in history" in detail
+    finally:
+        store.close()
+
+
+def test_snapshot_window_days_layer_from_settings_and_flags():
+    settings = {"daily": {"snapshot": {"window_days": 14}}}
+    assert build_config(_parse([]), settings).window_days == 14
+    assert build_config(_parse(["--window-days", "3"]), settings).window_days == 3

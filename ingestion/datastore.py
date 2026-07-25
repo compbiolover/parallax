@@ -9,6 +9,7 @@ text.
 Schema:
   documents        one row per ingested item (metadata + dedup signals)
   foundation_scores one row per (document, scorer)
+  snapshots        one aggregate row per UTC date (the JSD/composition history)
 
 Move to Postgres + pgvector when co-located embeddings become worthwhile; the
 access helpers here are deliberately thin so that swap stays localized.
@@ -89,7 +90,44 @@ CREATE TABLE IF NOT EXISTS document_clusters (
     document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
     cluster_id  INTEGER NOT NULL
 );
+
+-- One aggregate snapshot per UTC date. Re-running the daily job on the same
+-- day overwrites that day's row rather than appending, so the series has one
+-- point per day regardless of how many times the pipeline ran.
+CREATE TABLE IF NOT EXISTS snapshots (
+    snapshot_date TEXT PRIMARY KEY,      -- 'YYYY-MM-DD' (UTC)
+    generated_utc TEXT NOT NULL,
+    window_days   INTEGER NOT NULL,      -- trailing window used for the windowed basis
+    jsd_cumulative REAL,                 -- NULL when fewer than two diets are scored
+    jsd_window     REAL,
+    payload       TEXT NOT NULL          -- JSON: compositions, counts, log-ratios
+);
 """
+
+
+# How a document is dated: by publication where the source supplied one, by
+# fetch time otherwise. Both are stored as UTC ISO-8601.
+DOC_DATE_SQL = "COALESCE(d.published_utc, d.fetched_utc)"
+
+
+def _date_window(since: str | None, until: str | None) -> tuple[str, tuple[str, ...]]:
+    """SQL fragment + params restricting documents to the half-open ``[since, until)``.
+
+    Bounds are plain ``YYYY-MM-DD`` strings compared directly against ISO-8601
+    timestamps. That is exact rather than a shortcut: every timestamp this store
+    holds is normalized to UTC at ingestion, so the strings sort chronologically
+    and a bare date compares against them the way the calendar does. It would
+    stop being exact the moment a non-UTC offset were persisted.
+    """
+    clause = ""
+    params: list[str] = []
+    if since is not None:
+        clause += f" AND {DOC_DATE_SQL} >= ?"
+        params.append(since)
+    if until is not None:
+        clause += f" AND {DOC_DATE_SQL} < ?"
+        params.append(until)
+    return clause, tuple(params)
 
 
 @dataclass(frozen=True)
@@ -227,17 +265,30 @@ class Datastore:
         for row in self.conn.execute(sql, params):
             yield row["id"], json.loads(row["minhash"])
 
-    def scores_for_diet(self, diet_id: str, scorer: str = "dictionary") -> list[sqlite3.Row]:
-        """All non-duplicate document scores for a diet."""
+    def scores_for_diet(
+        self,
+        diet_id: str,
+        scorer: str = "dictionary",
+        since: str | None = None,
+        until: str | None = None,
+    ) -> list[sqlite3.Row]:
+        """All non-duplicate document scores for a diet.
+
+        ``since``/``until`` restrict to the half-open date window
+        ``[since, until)`` — see :func:`_date_window` for why plain string
+        comparison is exact here. Omitting both gives every document ever
+        ingested, which is what the headline dashboard numbers use.
+        """
+        clause, params = _date_window(since, until)
         return list(
             self.conn.execute(
-                """
+                f"""
                 SELECT d.weight AS weight, s.*
                 FROM foundation_scores s
                 JOIN documents d ON d.id = s.document_id
-                WHERE d.diet_id = ? AND d.is_duplicate = 0 AND s.scorer = ?
+                WHERE d.diet_id = ? AND d.is_duplicate = 0 AND s.scorer = ?{clause}
                 """,
-                (diet_id, scorer),
+                (diet_id, scorer, *params),
             )
         )
 
@@ -299,11 +350,28 @@ class Datastore:
         )
         return [r["title"] for r in rows]
 
-    def doc_count(self, diet_id: str) -> int:
+    def doc_count(
+        self, diet_id: str, since: str | None = None, until: str | None = None
+    ) -> int:
+        clause, params = _date_window(since, until)
         return self.conn.execute(
-            "SELECT COUNT(*) AS n FROM documents WHERE diet_id = ? AND is_duplicate = 0",
-            (diet_id,),
+            "SELECT COUNT(*) AS n FROM documents d "
+            f"WHERE d.diet_id = ? AND d.is_duplicate = 0{clause}",
+            (diet_id, *params),
         ).fetchone()["n"]
+
+    def document_date_range(self) -> tuple[str | None, str | None]:
+        """Earliest and latest document date (``YYYY-MM-DD``) over non-duplicates.
+
+        Bounds the retroactive history reconstruction so it does not walk back
+        through days the corpus never covered.
+        """
+        row = self.conn.execute(
+            f"SELECT MIN({DOC_DATE_SQL}) AS lo, MAX({DOC_DATE_SQL}) AS hi "
+            "FROM documents d WHERE d.is_duplicate = 0"
+        ).fetchone()
+        lo, hi = row["lo"], row["hi"]
+        return (lo[:10] if lo else None, hi[:10] if hi else None)
 
     # -- summaries -------------------------------------------------------
     def upsert_summary(
@@ -323,6 +391,50 @@ class Datastore:
 
     def all_summaries(self) -> dict[str, sqlite3.Row]:
         return {r["scope"]: r for r in self.conn.execute("SELECT * FROM summaries")}
+
+    # -- snapshot history ------------------------------------------------
+    def upsert_snapshot(
+        self,
+        *,
+        snapshot_date: str,
+        generated_utc: str,
+        window_days: int,
+        jsd_cumulative: float | None,
+        jsd_window: float | None,
+        payload: dict,
+    ) -> None:
+        """Record (or replace) the aggregate snapshot for one UTC date."""
+        with self._tx() as conn:
+            conn.execute(
+                """
+                INSERT INTO snapshots (snapshot_date, generated_utc, window_days,
+                    jsd_cumulative, jsd_window, payload)
+                VALUES (?,?,?,?,?,?)
+                ON CONFLICT(snapshot_date) DO UPDATE SET
+                    generated_utc=excluded.generated_utc,
+                    window_days=excluded.window_days,
+                    jsd_cumulative=excluded.jsd_cumulative,
+                    jsd_window=excluded.jsd_window,
+                    payload=excluded.payload
+                """,
+                (
+                    snapshot_date, generated_utc, int(window_days),
+                    jsd_cumulative, jsd_window, json.dumps(payload),
+                ),
+            )
+
+    def snapshot_rows(self, limit: int | None = None) -> list[sqlite3.Row]:
+        """Snapshots in chronological order. ``limit`` keeps the *most recent*
+        N, still oldest-first — the shape a time-series chart wants."""
+        if limit is None:
+            return list(self.conn.execute("SELECT * FROM snapshots ORDER BY snapshot_date"))
+        rows = self.conn.execute(
+            "SELECT * FROM snapshots ORDER BY snapshot_date DESC LIMIT ?", (limit,)
+        )
+        return list(reversed(list(rows)))
+
+    def snapshot_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) AS n FROM snapshots").fetchone()["n"]
 
     # -- provenance metadata --------------------------------------------
     def set_meta(self, key: str, value: str) -> None:
