@@ -137,8 +137,9 @@ an estimate with uncertainty, never ground truth.**
   has many stories covered by multiple outlets in one diet and none in the other, so
   blindspot lists can be short and some entries rest on 2 stories. Treat them as candidates,
   not verdicts; they strengthen as coverage accumulates over time and across more sources.
-  The **GDELT backfill** (`python -m ingestion backfill`) is the fix — it pulls weeks of
-  per-outlet history so clusters rest on real volume. Caveats specific to GDELT:
+  The **GDELT backfill** (`python -m ingestion backfill`, and included in `make daily`)
+  is the fix — it pulls weeks of per-outlet history so clusters rest on real volume.
+  Caveats specific to GDELT:
   - **Titles only.** GDELT returns article metadata, not bodies, so backfilled documents are
     title-based by default. That is what the clustering needs, but their moral-foundation
     scores (computed on the title) are weaker than body-scored feed documents — mixing the
@@ -150,6 +151,16 @@ an estimate with uncertainty, never ground truth.**
   - **Rate limits.** The free endpoint throttles hard (≈1 request/5s) and throttles shared
     IPs harder — a full-registry backfill is slow and can return partial results on a hot IP.
     The client backs off and retries; if a source comes back empty, re-run later.
+
+- **A daily snapshot is a batch job, not an interactive command.** `make daily` runs
+  ingest → backfill → cluster → summarize → export. Two costs dominate and neither is a
+  bug: transformer scoring runs five RoBERTa models over every ingested article (seconds
+  per article on CPU — the price of confidence bands), and the GDELT throttle paces the
+  backfill across the registry. Run it from cron rather than waiting on it. Steps are
+  isolated, so a GDELT outage or a missing `ANTHROPIC_API_KEY` degrades that step only —
+  the dashboard still refreshes from the data that landed, the report names what failed,
+  and the exit code is non-zero. A partial snapshot is therefore normal and visible rather
+  than silent: check the step report before reading a day's numbers as complete.
 - **A blindspot is a coverage signal, not a moral judgment.** "One diet covers X, the other
   doesn't" is descriptive. The tool reports both directions with equal prominence
   (including the author's own blindspots) and never editorializes about which absence is

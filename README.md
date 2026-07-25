@@ -63,6 +63,7 @@ Language split: **Python** owns ingestion, NLP, scoring, and comparison.
 | `compare/`     | JSD, CLR/Aitchison distance, per-foundation log-ratios.               |
 | `summarize/`   | Map-reduce LLM summarization.                                         |
 | `dashboard/`   | TypeScript + D3.js static site.                                      |
+| `daily/`       | One-command snapshot orchestrator (`make daily`).                     |
 | `validation/`  | Hand-coded gold set, agreement metrics, notebooks.                    |
 | `data/`        | Gitignored working data.                                              |
 
@@ -82,7 +83,49 @@ Phase 3 adds the **transformer tagger (Mformer)**, a **validation gold set**, an
 ingestion, each foundation on the radar carries a dictionary-vs-transformer band (wider =
 more disagreement = lower confidence). See `CLAUDE.md` for the full build spec and roadmap.
 
-### Running the pipeline
+### The daily snapshot (one command)
+
+```bash
+make daily          # or: python -m daily
+```
+
+That runs the whole chain — **ingest → GDELT backfill → cluster → summarize →
+export** — and leaves a refreshed dashboard. Then `make dashboard` and open
+<http://localhost:8000>.
+
+Steps are **isolated**: if one fails (GDELT throttling, no API key), the rest
+still run so the dashboard reflects whatever data landed, the report names what
+broke, and the exit code is non-zero so cron notices. The transformer is loaded
+once and shared across steps.
+
+```bash
+make daily-fast                      # today's feeds only — skips the slow backfill
+python -m daily --skip backfill
+python -m daily --only cluster export
+python -m daily --backfill-days 3 --max-per-source 100   # cheaper daily window
+```
+
+The backfill is included by default because blindspots are only trustworthy with
+real per-outlet volume behind them. Tune it in `config/settings.yaml` under
+`daily.backfill` (or disable it there); re-runs are idempotent thanks to
+URL-canonical dedup, so overlapping windows cost time, not correctness.
+
+**Expect the full run to take a while** — it is a batch job, not an interactive
+command. Two things dominate: transformer scoring runs five RoBERTa models over
+every ingested article (seconds per article on CPU), and GDELT's free endpoint
+throttles to ~1 request/5s across the whole registry. That is the cost of
+confidence bands and trustworthy blindspots. If you want it quicker: run it
+overnight from cron, use `make daily-fast` (skips backfill), shorten the window
+with `--backfill-days 3`, or drop `--no-transformer` for a fast dictionary-only
+refresh with no confidence bands.
+
+Run it every morning with cron:
+
+```cron
+0 6 * * *  cd /path/to/parallax && /path/to/.venv/bin/python -m daily >> data/daily.log 2>&1
+```
+
+### Running the steps individually
 
 ```bash
 # 1. Fetch every RSS source with a URL, extract bodies, dedup, score, embed, and

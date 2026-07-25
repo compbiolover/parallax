@@ -60,8 +60,11 @@ dev = [
   "pre-commit>=3.7",
 ]
 
+[project.scripts]
+parallax-daily = "daily.__main__:main"
+
 [tool.hatch.build.targets.wheel]
-packages = ["ingestion", "scoring", "cluster", "compare", "summarize"]
+packages = ["ingestion", "scoring", "cluster", "compare", "summarize", "daily"]
 
 [tool.ruff]
 line-length = 100
