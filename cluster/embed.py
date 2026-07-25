@@ -40,7 +40,9 @@ def _tokens(text: str) -> list[str]:
 def _features(text: str) -> list[str]:
     toks = _tokens(text)
     feats = list(toks)
-    feats += [f"{a}_{b}" for a, b in zip(toks, toks[1:])]  # bigrams
+    # Bigrams: the operands are deliberately ragged (n and n-1), so the short
+    # one must terminate the zip — strict=True would raise on every document.
+    feats += [f"{a}_{b}" for a, b in zip(toks, toks[1:], strict=False)]
     return feats
 
 

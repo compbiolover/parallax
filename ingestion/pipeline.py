@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from cluster.embed import Embedder, HashingEmbedder
 from scoring.aggregate import aggregate_profile, to_composition
@@ -36,6 +37,9 @@ from .extract import (
     parse_feed,
     strip_html,
 )
+
+if TYPE_CHECKING:  # import cost stays off the hot path; annotations are lazy
+    from .gdelt import GdeltClient
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +106,7 @@ class RunStats:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _cluster_text(item: FeedItem, text: str) -> str:
@@ -181,7 +185,7 @@ def backfill(
     config: PipelineConfig | None = None,
     scorer: DictionaryScorer | None = None,
     embedder: Embedder | None = None,
-    gdelt: "GdeltClient | None" = None,
+    gdelt: GdeltClient | None = None,
     days: int = 14,
     max_per_source: int = 250,
     extract_bodies: bool = False,
@@ -214,7 +218,10 @@ def backfill(
     client = gdelt or GdeltClient()
     store.set_meta("lexicon", lexicon_name)
     store.set_meta("embedder", getattr(embedder, "name", type(embedder).__name__))
-    robots = RobotsCache(cfg.user_agent, cfg.timeout) if (extract_bodies and cfg.respect_robots) else None
+    robots = (
+        RobotsCache(cfg.user_agent, cfg.timeout)
+        if (extract_bodies and cfg.respect_robots) else None
+    )
     limiter = RateLimiter(cfg.per_host_rpm)
     index = _seed_index(store, cfg.near_dup_threshold)
     stats = RunStats()
@@ -227,7 +234,9 @@ def backfill(
             continue
         seen_domains.add(key)
         try:
-            articles = client.search_domain(source.domain, timespan=f"{days}d", max_records=max_per_source)
+            articles = client.search_domain(
+                source.domain, timespan=f"{days}d", max_records=max_per_source
+            )
         except Exception:
             stats.errors += 1
             continue

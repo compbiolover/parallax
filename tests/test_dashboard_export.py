@@ -24,8 +24,10 @@ def _store_with_two_diets():
                          "authority": 0.1, "sanctity": 0.1},
             sentiment=0.0, moral_word_ratio=0.2, matched_words=18,
         )
-    store.upsert_summary(scope="self", generated_utc="t", model="m", method="deterministic", text="self summary")
-    store.upsert_summary(scope="executive", generated_utc="t", model="m", method="deterministic", text="exec summary")
+    store.upsert_summary(scope="self", generated_utc="t", model="m",
+                         method="deterministic", text="self summary")
+    store.upsert_summary(scope="executive", generated_utc="t", model="m",
+                         method="deterministic", text="exec summary")
     return store
 
 
@@ -105,7 +107,8 @@ def test_single_diet_has_no_comparison():
         word_count=90, minhash=None,
     )
     store.upsert_scores(document_id="d", scorer="dictionary",
-                        foundations={"care": 0.5}, sentiment=0.0, moral_word_ratio=0.1, matched_words=5)
+                        foundations={"care": 0.5}, sentiment=0.0,
+                        moral_word_ratio=0.1, matched_words=5)
     assert build_payload(store)["comparison"] is None
     store.close()
 

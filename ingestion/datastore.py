@@ -284,7 +284,9 @@ class Datastore:
             )
 
     # -- reads -----------------------------------------------------------
-    def iter_minhash_signatures(self, diet_id: str | None = None) -> Iterator[tuple[str, list[int]]]:
+    def iter_minhash_signatures(
+        self, diet_id: str | None = None
+    ) -> Iterator[tuple[str, list[int]]]:
         """Yield (document_id, signature) for non-duplicate docs with a signature."""
         sql = "SELECT id, minhash FROM documents WHERE minhash IS NOT NULL AND is_duplicate = 0"
         params: tuple[str, ...] = ()

@@ -7,7 +7,6 @@ from validation.evaluate import binding_trigger, evaluate
 from validation.gold import GOLD_DIR, GoldItem, GoldSet, load_gold
 from validation.metrics import foundation_agreement, krippendorff_alpha
 
-
 # -- metrics ---------------------------------------------------------------
 
 def test_foundation_agreement_perfect_separation():

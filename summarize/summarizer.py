@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from compare.divergence import jensen_shannon_divergence, log_ratios
 from ingestion.datastore import Datastore
@@ -42,7 +42,9 @@ class SummaryResult:
     generated_utc: str
 
 
-def gather(store: Datastore, max_headlines: int = 50) -> tuple[list[DietContext], ComparisonContext | None]:
+def gather(
+    store: Datastore, max_headlines: int = 50
+) -> tuple[list[DietContext], ComparisonContext | None]:
     """Pull per-diet contexts and a pairwise comparison from the datastore."""
     profiles = diet_profiles(store)
     contexts: list[DietContext] = []
@@ -72,7 +74,7 @@ def gather(store: Datastore, max_headlines: int = 50) -> tuple[list[DietContext]
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class Summarizer:
@@ -195,7 +197,10 @@ def _deterministic_executive(contexts, comparison, lexicon=None) -> str:
     if is_demo_lexicon(lexicon):
         provenance = "Differences at this scale are provisional given the demo lexicon."
     else:
-        provenance = f"Scores were produced by the {lexicon} lexicon; treat differences as estimates."
+        provenance = (
+            f"Scores were produced by the {lexicon} lexicon; "
+            "treat differences as estimates."
+        )
     return (
         f"{_FALLBACK_NOTE}\n\n"
         f"Jensen-Shannon divergence between {comparison.diet_a} and "

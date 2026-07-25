@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from compare.divergence import index_form, jensen_shannon_divergence, log_ratios
@@ -113,7 +113,7 @@ def build_payload(store: Datastore, history_limit: int | None = DEFAULT_SERIES_L
     has_bands = transformer_scorer is not None
     history = load_series(store, history_limit)
     return {
-        "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_utc": datetime.now(UTC).isoformat(),
         "foundations": list(CLASSIC_FOUNDATIONS),
         "diets": diets,
         "comparison": comparison,

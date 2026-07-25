@@ -108,7 +108,9 @@ def confidence_calibration_scored(goldset: GoldSet, scored: Sequence[dict]) -> d
     aligned with ``goldset.items``) — the reuse path so the ensemble scores each
     item once for both the agreement report and this calibration."""
     high_correct = high_total = low_correct = low_total = 0
-    for item, es_map in zip(goldset.items, scored):
+    # strict: `scored` is documented as parallel to `goldset.items`. If it ever
+    # is not, silently truncating would misreport calibration on a partial set.
+    for item, es_map in zip(goldset.items, scored, strict=True):
         for f in CLASSIC_FOUNDATIONS:
             es = es_map[f]
             correct = int(es.label == item.labels.get(f, 0))
@@ -119,8 +121,14 @@ def confidence_calibration_scored(goldset: GoldSet, scored: Sequence[dict]) -> d
                 high_total += 1
                 high_correct += correct
     return {
-        "high_confidence": {"n": high_total, "accuracy": high_correct / high_total if high_total else None},
-        "low_confidence": {"n": low_total, "accuracy": low_correct / low_total if low_total else None},
+        "high_confidence": {
+            "n": high_total,
+            "accuracy": high_correct / high_total if high_total else None,
+        },
+        "low_confidence": {
+            "n": low_total,
+            "accuracy": low_correct / low_total if low_total else None,
+        },
     }
 
 

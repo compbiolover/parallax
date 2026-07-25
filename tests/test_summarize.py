@@ -28,7 +28,8 @@ def _seed_store():
 
 
 def test_prompt_contains_rules_data_and_headlines():
-    ctx = [DietContext("self", "self", 3, {"care": 0.5, "loyalty": 0.5}, ["a headline", "b headline"])]
+    ctx = [DietContext("self", "self", 3, {"care": 0.5, "loyalty": 0.5},
+                       ["a headline", "b headline"])]
     cmp = ComparisonContext("self", "modeled_ce", 0.12, {"care": 0.4, "loyalty": -0.4})
     prompt = build_user_prompt(ctx, cmp)
     assert "## <label>" in prompt
@@ -74,7 +75,8 @@ class _FakeBlock:
 
 class _FakeMessages:
     def create(self, **kwargs):
-        class R: content = [_FakeBlock("## self\nS.\n## modeled_ce\nO.\n## Executive\nE.")]
+        class R:
+            content = [_FakeBlock("## self\nS.\n## modeled_ce\nO.\n## Executive\nE.")]
         return R()
 
 

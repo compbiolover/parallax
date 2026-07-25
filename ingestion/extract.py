@@ -15,7 +15,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlsplit
 from urllib.robotparser import RobotFileParser
 
@@ -57,7 +57,7 @@ def _entry_published(entry) -> str | None:
     if not pp:
         return None
     try:
-        return datetime(*pp[:6], tzinfo=timezone.utc).isoformat()
+        return datetime(*pp[:6], tzinfo=UTC).isoformat()
     except (TypeError, ValueError):
         return None
 
