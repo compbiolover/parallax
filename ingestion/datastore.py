@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS foundation_scores (
     authority        REAL,
     sanctity         REAL,
     liberty          REAL,               -- NULL for the dictionary scorer
+    -- MFQ-2 halves of `fairness`. NULL means "not partitioned" (no splitter, or
+    -- too little evidence) — never confuse that with an even split or a zero.
+    equality         REAL,
+    proportionality  REAL,
     sentiment        REAL,
     moral_word_ratio REAL,
     matched_words    INTEGER,
@@ -157,7 +161,26 @@ class Datastore:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Additive migrations for stores created by an earlier schema.
+
+        ``CREATE TABLE IF NOT EXISTS`` is a no-op on a table that already
+        exists, so columns added to :data:`SCHEMA` after a store was first
+        created never appear in it. Each entry below is applied only when its
+        column is missing, which makes opening an old database upgrade it in
+        place instead of failing on the first write that mentions a new column.
+        """
+        added: list[tuple[str, str, str]] = [
+            ("foundation_scores", "equality", "REAL"),
+            ("foundation_scores", "proportionality", "REAL"),
+        ]
+        for table, column, decl in added:
+            cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            if cols and column not in cols:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     # -- lifecycle -------------------------------------------------------
     def close(self) -> None:
@@ -229,18 +252,23 @@ class Datastore:
         moral_word_ratio: float,
         matched_words: int,
         liberty: float | None = None,
+        equality: float | None = None,
+        proportionality: float | None = None,
     ) -> None:
         with self._tx() as conn:
             conn.execute(
                 """
                 INSERT INTO foundation_scores (document_id, scorer, care,
-                    fairness, loyalty, authority, sanctity, liberty, sentiment,
+                    fairness, loyalty, authority, sanctity, liberty,
+                    equality, proportionality, sentiment,
                     moral_word_ratio, matched_words)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(document_id, scorer) DO UPDATE SET
                     care=excluded.care, fairness=excluded.fairness,
                     loyalty=excluded.loyalty, authority=excluded.authority,
                     sanctity=excluded.sanctity, liberty=excluded.liberty,
+                    equality=excluded.equality,
+                    proportionality=excluded.proportionality,
                     sentiment=excluded.sentiment,
                     moral_word_ratio=excluded.moral_word_ratio,
                     matched_words=excluded.matched_words
@@ -250,12 +278,15 @@ class Datastore:
                     foundations.get("care"), foundations.get("fairness"),
                     foundations.get("loyalty"), foundations.get("authority"),
                     foundations.get("sanctity"), liberty,
+                    equality, proportionality,
                     sentiment, moral_word_ratio, matched_words,
                 ),
             )
 
     # -- reads -----------------------------------------------------------
-    def iter_minhash_signatures(self, diet_id: str | None = None) -> Iterator[tuple[str, list[int]]]:
+    def iter_minhash_signatures(
+        self, diet_id: str | None = None
+    ) -> Iterator[tuple[str, list[int]]]:
         """Yield (document_id, signature) for non-duplicate docs with a signature."""
         sql = "SELECT id, minhash FROM documents WHERE minhash IS NOT NULL AND is_duplicate = 0"
         params: tuple[str, ...] = ()
@@ -291,6 +322,38 @@ class Datastore:
                 (diet_id, scorer, *params),
             )
         )
+
+    def fairness_split_for_diet(
+        self, diet_id: str, scorer: str = "dictionary"
+    ) -> tuple[list[tuple[float, float, float]], int]:
+        """``([(weight, equality, proportionality), ...], n_scored)`` for a diet.
+
+        Only rows that were actually partitioned are returned; ``n_scored`` is
+        the number of documents the scorer saw at all, so the caller can report
+        what fraction carried enough evidence to split. Treating the unsplit
+        remainder as zeros would manufacture an equality/proportionality reading
+        for every document that never discussed either.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT d.weight AS weight, s.equality AS eq, s.proportionality AS pr
+            FROM foundation_scores s
+            JOIN documents d ON d.id = s.document_id
+            WHERE d.diet_id = ? AND d.is_duplicate = 0 AND s.scorer = ?
+              AND s.equality IS NOT NULL AND s.proportionality IS NOT NULL
+            """,
+            (diet_id, scorer),
+        )
+        split = [(float(r["weight"] or 1.0), float(r["eq"]), float(r["pr"])) for r in rows]
+        total = self.conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM foundation_scores s
+            JOIN documents d ON d.id = s.document_id
+            WHERE d.diet_id = ? AND d.is_duplicate = 0 AND s.scorer = ?
+            """,
+            (diet_id, scorer),
+        ).fetchone()["n"]
+        return split, total
 
     def scorer_names(self) -> list[str]:
         """Distinct scorer names present in foundation_scores (e.g. 'dictionary',

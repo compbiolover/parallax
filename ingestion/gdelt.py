@@ -24,7 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 DEFAULT_UA = "parallax-research-bot/0.1 (+https://github.com/compbiolover/parallax)"
@@ -56,7 +56,7 @@ def _parse_seendate(value: str | None) -> str | None:
     if not value:
         return None
     try:
-        return datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc).isoformat()
+        return datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC).isoformat()
     except ValueError:
         return None
 

@@ -27,14 +27,24 @@ SEED_LEXICON: dict[str, tuple[dict[str, float], int]] = {
     "kill":        ({"care": 1.0}, -1), "victim":     ({"care": 1.0}, -1),
 
     # ---- fairness / cheating ----
+    # Two flavours, deliberately. An earlier version of this list was entirely
+    # equality-flavoured (equal, equit, justice, rights, discriminat) with no
+    # proportionality terms at all, so a document arguing about merit and desert
+    # scored as containing no fairness whatsoever. That is not a neutral default:
+    # it systematically under-measures whichever diet frames fairness as
+    # proportion, which is the §0 symmetry requirement failing quietly inside a
+    # word list. The proportionality terms below exist to correct that floor.
     "fair":        ({"fairness": 1.0}, +1), "equal":     ({"fairness": 1.0}, +1),
     "justice":     ({"fairness": 1.0}, +1), "rights":    ({"fairness": 1.0}, +1),
     "equit":       ({"fairness": 1.0}, +1), "reciprocat":({"fairness": 1.0}, +1),
     "impartial":   ({"fairness": 1.0}, +1),
+    "merit":       ({"fairness": 1.0}, +1), "deserv":    ({"fairness": 1.0}, +1),
+    "earn":        ({"fairness": 1.0}, +1), "proportion":({"fairness": 1.0}, +1),
     "cheat":       ({"fairness": 1.0}, -1), "fraud":     ({"fairness": 1.0}, -1),
     "unfair":      ({"fairness": 1.0}, -1), "biased":    ({"fairness": 1.0}, -1),
     "corrupt":     ({"fairness": 1.0}, -1), "injustice": ({"fairness": 1.0}, -1),
-    "discriminat": ({"fairness": 1.0}, -1),
+    "discriminat": ({"fairness": 1.0}, -1), "undeserv":  ({"fairness": 1.0}, -1),
+    "freeload":    ({"fairness": 1.0}, -1),
 
     # ---- loyalty / betrayal ----
     "loyal":       ({"loyalty": 1.0}, +1), "patriot":   ({"loyalty": 1.0}, +1),

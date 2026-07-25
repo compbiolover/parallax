@@ -22,7 +22,7 @@ repos:
       - id: detect-private-key
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.7
+    rev: v0.15.8  # keep in lockstep with pyproject's dev extra
     hooks:
       - id: ruff             # lint
         args: ["--fix"]

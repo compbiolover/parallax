@@ -18,7 +18,8 @@ def test_document_and_score_roundtrip():
     )
     store.upsert_scores(
         document_id="abc", scorer="dictionary",
-        foundations={"care": 0.1, "fairness": 0.2, "loyalty": 0.0, "authority": 0.0, "sanctity": 0.0},
+        foundations={"care": 0.1, "fairness": 0.2, "loyalty": 0.0,
+                     "authority": 0.0, "sanctity": 0.0},
         sentiment=0.05, moral_word_ratio=0.3, matched_words=36, liberty=None,
     )
     assert store.has_document("abc")

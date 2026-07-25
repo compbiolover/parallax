@@ -79,7 +79,9 @@ def _shingles(text: str, k: int) -> set[str]:
     return {" ".join(tokens[i : i + k]) for i in range(len(tokens) - k + 1)}
 
 
-def minhash_signature(text: str, num_perm: int = DEFAULT_NUM_PERM, k: int = DEFAULT_SHINGLE) -> MinHash:
+def minhash_signature(
+    text: str, num_perm: int = DEFAULT_NUM_PERM, k: int = DEFAULT_SHINGLE
+) -> MinHash:
     """Build a MinHash over word k-shingles of the text."""
     mh = MinHash(num_perm=num_perm)
     for shingle in _shingles(text, k):

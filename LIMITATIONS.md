@@ -28,6 +28,42 @@ an estimate with uncertainty, never ground truth.**
   the two methods disagree more, so trust that number less. The band shows *method
   disagreement*, not a statistical confidence interval.
 
+## The equality/proportionality split is exploratory
+
+MFQ-2 (Atari, Haidt, Graham et al. 2023) divides Fairness into **equality** (equal treatment
+and equal outcomes) and **proportionality** (reward tracking merit or contribution). Parallax
+reports that division, with heavier caveats than anything else on the dashboard.
+
+- **No validated dictionary implements the split.** The eMFD, the MFD, and MFD 2.0 all carry
+  a single `fairness` dimension, and the Moral Foundations Reddit Corpus behind Mformer does
+  not split it either. So far the split exists at the questionnaire level. Parallax's
+  partition runs off a **hand-built term list** (`scoring/fairness_split.py`) with no
+  validation behind it — the same status as the demo seed lexicon, and the same warning.
+- **It divides existing signal; it does not detect fairness.** The dictionary decides how
+  much fairness a document contains. The split only decides how that mass divides. If the
+  dictionary misses a fairness argument, the split cannot recover it.
+- **The seed lexicon's own fairness vocabulary was equality-skewed.** Before this was
+  corrected, the built-in seed contained no proportionality terms at all, so a merit-framed
+  argument scored as containing *no fairness*. That is worth stating plainly because of what
+  it implies: a word list can encode a political asymmetry while looking like a neutral
+  instrument, and the failure is invisible unless you go looking. The correction added
+  merit/desert terms; whether the eMFD carries the same skew is **not yet tested**, and it
+  would affect every real run.
+- **Unsplit is recorded as unsplit.** Documents without enough evidence get NULL, never an
+  even split, and coverage is reported next to every share. A 70/30 split over 4% of
+  documents is not a finding.
+- **The prediction it tests is contested.** Theory expects equality on the left and
+  proportionality on the right. Two reasons to hold that loosely: the liberal/conservative
+  foundation asymmetry replicates poorly when measured in *language* specifically (one
+  review reports ~30% replication success), and proportionality is reported to **bridge**
+  the divide rather than mark it — both sides value merit and effort. There is also
+  longitudinal evidence that ideology predicts foundation endorsement rather than the
+  reverse, which complicates reading any of this as a window into moral psychology.
+- **Historical note worth keeping in view.** Liberty was originally proposed partly because
+  economic conservatives objected that the five-foundation model captured equality but not
+  their proportional notion of fairness. The split and the liberty foundation address
+  overlapping complaints, so adding both risks double-counting the same disagreement.
+
 ## What the divergence time series does and does not show
 
 The dashboard plots recorded snapshots on two bases. Both inherit every caveat above —

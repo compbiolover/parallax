@@ -99,7 +99,8 @@ def _seed_topics(store, emb):
     i = 0
     def add(diet, title, text):
         nonlocal i
-        did = f"d{i}"; i += 1
+        did = f"d{i}"
+        i += 1
         store.upsert_document(doc_id=did, diet_id=diet, source_id="s", stratum_id=None,
             url=None, title=title, published_utc=None,
             fetched_utc="2026-07-23T00:00:00+00:00", word_count=50, minhash=None)

@@ -58,7 +58,8 @@ def test_client_throttles_between_calls():
         return t["now"]
 
     def sleep(s):
-        slept.append(s); t["now"] += s
+        slept.append(s)
+        t["now"] += s
 
     client = GdeltClient(min_interval=8.0, fetch=lambda url: SAMPLE, sleep=sleep, clock=clock)
     client.search_domain("foxnews.com")
@@ -108,10 +109,10 @@ class _FakeGdelt:
 
 
 def test_feed_and_backfill_of_same_url_collapse_to_one_doc():
+    from cluster.embed import HashingEmbedder
     from ingestion.dedup import NearDuplicateIndex
     from ingestion.pipeline import RunStats, _ingest_one
     from scoring.dictionary import DictionaryScorer
-    from cluster.embed import HashingEmbedder
 
     reg = load_registry()
     source = reg.backfillable()[0]
@@ -120,8 +121,10 @@ def test_feed_and_backfill_of_same_url_collapse_to_one_doc():
     stats = RunStats()
     # feed form: utm-tagged; backfill form: clean, http, trailing slash
     _ingest_one(store, source, scorer, embedder, index, stats,
-                title="Nuclear deal signed with Saudi Arabia today", link="https://x.com/a?utm_source=rss",
-                published_utc=None, text="body one two three four five six", cluster_text="Nuclear deal", min_words=3)
+                title="Nuclear deal signed with Saudi Arabia today",
+                link="https://x.com/a?utm_source=rss",
+                published_utc=None, text="body one two three four five six",
+                cluster_text="Nuclear deal", min_words=3)
     _ingest_one(store, source, scorer, embedder, index, stats,
                 title="Nuclear deal signed with Saudi Arabia today", link="http://x.com/a/",
                 published_utc=None, text="only a title", cluster_text="Nuclear deal", min_words=3)
@@ -137,7 +140,8 @@ def test_backfill_stores_titles_and_dedups_domains():
     per = {}
     for s in reg.backfillable():
         per.setdefault(s.domain, [
-            GdeltArticle(url=f"https://{s.domain}/x", title=f"Headline about {s.domain} policy news today",
+            GdeltArticle(url=f"https://{s.domain}/x",
+                         title=f"Headline about {s.domain} policy news today",
                          published_utc="2026-07-20T00:00:00+00:00", domain=s.domain)
         ])
     fake = _FakeGdelt(per)

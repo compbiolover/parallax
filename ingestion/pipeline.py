@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from cluster.embed import Embedder, HashingEmbedder
 from scoring.aggregate import aggregate_profile, to_composition
@@ -37,6 +38,9 @@ from .extract import (
     strip_html,
 )
 
+if TYPE_CHECKING:  # import cost stays off the hot path; annotations are lazy
+    from .gdelt import GdeltClient
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +55,11 @@ class PipelineConfig:
     respect_robots: bool = True
     lexicon_path: str | None = None  # eMFD CSV; None -> built-in demo seed
     assignment: str = "argmax"       # 'argmax' | 'probability' (see DictionaryScorer)
+    # Partition fairness into equality vs proportionality (MFQ-2). Cheap — it is
+    # a second pass over tokens already in memory — but unvalidated, so it is
+    # opt-out rather than load-bearing: the classic five are unaffected either way.
+    split_fairness: bool = True
+    fairness_min_evidence: int = 2
     # Transformer tagger (Mformer) run alongside the dictionary at ingestion, so
     # every article carries both estimates and the dashboard can show a
     # dictionary-vs-transformer confidence band. Requires parallax[scoring]; when
@@ -76,6 +85,8 @@ class PipelineConfig:
             near_dup_threshold=float(dedup.get("minhash_threshold", 0.85)),
             lexicon_path=dict_cfg.get("lexicon_path"),
             assignment=dict_cfg.get("assignment", "argmax"),
+            split_fairness=bool(dict_cfg.get("split_fairness", True)),
+            fairness_min_evidence=int(dict_cfg.get("fairness_min_evidence", 2)),
             transformer_enabled=bool(tr_cfg.get("enabled", True)),
             transformer_model=tr_cfg.get("model"),
             transformer_revision=tr_cfg.get("revision"),
@@ -95,7 +106,7 @@ class RunStats:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _cluster_text(item: FeedItem, text: str) -> str:
@@ -145,7 +156,8 @@ def run(
     cfg = config or PipelineConfig()
     if scorer is None:
         lexicon, lexicon_name = build_lexicon(cfg.lexicon_path)
-        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment)
+        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment,
+                                  splitter=_build_splitter(cfg))
     else:
         lexicon_name = "injected"
     if embedder is None:
@@ -173,7 +185,7 @@ def backfill(
     config: PipelineConfig | None = None,
     scorer: DictionaryScorer | None = None,
     embedder: Embedder | None = None,
-    gdelt: "GdeltClient | None" = None,
+    gdelt: GdeltClient | None = None,
     days: int = 14,
     max_per_source: int = 250,
     extract_bodies: bool = False,
@@ -197,7 +209,8 @@ def backfill(
     cfg = config or PipelineConfig()
     if scorer is None:
         lexicon, lexicon_name = build_lexicon(cfg.lexicon_path)
-        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment)
+        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment,
+                                  splitter=_build_splitter(cfg))
     else:
         lexicon_name = "injected"
     if embedder is None:
@@ -205,7 +218,10 @@ def backfill(
     client = gdelt or GdeltClient()
     store.set_meta("lexicon", lexicon_name)
     store.set_meta("embedder", getattr(embedder, "name", type(embedder).__name__))
-    robots = RobotsCache(cfg.user_agent, cfg.timeout) if (extract_bodies and cfg.respect_robots) else None
+    robots = (
+        RobotsCache(cfg.user_agent, cfg.timeout)
+        if (extract_bodies and cfg.respect_robots) else None
+    )
     limiter = RateLimiter(cfg.per_host_rpm)
     index = _seed_index(store, cfg.near_dup_threshold)
     stats = RunStats()
@@ -218,7 +234,9 @@ def backfill(
             continue
         seen_domains.add(key)
         try:
-            articles = client.search_domain(source.domain, timespan=f"{days}d", max_records=max_per_source)
+            articles = client.search_domain(
+                source.domain, timespan=f"{days}d", max_records=max_per_source
+            )
         except Exception:
             stats.errors += 1
             continue
@@ -241,6 +259,15 @@ def backfill(
                 transformer=transformer,
             )
     return stats
+
+
+def _build_splitter(cfg: PipelineConfig):
+    """The fairness equality/proportionality partitioner, or ``None`` if disabled."""
+    if not cfg.split_fairness:
+        return None
+    from scoring.fairness_split import FairnessSplitter
+
+    return FairnessSplitter(min_evidence=cfg.fairness_min_evidence)
 
 
 def _build_transformer(cfg: PipelineConfig):
@@ -368,6 +395,7 @@ def _ingest_one(
         document_id=doc_id, scorer=score.scorer, foundations=score.foundations,
         sentiment=score.sentiment, moral_word_ratio=score.moral_word_ratio,
         matched_words=score.matched_words, liberty=score.liberty,
+        equality=score.equality, proportionality=score.proportionality,
     )
     if transformer is not None:
         # A single flaky document (encoding, length edge, transient model error)

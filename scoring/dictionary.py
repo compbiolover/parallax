@@ -13,6 +13,11 @@ count. This is the single most important guard against garbage aggregates
 Coverage: the dictionary baseline scores the five CLASSIC foundations only — it
 has no signal for liberty/oppression, which stays ``None`` here and is supplied
 by the Claude tagger in a later phase.
+
+Optionally, the fairness score is further partitioned into equality and
+proportionality (MFQ-2) by :mod:`scoring.fairness_split`. That partition divides
+the fairness mass this scorer already found; it never creates more of it, and it
+reports ``None`` rather than guessing when a document gives it nothing to go on.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from .fairness_split import FairnessSplit, FairnessSplitter, apply_split
 from .foundations import CLASSIC_FOUNDATIONS
 from .lexicon import Lexicon, load_seed
 
@@ -39,6 +45,12 @@ class DocumentScore:
     # liberty is not covered by the dictionary; kept explicit so downstream code
     # never mistakes "unscored" for "zero".
     liberty: None = field(default=None)
+    # The MFQ-2 halves of `fairness`, present only when the splitter was enabled
+    # *and* the document carried enough evidence. None means "not partitioned",
+    # which is a different claim from an even split.
+    equality: float | None = field(default=None)
+    proportionality: float | None = field(default=None)
+    fairness_split: FairnessSplit | None = field(default=None, repr=False)
 
 
 class DictionaryScorer:
@@ -57,13 +69,24 @@ class DictionaryScorer:
 
     For a single-foundation lexicon (the built-in seed, classic MFD word lists)
     the two modes are identical.
+
+    ``splitter`` optionally partitions the fairness score into equality and
+    proportionality. Pass ``FairnessSplitter()`` to enable it, or leave it
+    ``None`` to score the classic five only. Enabling it never changes any of
+    the five foundation values — it only adds the two derived ones.
     """
 
-    def __init__(self, lexicon: Lexicon | None = None, assignment: str = "argmax") -> None:
+    def __init__(
+        self,
+        lexicon: Lexicon | None = None,
+        assignment: str = "argmax",
+        splitter: FairnessSplitter | None = None,
+    ) -> None:
         self.lexicon = lexicon if lexicon is not None else load_seed()
         if assignment not in ("argmax", "probability"):
             raise ValueError(f"unknown assignment mode: {assignment!r}")
         self.assignment = assignment
+        self.splitter = splitter
 
     def score(self, text: str) -> DocumentScore:
         tokens = _TOKEN_RE.findall(text.lower())
@@ -97,10 +120,18 @@ class DictionaryScorer:
             )
 
         foundations = {f: sums[f] / word_count for f in CLASSIC_FOUNDATIONS}
+        # The split reads the raw tokens, not the lexicon matches: whether a
+        # document argues about equality or about desert is carried by words the
+        # foundation lexicon may never have flagged as moral at all.
+        split = self.splitter.split(tokens) if self.splitter is not None else None
+        halves = apply_split(foundations["fairness"], split)
         return DocumentScore(
             foundations=foundations,
             sentiment=sentiment_sum / word_count,
             moral_word_ratio=matched / word_count,
             word_count=word_count,
             matched_words=matched,
+            equality=halves["equality"],
+            proportionality=halves["proportionality"],
+            fairness_split=split,
         )

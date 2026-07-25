@@ -36,7 +36,9 @@ def _build_score_fn(args: argparse.Namespace):
     if args.scorer == "ensemble":
         from scoring.ensemble import build_ensemble  # lazy: heavy deps
 
-        ens = build_ensemble(lexicon_path=args.lexicon, model_prefix=args.model, revision=args.revision)
+        ens = build_ensemble(
+            lexicon_path=args.lexicon, model_prefix=args.model, revision=args.revision
+        )
         return ens.scores, ens.name, 0.5, ens
     lexicon, name = build_lexicon(args.lexicon)
     scorer = DictionaryScorer(lexicon)
@@ -44,13 +46,17 @@ def _build_score_fn(args: argparse.Namespace):
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="validation", description="Validate scorers vs the gold set")
+    parser = argparse.ArgumentParser(
+        prog="validation", description="Validate scorers vs the gold set"
+    )
     parser.add_argument("--gold", default=str(GOLD_DIR / "seed.json"), help="gold set JSON")
-    parser.add_argument("--scorer", choices=["dictionary", "transformer", "ensemble"], default="dictionary")
+    parser.add_argument("--scorer", default="dictionary",
+                        choices=["dictionary", "transformer", "ensemble"])
     parser.add_argument("--lexicon", help="eMFD-format CSV for the dictionary scorer")
     parser.add_argument("--model", help="transformer model prefix (Mformer by default)")
     parser.add_argument("--revision", help="pin the transformer model HF revision (commit/tag)")
-    parser.add_argument("--threshold", type=float, help="presence threshold (default: scorer-specific)")
+    parser.add_argument("--threshold", type=float,
+                        help="presence threshold (default: scorer-specific)")
     args = parser.parse_args(argv)
 
     goldset = load_gold(args.gold)

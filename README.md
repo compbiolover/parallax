@@ -8,32 +8,33 @@ Moral Foundations Theory (MFT) as the analytical lens. It ingests news, podcasts
 video from two modeled information environments, scores them on moral foundations, and
 reports what each one covers that the other does not.
 
-## What this is — and is not
+## What this is, and what it is not
 
-- **It is** a personal research tool that models and compares two *media diets*.
-- **It is not** a system that tracks, surveils, or profiles any specific individual.
-  The "other" diet is a versioned model of outlets and programs
-  ([`config/sources.yaml`](config/sources.yaml)) — not any real person's consumption.
-  No private family communications are ever ingested.
+It is a personal research tool that models and compares two *media diets*. It is not a
+system that tracks, surveils, or profiles any specific individual. The "other" diet is a
+versioned model of outlets and programs ([`config/sources.yaml`](config/sources.yaml)),
+not any real person's consumption. No private family communications are ever ingested.
 
 ## Principles
 
-- **Charitable understanding.** Every generated summary steelmans each side's framing.
-  The binding foundations (loyalty, authority, sanctity) are sincere moral commitments
-  in MFT's framework, not deficits. Parallax does not mock, pathologize, or "dunk on"
-  either diet.
-- **Symmetry.** The identical pipeline runs on both diets. The author's own blindspots
-  and foundation skew are surfaced with equal prominence.
-- **Content handling.** Summarize and link; never republish. Derived metrics (scores,
-  aggregates, cluster metadata) are persisted; raw article text is a transient
-  processing artifact. `robots.txt`, rate limits, and each source's terms are honored.
-- **Uncertainty is first-class.** Every foundation number is an estimate with a
-  confidence band, never ground truth. See [`LIMITATIONS.md`](LIMITATIONS.md).
+**Charitable understanding.** Every generated summary steelmans each side's framing. The
+binding foundations (loyalty, authority, sanctity) are sincere moral commitments in MFT's
+framework, not deficits. Parallax does not mock, pathologize, or "dunk on" either diet.
+
+**Symmetry.** The identical pipeline runs on both diets. The author's own blindspots and
+foundation skew are surfaced with equal prominence.
+
+**Content handling.** Summarize and link, never republish. Derived metrics (scores,
+aggregates, cluster metadata) are persisted; raw article text is a transient processing
+artifact. `robots.txt`, rate limits, and each source's terms are honored.
+
+**Uncertainty is first-class.** Every foundation number is an estimate with a confidence
+band, never ground truth. See [`LIMITATIONS.md`](LIMITATIONS.md).
 
 ## Architecture
 
-Language split: **Python** owns ingestion, NLP, scoring, and comparison.
-**TypeScript + D3.js** owns the dashboard. **R** is for statistical exploration.
+Python owns ingestion, NLP, scoring, and comparison. TypeScript and D3.js own the
+dashboard. R is there for statistical exploration.
 
 ```
   RSS / GDELT / Media Cloud / podcasts / YouTube
@@ -70,20 +71,52 @@ Language split: **Python** owns ingestion, NLP, scoring, and comparison.
 ## Moral foundations modeled
 
 care/harm, fairness/cheating, loyalty/betrayal, authority/subversion,
-sanctity/degradation, and liberty/oppression — with fairness optionally split into
-Equality vs Proportionality (Atari & Haidt 2023).
+sanctity/degradation, and liberty/oppression, with fairness split into Equality and
+Proportionality (Atari & Haidt 2023).
+
+### Fairness, split two ways
+
+MFQ-2 divides Fairness into equality (equal treatment, equal outcomes) and
+proportionality (reward tracking merit and contribution). The distinction earns its place
+here. Both diets argue about fairness constantly, and a five-way tagger reports that as
+one number, which hides the more interesting fact: they often mean different things by it.
+One asks who is being left out. The other asks whether reward is tracking contribution.
+Each is a coherent account of fairness, and neither reduces to the other.
+
+The dashboard shows the division per diet, with coverage next to it. Read it with more
+suspicion than anything else on the page. No validated dictionary implements this split,
+so Parallax partitions fairness using a hand-built term list, and the prediction it tests
+(equality on the left, proportionality on the right) replicates poorly when measured in
+language. See `LIMITATIONS.md`.
+
+```yaml
+scoring:
+  taggers:
+    dictionary:
+      split_fairness: true
+      fairness_min_evidence: 2   # split-terms required before partitioning at all
+```
+
+Building this turned up a bug worth mentioning, because it is the kind that hides well.
+The built-in seed lexicon's fairness vocabulary contained no proportionality terms at all,
+so a merit-framed argument scored as containing *no fairness*. That systematically
+under-measured whichever diet frames fairness as proportion: the symmetry requirement
+failing quietly inside a word list. It is fixed for the seed. Whether the eMFD carries the
+same skew has not been tested.
 
 ## Status
 
-Phase 1 (MVP) and Phase 2 (blindspot engine) are complete — extraction, dedup, dictionary
+Phase 1 (MVP) and Phase 2 (blindspot engine) are complete: extraction, dedup, dictionary
 scoring, a daily summary per diet, a static radar/JSD dashboard, and coverage-asymmetry
-blindspot detection — plus **GDELT historical backfill** for weeks of per-outlet volume.
-Phase 3 adds the **transformer tagger (Mformer)**, a **validation gold set**, and an
-**ensemble confidence signal** now wired to the dashboard: with the transformer run at
-ingestion, each foundation on the radar carries a dictionary-vs-transformer band (wider =
-more disagreement = lower confidence). Runs now also leave a **dated snapshot** behind, so
-the dashboard plots divergence over time instead of only ever showing today — the first
-piece of Phase 5's cadence work. See `CLAUDE.md` for the full build spec and roadmap.
+blindspot detection, plus GDELT historical backfill for weeks of per-outlet volume.
+
+Phase 3 adds the transformer tagger (Mformer), a validation gold set, and an ensemble
+confidence signal wired to the dashboard. With the transformer running at ingestion, each
+foundation on the radar carries a dictionary-vs-transformer band, where wider means more
+disagreement and lower confidence. Every run also leaves a dated snapshot behind, so the
+dashboard plots divergence over time rather than only ever showing today. That is the
+first piece of Phase 5's cadence work. See `CLAUDE.md` for the full build spec and
+roadmap.
 
 ### The daily snapshot (one command)
 
@@ -91,35 +124,33 @@ piece of Phase 5's cadence work. See `CLAUDE.md` for the full build spec and roa
 make daily          # or: python -m daily
 ```
 
-That runs the whole chain — **ingest → GDELT backfill → cluster → summarize →
-snapshot → export** — and leaves a refreshed dashboard. Then `make dashboard` and
-open <http://localhost:8000>.
+That runs the whole chain, ingest through GDELT backfill, cluster, summarize, snapshot,
+and export, and leaves a refreshed dashboard. Then `make dashboard` and open
+<http://localhost:8000>.
 
-Steps are **isolated**: if one fails (GDELT throttling, no API key), the rest
-still run so the dashboard reflects whatever data landed, the report names what
-broke, and the exit code is non-zero so cron notices. The transformer is loaded
-once and shared across steps.
+Steps are isolated. If one fails (GDELT throttling, no API key), the rest still run so the
+dashboard reflects whatever data landed, the report names what broke, and the exit code is
+non-zero so cron notices. The transformer is loaded once and shared across steps.
 
 ```bash
-make daily-fast                      # today's feeds only — skips the slow backfill
+make daily-fast                      # today's feeds only; skips the slow backfill
 python -m daily --skip backfill
 python -m daily --only cluster export
 python -m daily --backfill-days 3 --max-per-source 100   # cheaper daily window
 ```
 
-The backfill is included by default because blindspots are only trustworthy with
-real per-outlet volume behind them. Tune it in `config/settings.yaml` under
-`daily.backfill` (or disable it there); re-runs are idempotent thanks to
-URL-canonical dedup, so overlapping windows cost time, not correctness.
+The backfill is included by default because blindspots are only trustworthy with real
+per-outlet volume behind them. Tune it in `config/settings.yaml` under `daily.backfill`,
+or disable it there. Re-runs are idempotent thanks to URL-canonical dedup, so overlapping
+windows cost time, not correctness.
 
-**Expect the full run to take a while** — it is a batch job, not an interactive
-command. Two things dominate: transformer scoring runs five RoBERTa models over
-every ingested article (seconds per article on CPU), and GDELT's free endpoint
-throttles to ~1 request/5s across the whole registry. That is the cost of
-confidence bands and trustworthy blindspots. If you want it quicker: run it
-overnight from cron, use `make daily-fast` (skips backfill), shorten the window
-with `--backfill-days 3`, or drop `--no-transformer` for a fast dictionary-only
-refresh with no confidence bands.
+Expect the full run to take a while. It is a batch job, not an interactive command. Two
+things dominate: transformer scoring runs five RoBERTa models over every ingested article
+(seconds per article on CPU), and GDELT's free endpoint throttles to roughly one request
+every five seconds across the whole registry. That is the cost of confidence bands and
+trustworthy blindspots. If you want it quicker, run it overnight from cron, use `make
+daily-fast` to skip backfill, shorten the window with `--backfill-days 3`, or pass
+`--no-transformer` for a fast dictionary-only refresh with no confidence bands.
 
 Run it every morning with cron:
 
@@ -129,17 +160,17 @@ Run it every morning with cron:
 
 ### Divergence over time
 
-Each run records one dated snapshot — compositions, JSD, log-ratios, and document
-counts — so the numbers accumulate into a series instead of overwriting yesterday.
-Re-running on the same day replaces that day's row rather than adding one, so the
-series stays at one point per day however often the pipeline runs.
+Each run records one dated snapshot of compositions, JSD, log-ratios, and document counts,
+so the numbers accumulate into a series instead of overwriting yesterday. Re-running on the
+same day replaces that day's row rather than adding one, so the series stays at one point
+per day however often the pipeline runs.
 
-Every snapshot is computed on **two bases**, because they answer different questions:
+Every snapshot is computed on two bases, because they answer different questions:
 
 | Basis | What it profiles | How to read it |
 | ----- | ---------------- | -------------- |
-| **Trailing window** (7 days by default) | Only documents dated in the window | The basis that can actually respond to an event. Noisier, and on thin days it *is* noise. |
-| **All-time** | Every document dated on or before that day | The headline number the radar reports. Heavily damped — it moves less the longer the project runs. |
+| Trailing window (7 days by default) | Only documents dated in the window | The basis that can actually respond to an event. Noisier, and on thin days it *is* noise. |
+| All-time | Every document dated on or before that day | The headline number the radar reports. Heavily damped, and it moves less the longer the project runs. |
 
 Neither is the truer number, and the dashboard labels both rather than picking one.
 
@@ -150,14 +181,13 @@ python -m daily --window-days 14               # widen the trailing window
 python -m dashboard.export --history-limit 90  # ship 90 days to the dashboard
 ```
 
-`--backfill` reconstructs past days from publication dates already in the store, so
-the chart is useful on day one rather than after a month of runs. It computes the
-same arithmetic on a different corpus, though: a reconstructed row for last Tuesday
-includes articles published then but fetched since (GDELT backfill pulls weeks of
-history), which a live run that day could not have seen. Reconstructed rows are
-therefore *what the corpus now says about that date*, not what the dashboard would
-have shown — the chart shades them, and reconstruction will not overwrite a live row
-unless you pass `--overwrite`.
+`--backfill` reconstructs past days from publication dates already in the store, so the
+chart is useful on day one rather than after a month of runs. It computes the same
+arithmetic on a different corpus, though. A reconstructed row for last Tuesday includes
+articles published then but fetched since (GDELT backfill pulls weeks of history), which a
+live run that day could not have seen. Reconstructed rows are therefore *what the corpus
+now says about that date*, not what the dashboard would have shown. The chart shades them,
+and reconstruction will not overwrite a live row unless you pass `--overwrite`.
 
 ### Running the steps individually
 
@@ -171,7 +201,7 @@ unless you pass `--overwrite`.
 python -m ingestion run --max-items 25
 
 # 1b. Backfill weeks of history per outlet from GDELT (title-based, so it's fast
-#     and needs no API key) — this is the volume that makes blindspots reliable:
+#     and needs no API key). This is the volume that makes blindspots reliable:
 python -m ingestion backfill --days 14 --max-per-source 250
 #     (add --extract to also fetch article bodies for full scoring; slower)
 
@@ -179,7 +209,7 @@ python -m ingestion backfill --days 14 --max-per-source 250
 #    and the per-foundation log-ratios:
 python -m ingestion compare
 
-# 3. Cluster stories from the stored embeddings and detect blindspots — the
+# 3. Cluster stories from the stored embeddings and detect blindspots: the
 #    clusters one diet covers heavily and the other barely touches, both
 #    directions (scikit-learn is a core dependency):
 python -m cluster run
@@ -195,7 +225,7 @@ python -m dashboard.export
 # 6. View the dashboard (radar, JSD, log-ratio bars, summaries, blindspot lists):
 cd dashboard && python -m http.server   # then open http://localhost:8000
 
-# Validate a scorer against the hand-coded gold set — per-foundation AUC/F1/kappa
+# Validate a scorer against the hand-coded gold set: per-foundation AUC/F1/kappa
 # and the §5 trigger (binding foundations below 0.7 AUC warrant the transformer):
 python -m validation --lexicon data/emfd_scoring.csv
 python -m validation --scorer transformer   # Mformer; needs parallax[scoring]
@@ -204,26 +234,25 @@ python -m validation --scorer ensemble      # dictionary + transformer, with a
 ```
 
 Story clustering embeds each document at ingestion (text is discarded, so embeddings are
-persisted). The default embedder is a dependency-free hashing embedder over headlines;
-`cluster.embedder.kind: sentence-transformers` swaps in neural embeddings for sharper
-clusters (`pip install parallax[embeddings]`). See `LIMITATIONS.md` for what the current
-clusters do and don't support.
+persisted). The default embedder is a dependency-free hashing embedder over headlines.
+Setting `cluster.embedder.kind: sentence-transformers` swaps in neural embeddings for
+sharper clusters (`pip install parallax[embeddings]`). See `LIMITATIONS.md` for what the
+current clusters do and don't support.
 
-By default scoring uses a **built-in demo lexicon** so the pipeline runs with zero
-external data — a placeholder, not a validated instrument. For real results, supply the
-eMFD:
+By default scoring uses a built-in demo lexicon so the pipeline runs with zero external
+data. It is a placeholder, not a validated instrument. For real results, supply the eMFD:
 
 ```bash
-# 1. Drop the eMFD CSV in data/ (gitignored) — from the eMFDscore repo,
+# 1. Drop the eMFD CSV in data/ (gitignored), from the eMFDscore repo:
 #    dictionaries/emfd_scoring.csv (columns: word, <foundation>_p, <foundation>_sent).
 # 2. Either set scoring.dictionary.lexicon_path in config/settings.yaml, or:
 python -m ingestion run --lexicon data/emfd_scoring.csv
 ```
 
 The active lexicon is recorded with the scores, so the dashboard caveat and summaries
-state which one produced the numbers. Because eMFD words carry probability across all
-five foundations, the scorer defaults to `assignment: argmax` (each word counts toward
-its dominant foundation); see `LIMITATIONS.md` for why, and for what the eMFD's low
+state which one produced the numbers. Because eMFD words carry probability across all five
+foundations, the scorer defaults to `assignment: argmax`, where each word counts toward
+its dominant foundation. See `LIMITATIONS.md` for why, and for what the eMFD's low
 aggregate discrimination does and doesn't mean. The dictionary baseline covers the five
 classic foundations only; liberty/oppression arrives with the Claude tagger in Phase 3.
 
