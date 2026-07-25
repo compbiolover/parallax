@@ -125,3 +125,20 @@ summarize:
 output:
   dashboard_data_dir: dashboard/public/data   # generated JSON for the static site
   show_confidence_bands: true
+
+# --- Daily snapshot (`make daily` / `python -m daily`) ----------------------
+# One command runs: ingest -> backfill -> cluster -> summarize -> export.
+# Steps are isolated: if one fails the rest still run, so the dashboard is
+# refreshed from whatever data landed, and the CLI exits non-zero for cron.
+daily:
+  # GDELT backfill is included by default — blindspots are only trustworthy
+  # with real per-outlet volume behind them. It is also the slow part (the free
+  # endpoint throttles to ~1 request/5s), so a full-registry run takes a while.
+  # Shorten the window for a cheaper daily cadence; dedup makes re-runs
+  # idempotent, so overlapping windows cost time, not correctness.
+  backfill:
+    enabled: true
+    days: 14
+    max_per_source: 250
+    extract_bodies: false         # fetch article bodies too (much slower)
+    transformer: false            # title-only bulk; bands come from feed ingest
