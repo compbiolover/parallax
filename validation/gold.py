@@ -30,7 +30,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from scoring.foundations import CLASSIC_FOUNDATIONS
+from scoring.foundations import CLASSIC_FOUNDATIONS, FOUNDATIONS
 
 GOLD_DIR = Path(__file__).resolve().parent / "gold"
 
@@ -50,6 +50,14 @@ class GoldSet:
     coders: list[str]
     items: list[GoldItem]
     guidelines: str = ""
+    labelled: tuple[str, ...] = ()
+    """Foundations at least one item actually carries a label for.
+
+    Distinct from "foundations with a positive label": an unlabelled foundation
+    reads as all-zeros through :meth:`gold_column`, which is indistinguishable
+    from "coded, and absent everywhere". Callers evaluating a foundation should
+    check this first so an uncoded dimension reports as uncoded rather than as a
+    scorer with no signal."""
 
     def gold_column(self, foundation: str) -> list[int]:
         """Binary gold labels for one foundation, in item order."""
@@ -59,8 +67,17 @@ class GoldSet:
 def load_gold(path: str | Path) -> GoldSet:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     items: list[GoldItem] = []
+    labelled: set[str] = set()
     for raw in data["items"]:
+        # The classic five always materialize (absent == negative, the MFRC
+        # convention). Liberty only materializes when the gold set codes it —
+        # it was added after the first gold sets were written, so defaulting it
+        # to zero would silently turn "not coded" into "coded absent".
         labels = {f: int(raw["labels"].get(f, 0)) for f in CLASSIC_FOUNDATIONS}
+        for f in FOUNDATIONS:
+            if f in raw["labels"]:
+                labels[f] = int(raw["labels"][f])
+                labelled.add(f)
         items.append(
             GoldItem(
                 id=raw["id"],
@@ -75,4 +92,5 @@ def load_gold(path: str | Path) -> GoldSet:
         coders=list(data.get("coders", [])),
         items=items,
         guidelines=data.get("guidelines", ""),
+        labelled=tuple(f for f in FOUNDATIONS if f in labelled),
     )

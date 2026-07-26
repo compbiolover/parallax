@@ -85,9 +85,25 @@ scoring:
       model: mformer              # 'mformer' alias, or a literal HF model prefix
       # revision: <commit-or-tag> # pin the HF revision (recommended for reproducibility)
       max_length: 256
-    claude:
-      enabled: false              # Phase 1+ for summaries; owns liberty/oppression
-      model: claude-opus-4-8
+    liberty:
+      # Liberty/oppression via Claude — the sixth foundation, and the only one
+      # nothing else here can score: the eMFD and MFD cover five, and Mformer's
+      # training corpus does not label liberty either.
+      #
+      # This is the one tagger that costs money per document. It runs only when
+      # ANTHROPIC_API_KEY is set; without a key the run completes with five
+      # foundations rather than failing. `batch` uses the Batch API (half price;
+      # the daily job is an overnight batch by design). `effort: low` matters —
+      # Sonnet 5 runs adaptive thinking at `high` effort by default, which bills
+      # several times the output tokens for judgment against a fixed rubric.
+      #
+      # Cost sketch at ~200 documents/day: roughly $17/month on Sonnet 5 with
+      # batching, ~$8 on Haiku 4.5, ~$42 on Opus 5. Compare tiers empirically
+      # before committing: `python -m validation --scorer liberty --model X --limit 40`.
+      enabled: true
+      model: claude-sonnet-5
+      effort: low                 # low | medium | high | xhigh | max
+      batch: true                 # Batch API: 50% cheaper, completes within the hour
   ensemble:
     low_confidence_on_disagreement: true
   split_fairness: false           # equality vs proportionality (Atari & Haidt 2023)

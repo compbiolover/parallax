@@ -109,6 +109,9 @@ function render(d) {
   // Equality vs proportionality (MFQ-2)
   fairnessSplit(app, d, colors);
 
+  // Liberty / oppression (Claude tagger)
+  liberty(app, d, colors);
+
   // Diverging bars (log-ratios)
   if (d.comparison) {
     const bp = panel(app, `Over / under-indexing — ${d.comparison.pair[0]} vs ${d.comparison.pair[1]} (log-ratio)`);
@@ -312,6 +315,72 @@ function fairnessSplit(app, d, colors) {
      the partition uses a hand-built term list with no validation behind it, the
      liberal/conservative asymmetry replicates poorly when measured in language specifically,
      and proportionality is reported to bridge the divide rather than mark it.`;
+  p.appendChild(cap);
+}
+
+// Liberty / oppression — the sixth foundation, scored by Claude because no
+// dictionary or available transformer covers it. Shown as an absolute mean
+// rather than a radar spoke: it is scored on a subset of documents, and folding
+// partial coverage into the five-way composition would move every other share
+// (and the headline divergence) as a side effect of coverage.
+function liberty(app, d, colors) {
+  const lib = d.liberty;
+  const p = panel(app, "Liberty / oppression");
+  p.style.marginTop = "18px";
+  if (!lib || !lib.diets) {
+    p.innerHTML += `<p class="sub">Not scored. The liberty tagger runs at ingestion when
+      <code>ANTHROPIC_API_KEY</code> is set — it is the one foundation no dictionary or
+      transformer in this project covers.</p>`;
+    return;
+  }
+
+  const ids = Object.keys(lib.diets).sort();
+  const W = 900, rowH = 56, H = ids.length * rowH + 30, L = 150, R = 70;
+  const maxMean = Math.max(0.25, d3.max(ids, id => lib.diets[id].mean) * 1.25);
+  const x = d3.scaleLinear().domain([0, maxMean]).range([L, W - R]);
+  const svg = d3.select(p).append("svg").attr("viewBox", `0 0 ${W} ${H}`);
+
+  x.ticks(5).forEach(t => {
+    svg.append("line").attr("x1", x(t)).attr("x2", x(t)).attr("y1", 16).attr("y2", H - 18)
+      .attr("stroke", "var(--line)");
+    svg.append("text").attr("x", x(t)).attr("y", 11).attr("text-anchor", "middle")
+      .attr("font-size", 10).text(t.toFixed(2));
+  });
+
+  ids.forEach((id, i) => {
+    const v = lib.diets[id], y = 28 + i * rowH, h = 20;
+    svg.append("rect").attr("x", x(0)).attr("y", y)
+      .attr("width", Math.max(0, x(v.mean) - x(0))).attr("height", h)
+      .attr("fill", colors[id] || "var(--muted)")
+      .attr("fill-opacity", v.thin ? 0.28 : 0.85).attr("rx", 3);
+    svg.append("text").attr("x", L - 10).attr("y", y + h / 2).attr("text-anchor", "end")
+      .attr("dominant-baseline", "middle").attr("font-size", 12).attr("fill", "var(--ink)")
+      .text(id);
+    svg.append("text").attr("x", x(v.mean) + 8).attr("y", y + h / 2)
+      .attr("dominant-baseline", "middle").attr("font-size", 11).attr("fill", "var(--ink)")
+      .text(v.mean.toFixed(3));
+    svg.append("text").attr("x", L).attr("y", y + h + 14).attr("font-size", 10)
+      .text(`${Math.round(v.salient_share * 100)}% of tagged stories score above 0.5 · `
+            + `${v.docs_scored} of ${v.docs_total} tagged (${Math.round(v.coverage * 100)}%)`
+            + (v.thin ? " — too thin to read" : ""));
+  });
+
+  const cap = document.createElement("div");
+  cap.className = "sub"; cap.style.marginTop = "8px"; cap.style.fontSize = "12px";
+  const g = lib.gap;
+  const thinNote = g && g.thin ? ", on coverage too thin to rely on" : "";
+  const lead = g
+    ? `<b>${g.pair[0]}</b> engages liberty ${g.mean_gap >= 0 ? "more" : "less"} than `
+      + `<b>${g.pair[1]}</b> by ${Math.abs(g.mean_gap).toFixed(3)}${thinNote}. `
+    : "";
+  cap.innerHTML = lead +
+    `Mean presence per tagged story, 0 to 1. The rubric is deliberately conservative, so
+     low means are expected — read the difference between diets, not the level. Liberty is
+     claimed in both registers (freedom from state coercion, and freedom from private or
+     structural domination) and the rubric is written to score both; that symmetry is the
+     part most worth auditing. Scored by ${escapeHtml(lib.scorer)}, on documents ingested
+     from feeds only, and kept off the radar because partial coverage cannot go into a
+     composition without moving every other share.`;
   p.appendChild(cap);
 }
 
