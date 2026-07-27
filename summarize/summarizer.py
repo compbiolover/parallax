@@ -14,7 +14,7 @@ body quotes. Auditable cluster-level quotes arrive with Phase 2.
 
 from __future__ import annotations
 
-import os
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from compare.divergence import jensen_shannon_divergence, log_ratios
 from ingestion.datastore import Datastore
 from ingestion.pipeline import diet_profiles
+from scoring.claude_client import build_client
 
 from .prompts import (
     SYSTEM_PROMPT,
@@ -29,6 +30,8 @@ from .prompts import (
     DietContext,
     build_user_prompt,
 )
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-opus-4-8"
 
@@ -127,13 +130,18 @@ class Summarizer:
 
 
 def _build_client():
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return None
-    try:
-        import anthropic
-    except ImportError:
-        return None
-    return anthropic.Anthropic()
+    """The Claude client, or ``None`` with a warning explaining which piece of
+    setup is missing.
+
+    Falling back to the deterministic summary is a legitimate mode, but it is
+    labelled on the dashboard as "numbers-only" — so an unintended fallback is
+    visible in the output while its *cause* was not. The warning closes that gap.
+    """
+    client, reason = build_client()
+    if client is None:
+        logger.warning("Claude summaries disabled, using the deterministic "
+                       "fallback: %s", reason)
+    return client
 
 
 def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:

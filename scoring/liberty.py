@@ -38,9 +38,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from dataclasses import dataclass
+
+from .claude_client import build_client
 
 logger = logging.getLogger(__name__)
 
@@ -345,17 +346,70 @@ def build_tagger(
     Mirrors ``_build_transformer``: a missing key or package degrades to "no
     liberty scores" rather than failing the run, because the rest of the
     pipeline is still worth completing without the sixth foundation.
+
+    The degraded path warns rather than staying quiet. Liberty is configured on
+    by default, so reaching here without a client is a misconfiguration, and a
+    missing liberty score is indistinguishable from a corpus with no liberty
+    content. Turn ``enabled`` off in settings to opt out silently and on purpose.
     """
     if not enabled:
         return None
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        logger.info("liberty tagging skipped — no ANTHROPIC_API_KEY set")
-        return None
-    try:
-        import anthropic
-    except ImportError:
-        logger.info("liberty tagging skipped — `anthropic` not installed")
+    client, reason = build_client()
+    if client is None:
+        logger.warning("liberty tagging disabled: %s", reason)
         return None
     return LibertyTagger(
-        anthropic.Anthropic(), model=model, effort=effort, use_batch=use_batch, **kwargs
+        client, model=model, effort=effort, use_batch=use_batch, **kwargs
     )
+
+
+# -- self-check -------------------------------------------------------------
+
+_PROBE = "The mandate leaves families no choice but to comply, pastors said."
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m scoring.liberty`` — verify setup with one cheap call.
+
+    Exercises the key, the SDK, the rubric, the structured output and the
+    parser in one request (a fraction of a cent), so a broken setup is one
+    command to diagnose rather than a run that silently produces no scores.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="scoring.liberty",
+        description="Check that Claude-backed liberty scoring works here",
+    )
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Claude model id")
+    parser.add_argument("--text", default=_PROBE, help="text to score")
+    args = parser.parse_args(argv)
+
+    client, reason = build_client()
+    if client is None:
+        print(f"Liberty scoring cannot run here.\n\n  {reason}\n")
+        return 1
+
+    tagger = LibertyTagger(client, model=args.model, use_batch=False)
+    print(f"Client OK. Scoring one probe with {tagger.model}...\n")
+    score = tagger.score(args.text)
+    if score is None:
+        print("The call returned no usable verdict. The warning above says why; a "
+              "refusal or a malformed response both land here.")
+        return 1
+
+    print(f"  presence : {score.presence:.2f}")
+    print(f"  pole     : {score.pole}")
+    print(f"  register : {score.register}")
+    print(f"  quote    : {score.quote or '(none)'}")
+    print(f"  rationale: {score.rationale}")
+    if not score.grounded:
+        print("\n  Note: no supporting quote. An ungrounded verdict is weaker "
+              "evidence — the rubric asks for one precisely so the judgment has "
+              "to point at the text.")
+    print(f"\nReady. Scores will be recorded under: {tagger.name}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

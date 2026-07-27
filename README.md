@@ -321,16 +321,41 @@ classic foundations only; liberty/oppression arrives with the Claude tagger in P
 # 1. Create and activate a virtual environment
 python3 -m venv .venv && source .venv/bin/activate
 
-# 2. Install the package with dev tooling
-pip install -e ".[dev]"
+# 2. Install the package. `llm` brings in the anthropic SDK, which the liberty
+#    tagger and the Claude summaries both need — without it they degrade to
+#    "not scored" and "numbers-only" respectively.
+pip install -e ".[dev,llm]"
 
 # 3. Install the pre-commit hooks (secret scanning)
 pre-commit install
 
 # 4. Copy the example configuration and fill in your own diet
 cp config/settings.example.yaml config/settings.yaml
-cp .env.example .env
 ```
+
+### The API key
+
+Anything Claude-backed reads `ANTHROPIC_API_KEY` **from the environment**.
+`.env.example` documents which keys exist, but nothing in this repo loads a `.env`
+file — export the key in your shell instead, and put it in the crontab for scheduled
+runs, since cron does not inherit your shell environment.
+
+```bash
+# in ~/.zshrc (or ~/.bashrc) — editing the file beats typing `export`,
+# which would leave the key in your shell history
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Then check the whole path — key, SDK, rubric, structured output, parser — with one
+call costing a fraction of a cent:
+
+```bash
+python -m scoring.liberty
+```
+
+It prints a scored probe if everything is wired up, and names the missing piece if not.
+Without a key the pipeline still runs; you get five foundations instead of six, and a
+warning saying why.
 
 ## License
 
