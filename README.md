@@ -119,6 +119,50 @@ show up, because half the merit terms the eMFD contains are assigned to other fo
 (*accountable* to authority, *contribution* to loyalty, *effort* to care) and contribute
 nothing to fairness. `LIMITATIONS.md` has the numbers and what they do and don't support.
 
+### Liberty, the foundation nothing else can score
+
+The eMFD, the MFD, and MFD 2.0 all cover five foundations. Mformer's training corpus does
+not label liberty either. So liberty/oppression falls to Claude, which is what `CLAUDE.md`
+§3(a) assigns it to and what `scoring/liberty.py` implements.
+
+The rubric is the part worth reading. Liberty is claimed in two registers: freedom from
+state coercion (mandates, overreach, censorship, conscience claims) and freedom from
+private or structural domination (corporate power, surveillance, bodily autonomy, employer
+control). A rubric that recognized only one would score one diet as caring about liberty
+and the other as silent — a coverage artifact wearing the clothes of a finding, and the
+same failure the fairness lexicon audit caught. Both registers are named explicitly, and a
+test asserts they stay named.
+
+```yaml
+scoring:
+  taggers:
+    liberty:
+      enabled: true
+      model: claude-sonnet-5
+      effort: low       # this matters: adaptive thinking at default `high` bills far more
+      batch: true       # Batch API — half price, and the daily run is overnight anyway
+```
+
+It needs `ANTHROPIC_API_KEY`. Without one the run completes with five foundations rather
+than failing. At roughly 200 documents a day the batched cost is about $17/month on
+Sonnet 5, $8 on Haiku 4.5, $42 on Opus 5 — but don't take the tier on faith:
+
+```bash
+python -m validation --scorer liberty --model claude-haiku-4-5 --limit 40
+python -m validation --scorer liberty --model claude-sonnet-5  --limit 40
+```
+
+That reports AUC/F1/kappa against hand-coded liberty labels, the same as every other
+scorer. It needs those labels to exist first — no public corpus supplies them, so the gold
+set has to be coded for liberty by hand, and the CLI says so rather than scoring against
+all-zeros and printing a number that means nothing.
+
+Liberty appears as its own panel rather than a sixth spoke on the radar. The radar is a
+composition over documents every tagger saw; liberty is scored on feed-ingested documents
+only, and only when a key is set. Folding partial coverage into a composition would move
+every other share, and would shift the headline divergence that the snapshot history has
+been recording since the series started.
+
 ## Status
 
 Phase 1 (MVP) and Phase 2 (blindspot engine) are complete: extraction, dedup, dictionary

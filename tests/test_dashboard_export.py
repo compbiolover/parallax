@@ -183,3 +183,45 @@ def test_fairness_split_carries_shares_and_coverage():
     assert fs["diets"]["modeled_ce"]["docs_split"] == 0
     assert fs["diets"]["modeled_ce"]["thin"]
     store.close()
+
+
+# -- liberty in the payload ------------------------------------------------
+
+def test_liberty_absent_until_the_tagger_runs():
+    store = _store_with_two_diets()
+    assert build_payload(store)["liberty"] is None
+    store.close()
+
+
+def test_liberty_reports_mean_and_coverage():
+    store = _store_with_two_diets()
+    scorer = "claude-liberty/claude-sonnet-5"
+    store.upsert_scores(
+        document_id="self-doc", scorer=scorer, foundations={},
+        sentiment=0.0, moral_word_ratio=0.0, matched_words=0, liberty=0.75,
+    )
+    store.set_meta("liberty_scorer", scorer)
+    lib = build_payload(store)["liberty"]
+    assert lib["scorer"] == scorer
+    assert lib["diets"]["self"]["mean"] == 0.75
+    assert lib["diets"]["self"]["docs_scored"] == 1
+    # The other diet exists but was never tagged — reported, with nothing behind it.
+    assert lib["diets"]["modeled_ce"]["docs_scored"] == 0
+    assert lib["diets"]["modeled_ce"]["thin"]
+
+
+def test_liberty_does_not_change_the_headline_composition():
+    """Partial-coverage liberty must not move the five-way profile or the JSD
+    that compare/history.py has been recording."""
+    store = _store_with_two_diets()
+    before = build_payload(store)
+    store.upsert_scores(
+        document_id="self-doc", scorer="claude-liberty/claude-sonnet-5", foundations={},
+        sentiment=0.0, moral_word_ratio=0.0, matched_words=0, liberty=0.9,
+    )
+    store.set_meta("liberty_scorer", "claude-liberty/claude-sonnet-5")
+    after = build_payload(store)
+    assert after["comparison"]["jsd"] == before["comparison"]["jsd"]
+    assert [d["profile"] for d in after["diets"]] == [d["profile"] for d in before["diets"]]
+    assert after["foundations"] == before["foundations"]   # still the classic five
+    store.close()

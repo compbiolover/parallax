@@ -123,6 +123,7 @@ def build_payload(store: Datastore, history_limit: int | None = DEFAULT_SERIES_L
         "history": history,
         "history_window_days": history[-1]["window_days"] if history else None,
         "fairness_split": _fairness_payload(store),
+        "liberty": _liberty_payload(store),
         "executive_summary": exec_row["text"] if exec_row else "",
         "summary_method": exec_row["method"] if exec_row else None,
         "lexicon": lexicon,
@@ -158,6 +159,38 @@ def _fairness_payload(store: Datastore) -> dict | None:
                 "coverage": p.coverage,
                 "thin": p.thin,
                 "leans": p.leans,
+            }
+            for diet_id, p in profiles.items()
+        },
+        "gap": gap(profiles),
+    }
+
+
+def _liberty_payload(store: Datastore) -> dict | None:
+    """Per-diet liberty engagement, or ``None`` if the tagger never ran.
+
+    Reported separately from the radar composition on purpose — see
+    ``compare/liberty.py`` for why partial coverage can't be folded into a
+    composition without moving the headline number.
+    """
+    scorer = store.get_meta("liberty_scorer")
+    if not scorer:
+        return None
+    from compare.liberty import all_diet_liberty, gap
+
+    profiles = all_diet_liberty(store, scorer)
+    if not any(p.docs_scored for p in profiles.values()):
+        return None
+    return {
+        "scorer": scorer,
+        "diets": {
+            diet_id: {
+                "mean": p.mean,
+                "salient_share": p.salient_share,
+                "docs_scored": p.docs_scored,
+                "docs_total": p.docs_total,
+                "coverage": p.coverage,
+                "thin": p.thin,
             }
             for diet_id, p in profiles.items()
         },

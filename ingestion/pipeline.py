@@ -68,6 +68,13 @@ class PipelineConfig:
     transformer_model: str | None = None    # 'mformer' alias or a HF prefix
     transformer_revision: str | None = None  # pin the HF revision (recommended)
     transformer_max_length: int = 256
+    # Liberty/oppression via Claude — the sixth foundation, which no dictionary
+    # and no available transformer covers. Costs money per document, so it is
+    # off unless a key is present; the run completes without it either way.
+    liberty_enabled: bool = True
+    liberty_model: str | None = None      # None -> scoring.liberty.DEFAULT_MODEL
+    liberty_effort: str | None = None     # None -> DEFAULT_EFFORT ('low')
+    liberty_batch: bool = True            # Batch API: half price, overnight-friendly
 
     @classmethod
     def from_settings(cls, settings: dict) -> PipelineConfig:
@@ -77,6 +84,7 @@ class PipelineConfig:
         taggers = ((settings.get("scoring", {}) or {}).get("taggers", {}) or {})
         dict_cfg = taggers.get("dictionary", {}) or {}
         tr_cfg = taggers.get("transformer", {}) or {}
+        lib_cfg = taggers.get("liberty", {}) or {}
         return cls(
             user_agent=ing.get("user_agent", DEFAULT_UA),
             timeout=int(ing.get("request_timeout_seconds", 30)),
@@ -91,6 +99,10 @@ class PipelineConfig:
             transformer_model=tr_cfg.get("model"),
             transformer_revision=tr_cfg.get("revision"),
             transformer_max_length=int(tr_cfg.get("max_length", 256)),
+            liberty_enabled=bool(lib_cfg.get("enabled", True)),
+            liberty_model=lib_cfg.get("model"),
+            liberty_effort=lib_cfg.get("effort"),
+            liberty_batch=bool(lib_cfg.get("batch", True)),
         )
 
 
@@ -102,6 +114,7 @@ class RunStats:
     near_duplicates: int = 0
     skipped_short: int = 0
     errors: int = 0
+    liberty_scored: int = 0
     per_diet: dict[str, int] = field(default_factory=dict)
 
 
@@ -150,6 +163,7 @@ def run(
     scorer: DictionaryScorer | None = None,
     embedder: Embedder | None = None,
     transformer: object | None = None,
+    liberty_tagger: object | None = None,
 ) -> RunStats:
     """Ingest every RSS source with a URL, scoring and deduping into ``store``."""
     registry = registry or load_registry()
@@ -172,11 +186,46 @@ def run(
     index = _seed_index(store, cfg.near_dup_threshold)
     stats = RunStats()
 
+    # Only allocate the buffer when something will consume it — otherwise every
+    # run holds the day's article bodies in memory for no reason.
+    liberty = liberty_tagger if liberty_tagger is not None else _build_liberty(cfg)
+    liberty_texts: dict[str, str] | None = {} if liberty is not None else None
+
     for source in registry.ingestable(("rss",)):
         _ingest_source(
-            source, store, cfg, scorer, embedder, robots, limiter, index, stats, transformer
+            source, store, cfg, scorer, embedder, robots, limiter, index, stats,
+            transformer, liberty_texts,
         )
+
+    if liberty is not None and liberty_texts:
+        _score_liberty(store, liberty, liberty_texts, stats)
     return stats
+
+
+def _score_liberty(store: Datastore, tagger, texts: dict[str, str], stats: RunStats) -> None:
+    """Tag this run's documents on liberty and persist the scores.
+
+    Runs after the source loop rather than per document so the whole day goes
+    out as one Batch API submission. It has to happen before ``run`` returns:
+    the texts live only in ``texts``, and nothing persists them.
+    """
+    try:
+        scores = tagger.score_many(texts)
+    except Exception as exc:
+        logger.warning("liberty scoring failed for the whole run (%s: %s)",
+                       type(exc).__name__, exc)
+        return
+    for doc_id, score in scores.items():
+        store.upsert_scores(
+            document_id=doc_id, scorer=tagger.name, foundations={},
+            sentiment=0.0, moral_word_ratio=0.0, matched_words=0,
+            liberty=score.presence,
+        )
+    store.set_meta("liberty_scorer", tagger.name)
+    stats.liberty_scored = len(scores)
+    if len(scores) < len(texts):
+        logger.info("liberty: scored %d of %d documents this run",
+                    len(scores), len(texts))
 
 
 def backfill(
@@ -270,6 +319,18 @@ def _build_splitter(cfg: PipelineConfig):
     return FairnessSplitter(min_evidence=cfg.fairness_min_evidence)
 
 
+def _build_liberty(cfg: PipelineConfig):
+    """The Claude liberty tagger, or ``None`` when it can't or shouldn't run."""
+    from scoring.liberty import DEFAULT_EFFORT, DEFAULT_MODEL, build_tagger
+
+    return build_tagger(
+        model=cfg.liberty_model or DEFAULT_MODEL,
+        effort=cfg.liberty_effort or DEFAULT_EFFORT,
+        use_batch=cfg.liberty_batch,
+        enabled=cfg.liberty_enabled,
+    )
+
+
 def _build_transformer(cfg: PipelineConfig):
     """Construct the Mformer transformer scorer, or return ``None`` (with a
     single warning) when it's disabled or its heavy deps aren't installed.
@@ -325,6 +386,7 @@ def _ingest_source(
     index: NearDuplicateIndex,
     stats: RunStats,
     transformer: object | None = None,
+    liberty_texts: dict[str, str] | None = None,
 ) -> None:
     try:
         items = parse_feed(source.url, cfg.user_agent)  # type: ignore[arg-type]
@@ -342,7 +404,7 @@ def _ingest_source(
             store, source, scorer, embedder, index, stats,
             title=item.title, link=item.link, published_utc=item.published_utc,
             text=text, cluster_text=_cluster_text(item, text), min_words=cfg.min_words,
-            transformer=transformer,
+            transformer=transformer, liberty_texts=liberty_texts,
         )
 
 
@@ -361,6 +423,7 @@ def _ingest_one(
     cluster_text: str,
     min_words: int,
     transformer: object | None = None,
+    liberty_texts: dict[str, str] | None = None,
 ) -> None:
     """Score, dedup, embed and store one document. Shared by feed ingest and
     GDELT backfill. Identity is the canonical article URL when present, so the
@@ -421,6 +484,10 @@ def _ingest_one(
     else:
         index.add(doc_id, mh)
         stats.stored += 1
+        if liberty_texts is not None:
+            # Buffered, not persisted: raw text is discarded at the end of this
+            # run (§0), so the liberty tagger has to see it before then.
+            liberty_texts[doc_id] = text
         stats.per_diet[source.diet_id] = stats.per_diet.get(source.diet_id, 0) + 1
 
 

@@ -28,6 +28,49 @@ an estimate with uncertainty, never ground truth.**
   the two methods disagree more, so trust that number less. The band shows *method
   disagreement*, not a statistical confidence interval.
 
+## Liberty is scored by one model against one rubric
+
+Liberty/oppression is supplied by Claude, because nothing else in the pipeline can supply
+it — the eMFD and MFD cover five foundations and the Moral Foundations Reddit Corpus behind
+Mformer does not label liberty. That makes it the least corroborated number here.
+
+- **There is no second opinion.** Every other foundation gets at least two independent
+  estimates (dictionary and transformer), and the disagreement between them is the
+  confidence signal. Liberty has one estimate from one model, so it carries no band and no
+  ensemble flag. Treat a liberty score as a single annotator's judgment, because that is
+  what it is.
+- **The rubric is the instrument, and it is hand-written.** Liberty is claimed in two
+  registers — freedom from state coercion, and freedom from private or structural
+  domination. The rubric names both explicitly and instructs that neither is more truly
+  liberty, precisely because a one-sided rubric would produce a clean, wrong finding: one
+  diet engaged with liberty, the other silent. That symmetry is asserted by a test, but a
+  test only checks that the words are present. **Whether the model actually scores the two
+  registers evenhandedly is unvalidated**, and it is the first thing to check on real data.
+- **Not validated at all yet.** No public corpus labels liberty, so the gold set does not
+  either. `python -m validation --scorer liberty` refuses to run until liberty labels are
+  hand-coded, rather than reporting an AUC against all-zero labels. Until that coding
+  happens, every liberty number on the dashboard is unvalidated in the strict sense — not
+  "weakly validated", but never checked against a human coder.
+- **Coverage is partial and uneven.** The tagger runs on feed-ingested documents only —
+  GDELT backfill is title-only, and a title is too little to judge liberty framing from.
+  It also runs only when an API key is set, so a corpus can contain long stretches with no
+  liberty scores at all. Coverage is reported next to every mean for that reason.
+- **It is deliberately kept out of the composition.** Liberty is not a sixth spoke on the
+  radar and does not enter the Jensen-Shannon divergence. Mixing a partial-coverage
+  foundation into a composition would change every other share as a side effect of
+  coverage, and would move the headline number that the snapshot history has been recording
+  since it began. The cost of that choice is that the dashboard's headline still describes
+  five foundations while the project models six.
+- **Production scores are not individually auditable.** The rubric requires a verbatim
+  supporting quote, which is what forces the judgment to point at the text rather than at a
+  vibe — but the quote is not persisted, because a persisted quote is persisted article
+  text, which §0 forbids. Quotes and rationales are visible during validation, where the
+  gold texts are on disk anyway. This is a real tension with `CLAUDE.md` §3(a)'s
+  auditability goal, resolved in favour of the content-handling rule rather than reconciled.
+- **Model changes are silent breaks.** The scorer name records the model, but scores from
+  different models sit in the same column. Swapping the tier mid-corpus makes earlier and
+  later documents incomparable, and nothing detects it.
+
 ## The equality/proportionality split is exploratory
 
 MFQ-2 (Atari, Haidt, Graham et al. 2023) divides Fairness into **equality** (equal treatment

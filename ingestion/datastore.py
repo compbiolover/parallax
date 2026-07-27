@@ -355,6 +355,30 @@ class Datastore:
         ).fetchone()["n"]
         return split, total
 
+    def liberty_for_diet(
+        self, diet_id: str, scorer: str
+    ) -> tuple[list[tuple[float, float]], int]:
+        """``([(weight, liberty), ...], n_documents)`` for one diet.
+
+        Only rows carrying a liberty score are returned; ``n_documents`` is the
+        diet's whole non-duplicate corpus, so the caller can report what fraction
+        was actually tagged. Liberty coverage is always partial — the tagger runs
+        on feed-ingested documents only, and only when an API key is set — so a
+        mean over the tagged subset is not a mean over the diet.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT d.weight AS weight, s.liberty AS liberty
+            FROM foundation_scores s
+            JOIN documents d ON d.id = s.document_id
+            WHERE d.diet_id = ? AND d.is_duplicate = 0 AND s.scorer = ?
+              AND s.liberty IS NOT NULL
+            """,
+            (diet_id, scorer),
+        )
+        scored = [(float(r["weight"] or 1.0), float(r["liberty"])) for r in rows]
+        return scored, self.doc_count(diet_id)
+
     def scorer_names(self) -> list[str]:
         """Distinct scorer names present in foundation_scores (e.g. 'dictionary',
         'transformer/...'). Lets the exporter detect whether bands are possible."""
