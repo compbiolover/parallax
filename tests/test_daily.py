@@ -158,7 +158,7 @@ def test_failed_transformer_build_is_not_retried_by_ingest(monkeypatch):
     # re-attempt it (a slow failure would be paid twice and warn twice).
     seen = {}
 
-    def fake_ingest(store, cfg, pcfg, registry, embedder, transformer):
+    def fake_ingest(store, cfg, pcfg, registry, embedder, transformer, progress=None):
         seen["enabled"] = pcfg.transformer_enabled
         seen["transformer"] = transformer
         return ""

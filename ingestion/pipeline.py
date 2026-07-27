@@ -10,6 +10,8 @@ previously-stored signatures so dedup holds across runs.
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -118,6 +120,26 @@ class RunStats:
     per_diet: dict[str, int] = field(default_factory=dict)
 
 
+@dataclass
+class SourceProgress:
+    """What one source did, reported the moment it finishes.
+
+    A run walks every source sequentially, each waiting on the network behind a
+    30-second timeout and a per-host rate limit. Without this the terminal is
+    blank for minutes and a slow source is indistinguishable from a hang — the
+    first thing that went wrong on the first real run of this pipeline.
+    """
+
+    index: int              # 1-based position in the run
+    total: int
+    source: Source
+    stored: int             # documents new to the datastore
+    fetched: int            # feed items seen
+    errors: int
+    seconds: float
+    failed: bool = False    # the feed itself could not be parsed
+
+
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -164,8 +186,15 @@ def run(
     embedder: Embedder | None = None,
     transformer: object | None = None,
     liberty_tagger: object | None = None,
+    progress: Callable[[SourceProgress | str], None] | None = None,
 ) -> RunStats:
-    """Ingest every RSS source with a URL, scoring and deduping into ``store``."""
+    """Ingest every RSS source with a URL, scoring and deduping into ``store``.
+
+    ``progress`` is called after each source with a :class:`SourceProgress`, and
+    with a plain string for the occasional free-text note (the Batch API wait).
+    Omit it and the run is silent, which is what the library callers and the
+    tests want; the CLI passes a reporter.
+    """
     registry = registry or load_registry()
     cfg = config or PipelineConfig()
     if scorer is None:
@@ -191,15 +220,45 @@ def run(
     liberty = liberty_tagger if liberty_tagger is not None else _build_liberty(cfg)
     liberty_texts: dict[str, str] | None = {} if liberty is not None else None
 
-    for source in registry.ingestable(("rss",)):
-        _ingest_source(
+    sources = list(registry.ingestable(("rss",)))
+    for position, source in enumerate(sources, start=1):
+        before = (stats.stored, stats.fetched, stats.errors)
+        started = time.monotonic()
+        failed = _ingest_source(
             source, store, cfg, scorer, embedder, robots, limiter, index, stats,
             transformer, liberty_texts,
         )
+        if progress is not None:
+            progress(SourceProgress(
+                index=position, total=len(sources), source=source,
+                stored=stats.stored - before[0], fetched=stats.fetched - before[1],
+                errors=stats.errors - before[2],
+                seconds=time.monotonic() - started, failed=failed,
+            ))
 
     if liberty is not None and liberty_texts:
+        if progress is not None:
+            _announce_liberty(liberty, liberty_texts, progress)
         _score_liberty(store, liberty, liberty_texts, stats)
     return stats
+
+
+def _announce_liberty(tagger, texts: dict[str, str], progress) -> None:
+    """Warn before the pipeline's one genuinely long silent wait.
+
+    Above ``BATCH_MIN_ITEMS`` the tagger submits a Batch API job and polls it,
+    which is half price and appropriate for an overnight run but can sit quiet
+    for minutes after ingestion has visibly finished. Saying so is the
+    difference between "still working" and "hung".
+    """
+    from scoring.liberty import BATCH_MIN_ITEMS
+
+    batched = getattr(tagger, "use_batch", False) and len(texts) >= BATCH_MIN_ITEMS
+    progress(f"\nLiberty tagging {len(texts)} document(s) via {tagger.name}…")
+    if batched:
+        progress("  Submitted as a Batch API job (half price). This polls every "
+                 "20s and usually lands in a few minutes; it can take longer. "
+                 "Nothing is wrong if this line sits alone for a while.")
 
 
 def _score_liberty(store: Datastore, tagger, texts: dict[str, str], stats: RunStats) -> None:
@@ -387,12 +446,19 @@ def _ingest_source(
     stats: RunStats,
     transformer: object | None = None,
     liberty_texts: dict[str, str] | None = None,
-) -> None:
+) -> bool:
+    """Ingest one source. Returns True if the feed itself could not be read.
+
+    A dead feed and a feed of unreachable articles both raise the error count,
+    but only the first means the source is gone — worth distinguishing in the
+    progress line, since it is the one that needs a fix in ``sources.yaml``.
+    """
     try:
         items = parse_feed(source.url, cfg.user_agent)  # type: ignore[arg-type]
-    except Exception:
+    except Exception as exc:
+        logger.warning("feed unreadable for %s (%s: %s)", source.id, type(exc).__name__, exc)
         stats.errors += 1
-        return
+        return True
 
     for item in items[: cfg.max_items_per_feed]:
         stats.fetched += 1
@@ -406,6 +472,7 @@ def _ingest_source(
             text=text, cluster_text=_cluster_text(item, text), min_words=cfg.min_words,
             transformer=transformer, liberty_texts=liberty_texts,
         )
+    return False
 
 
 def _ingest_one(

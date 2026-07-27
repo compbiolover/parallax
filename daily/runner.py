@@ -143,10 +143,12 @@ def _resolve_db(cfg: DailyConfig, settings: dict) -> str:
 # isolation wrapper in run_daily, which records them as a failed step.
 
 
-def _step_ingest(store, cfg: DailyConfig, pcfg, registry, embedder, transformer) -> str:
+def _step_ingest(store, cfg: DailyConfig, pcfg, registry, embedder, transformer,
+                 progress=None) -> str:
     from ingestion.pipeline import run
 
-    stats = run(store, registry, pcfg, embedder=embedder, transformer=transformer)
+    stats = run(store, registry, pcfg, embedder=embedder, transformer=transformer,
+                progress=progress)
     return (
         f"{stats.stored} stored, {stats.exact_duplicates} exact-dup, "
         f"{stats.near_duplicates} near-dup, {stats.errors} errors"
@@ -212,8 +214,15 @@ def _step_export(store, cfg: DailyConfig) -> str:
     return f"wrote {out}"
 
 
-def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None) -> DailyReport:
-    """Run the daily snapshot. Never raises for a step failure — see the report."""
+def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
+              progress=None) -> DailyReport:
+    """Run the daily snapshot. Never raises for a step failure — see the report.
+
+    ``progress`` is an optional callback that receives step announcements and
+    the ingest step's per-source lines. A full run is minutes long and prints
+    nothing until the end without it, which makes a slow network and a hung
+    process look identical.
+    """
     from ingestion.config import load_registry, load_settings
     from ingestion.pipeline import PipelineConfig
 
@@ -245,7 +254,8 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None) ->
             pcfg.transformer_enabled = False
 
         step_args = {
-            "ingest": lambda: _step_ingest(store, cfg, pcfg, registry, embedder, transformer),
+            "ingest": lambda: _step_ingest(store, cfg, pcfg, registry, embedder,
+                                           transformer, progress),
             "backfill": lambda: _step_backfill(store, cfg, pcfg, registry, embedder, transformer),
             "cluster": lambda: _step_cluster(store, cfg),
             "summarize": lambda: _step_summarize(store, cfg),
@@ -253,7 +263,7 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None) ->
             "export": lambda: _step_export(store, cfg),
         }
         for name in STEPS:
-            report.steps.append(_run_step(name, step_args[name], cfg.enabled(name)))
+            report.steps.append(_run_step(name, step_args[name], cfg.enabled(name), progress))
     finally:
         if owns_store:
             store.close()
@@ -280,19 +290,31 @@ def _build_transformer(pcfg):
     return build(pcfg)
 
 
-def _run_step(name: str, fn, enabled: bool) -> StepResult:
-    """Run one step, converting any failure into a recorded result."""
+def _run_step(name: str, fn, enabled: bool, progress=None) -> StepResult:
+    """Run one step, converting any failure into a recorded result.
+
+    Announces the step before running it, not after: the announcement exists to
+    say what the process is currently blocked on, and one printed afterwards
+    would arrive exactly when it stopped being useful.
+    """
     if not enabled:
         return StepResult(name=name, status="skipped", detail="disabled")
+    if progress is not None:
+        progress(f"\n→ {name}")
     started = time.monotonic()
     try:
         detail = fn() or ""
-        return StepResult(name, "ok", time.monotonic() - started, detail=detail)
+        result = StepResult(name, "ok", time.monotonic() - started, detail=detail)
     except Exception as exc:
-        return StepResult(
+        result = StepResult(
             name, "failed", time.monotonic() - started,
             error=f"{type(exc).__name__}: {exc}",
         )
+    if progress is not None:
+        note = result.error or result.detail
+        progress(f"  {name} {result.status} in {result.seconds:.1f}s"
+                 f"{' — ' + note if note else ''}")
+    return result
 
 
 def format_report(report: DailyReport) -> str:
