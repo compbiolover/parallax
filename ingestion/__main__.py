@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import sys
 from itertools import combinations
 
 from cluster.embed import build_embedder
@@ -15,13 +17,46 @@ from compare.divergence import jensen_shannon_divergence, log_ratios
 
 from .config import load_registry, load_settings
 from .datastore import Datastore
-from .pipeline import PipelineConfig, RunStats, backfill, diet_profiles, run
+from .pipeline import PipelineConfig, RunStats, SourceProgress, backfill, diet_profiles, run
 
 
 def _db_path(args: argparse.Namespace, settings: dict) -> str:
     if args.db:
         return args.db
     return (settings.get("datastore", {}) or {}).get("path", "data/parallax.sqlite")
+
+
+def format_progress(event: SourceProgress) -> str:
+    """One line per source, written as it finishes.
+
+    Carries the elapsed seconds because that is what distinguishes a slow
+    network from a stuck one: sources take a couple of seconds each, and a
+    double-digit number means something hit the 30s fetch timeout.
+    """
+    src = event.source
+    head = f"  [{event.index:>2}/{event.total}] {src.id:<28} {src.diet_id:<12}"
+    if event.failed:
+        return f"{head} feed unreachable ({event.seconds:.1f}s)"
+    detail = f"{event.stored} stored / {event.fetched} fetched"
+    if event.errors:
+        detail += f", {event.errors} unreadable"
+    return f"{head} {detail:<28} {event.seconds:>5.1f}s"
+
+
+def build_reporter(stream=None):
+    """Print progress as it happens, unbuffered.
+
+    Line-buffered output is not enough here: the gaps between lines are the
+    whole signal, and a buffered pipe would deliver them in one burst at the
+    end, which is the silence this exists to remove.
+    """
+    out = stream if stream is not None else sys.stdout
+
+    def report(event: SourceProgress | str) -> None:
+        print(event if isinstance(event, str) else format_progress(event),
+              file=out, flush=True)
+
+    return report
 
 
 def _print_stats(stats: RunStats) -> None:
@@ -73,7 +108,20 @@ def main(argv: list[str] | None = None) -> int:
                         help="run: also transformer-score every article (confidence bands)")
     parser.add_argument("--no-transformer", dest="transformer", action="store_false",
                         help="run: skip the transformer tagger (dictionary-only, no bands)")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="log why individual fetches failed, not just the count")
+    parser.add_argument("-q", "--quiet", action="store_true",
+                        help="suppress the per-source progress lines")
     args = parser.parse_args(argv)
+
+    # Progress is on by default. The run walks every source sequentially behind
+    # a 30-second timeout each, so a silent terminal for several minutes is the
+    # normal case, and it looks exactly like a hang.
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+    progress = None if args.quiet else build_reporter()
 
     settings = load_settings(args.settings)
     store = Datastore(_db_path(args, settings))
@@ -90,7 +138,14 @@ def main(argv: list[str] | None = None) -> int:
                 cfg.transformer_enabled = args.transformer
             embedder, _ = build_embedder(settings)
             if args.command == "run":
-                stats = run(store, load_registry(), cfg, embedder=embedder)
+                registry = load_registry()
+                if progress is not None:
+                    n = len(list(registry.ingestable(("rss",))))
+                    print(f"Ingesting {n} RSS source(s), up to "
+                          f"{cfg.max_items_per_feed} item(s) each. Sequential, with a "
+                          f"{cfg.timeout}s fetch timeout and {cfg.per_host_rpm} "
+                          f"requests/min per host — expect a few minutes.\n", flush=True)
+                stats = run(store, registry, cfg, embedder=embedder, progress=progress)
             else:
                 print(f"Backfilling {args.days}d of history from GDELT "
                       f"(≤{args.max_per_source}/source, "

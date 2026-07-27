@@ -227,6 +227,29 @@ trustworthy blindspots. If you want it quicker, run it overnight from cron, use 
 daily-fast` to skip backfill, shorten the window with `--backfill-days 3`, or pass
 `--no-transformer` for a fast dictionary-only refresh with no confidence bands.
 
+Because it is slow, it narrates. Every step is announced before it runs, and ingestion
+prints a line per source as that source finishes:
+
+```
+→ ingest
+  [ 1/16] self_nyt_home              self         3 stored / 3 fetched         2.1s
+  [ 2/16] self_wapo_national         self         2 stored / 3 fetched, 1 unreadable  14.7s
+  [ 3/16] self_guardian_us           self         feed unreachable (30.4s)
+```
+
+The elapsed seconds are the useful part: sources take a couple of seconds each, so a
+double-digit number means something hit the 30-second fetch timeout, and a source that
+never prints is the one you are currently waiting on. A dead feed is called out separately
+from articles that failed to fetch — only the first needs a fix in `config/sources.yaml`.
+
+Liberty tagging is the one step that goes quiet on purpose. Above ten documents it submits
+a Batch API job and polls every twenty seconds, so the run can sit silent for minutes
+*after* ingestion has visibly finished. It says so before it starts, because otherwise
+that pause is indistinguishable from a hang at the very last step.
+
+`-v` adds the reason each individual fetch failed rather than only the count; `--quiet`
+turns the narration off for cron, leaving just the final report.
+
 Run it every morning with cron:
 
 ```cron
@@ -274,6 +297,8 @@ and reconstruction will not overwrite a live row unless you pass `--overwrite`.
 #    --no-transformer for the fast dictionary-only path (parallax[scoring] needed
 #    for the transformer, else it degrades to dictionary-only automatically):
 python -m ingestion run --max-items 25
+#    Prints a line per source as it goes; -v explains individual fetch failures,
+#    -q suppresses the narration.
 
 # 1b. Backfill weeks of history per outlet from GDELT (title-based, so it's fast
 #     and needs no API key). This is the volume that makes blindspots reliable:

@@ -56,6 +56,8 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--history-limit", type=int,
                    help="most recent N snapshots to serialize into the payload")
     p.add_argument("--quiet", action="store_true", help="only print the final report")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="log why individual fetches failed, not just the count")
     return p.parse_args(argv)
 
 
@@ -99,13 +101,22 @@ def build_config(args: argparse.Namespace, settings: dict) -> DailyConfig:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import logging
+
+    from ingestion.__main__ import build_reporter
     from ingestion.config import load_settings
 
     args = _parse(argv)
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
     cfg = build_config(args, load_settings(args.settings))
-    if not args.quiet:
-        print(f"Running steps: {', '.join(cfg.steps)}\n")
-    report = run_daily(cfg)
+    progress = None if args.quiet else build_reporter()
+    if progress is not None:
+        print(f"Running steps: {', '.join(cfg.steps)}")
+    report = run_daily(cfg, progress=progress)
+    print()
     print(format_report(report))
     return 0 if report.ok else 1
 
