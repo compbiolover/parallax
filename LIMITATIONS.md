@@ -44,8 +44,15 @@ Mformer does not label liberty. That makes it the least corroborated number here
   domination. The rubric names both explicitly and instructs that neither is more truly
   liberty, precisely because a one-sided rubric would produce a clean, wrong finding: one
   diet engaged with liberty, the other silent. That symmetry is asserted by a test, but a
-  test only checks that the words are present. **Whether the model actually scores the two
-  registers evenhandedly is unvalidated**, and it is the first thing to check on real data.
+  test only checks that the words are present in the prompt — not that the model obeys
+  them. `python -m validation.register_probe` measures the obedience: ten templates, each
+  rendered once with a state actor and once with a private one and otherwise identical
+  word for word, scored several times per condition. It reports register-classification
+  accuracy, the mean presence gap between the two registers, and the pooled within-cell
+  spread to compare that gap against. Run it whenever the rubric or the model changes.
+  **The reading is descriptive, not inferential** — a handful of samples per cell cannot
+  support a significance test, and a gap smaller than the noise floor is absence of
+  evidence rather than evidence of evenhandedness.
 - **Not validated at all yet.** No public corpus labels liberty, so the gold set does not
   either. `python -m validation --scorer liberty` refuses to run until liberty labels are
   hand-coded, rather than reporting an AUC against all-zero labels. Until that coding
