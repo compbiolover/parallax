@@ -62,6 +62,55 @@ disagree, don't. Note the ensemble's *point-estimate* AUC (macro 0.86) is below
 the transformer alone (0.95) — the ensemble's job is the confidence flag, not a
 better score.
 
+## The liberty register probe (`python -m validation.register_probe`)
+
+The gold set cannot validate liberty yet — no public corpus labels it. But one
+specific liberty failure can be tested without any hand-coding, and it is the
+one that would do the most damage: the rubric scoring *state coercion* more
+readily than *private or structural domination*. That asymmetry would show up on
+the dashboard as one diet caring about freedom and the other not — a clean,
+wrong finding about media rather than a property of the prompt.
+
+```bash
+make register-probe               # 10 pairs x 2 registers x 3 repeats = 60 calls
+make register-probe REPEATS=5
+python -m validation.register_probe --model claude-haiku-4-5 --yes
+```
+
+Ten templates across compulsion, surveillance, speech, medical disclosure,
+livelihood, property, exit, conscience, assembly, and data. Each is a single
+sentence with one `{actor}` slot, rendered twice — once with a state actor, once
+with a private one. **The two sides are matched by construction, not by
+judgement**: every other word is identical because it is literally the same
+string. Writing two sentences by hand and calling them equivalent would put the
+author's framing instincts inside the instrument, which is the exact error the
+probe exists to detect. A test asserts the one-slot property, and asserts that
+no template body contains the words *state*, *government*, *private*, or
+*corporate* — which would hand the model the answer through the shared text.
+
+It reports two separable things:
+
+1. **Register classification** — do state-actor items get labelled `from_state`
+   and private-actor items `from_private_power`? Categorical; `both` counts as
+   correct, since a single-actor sentence can defensibly read either way. The
+   failure under test is a crossed label, not a hedge.
+2. **Presence magnitude** — does one register score systematically higher? This
+   is the subtle one. Current models reject `temperature`, so run-to-run
+   variance cannot be dialled down; the probe repeats each condition and prints
+   the gap next to the **pooled within-cell spread**.
+
+The magnitude reading is **descriptive, not inferential**. A few samples per
+cell is not a significance test, and a gap below the noise floor is *absence of
+evidence either way*, not evidence of fairness — the report says so in those
+words rather than letting a reader infer a clean bill of health. With
+`--repeats 1` it refuses to interpret the magnitude at all. Failed calls are
+counted and dropped, never averaged in as zeros, so a register that errors more
+often doesn't get dragged toward the middle.
+
+This costs real API calls; the CLI prints the call count and asks before
+spending (`--yes` skips it). Re-run it whenever the rubric text or the model
+changes — both are the instrument, and both drift.
+
 ## Guarding against confirmation bias
 
 - Pre-register what you expect each period, then check yourself.

@@ -133,6 +133,22 @@ and the other as silent — a coverage artifact wearing the clothes of a finding
 same failure the fairness lexicon audit caught. Both registers are named explicitly, and a
 test asserts they stay named.
 
+A test can only check that the words are in the prompt, though — not that the model obeys
+them. So there is a probe for that too:
+
+```bash
+make register-probe                 # 10 pairs x 2 registers x 3 repeats = 60 calls
+```
+
+Ten sentences, each with a single `{actor}` slot, rendered once with a state actor and once
+with a private one. The two sides are identical word for word because they come from the
+same string — matched by construction rather than by my judgement, since hand-writing two
+"equivalent" sentences would put my own framing instincts inside the instrument. It reports
+whether the registers get classified correctly, and whether one of them scores
+systematically higher, with the run-to-run noise floor printed next to the gap so a few
+samples don't get read as a result. A gap under the noise is absence of evidence, not a
+clean bill of health, and the report says so in those words.
+
 ```yaml
 scoring:
   taggers:
