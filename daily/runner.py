@@ -39,7 +39,14 @@ from ingestion.datastore import Datastore
 
 # Step names, in execution order. ``snapshot`` runs before ``export`` so the
 # payload carries today's point rather than lagging a day behind.
-STEPS = ("ingest", "backfill", "cluster", "summarize", "snapshot", "export")
+STEPS = ("ingest", "backfill", "cluster", "summarize", "snapshot", "export", "digest")
+
+# What a run does unless told otherwise. ``digest`` is the one step that is not
+# in here: it needs SMTP credentials nobody has on a first run, and a step that
+# fails every morning until configured trains you to ignore the report that is
+# supposed to tell you when something actually broke. Settings opt it in;
+# ``--only digest`` still runs it on demand.
+DEFAULT_STEPS = tuple(s for s in STEPS if s != "digest")
 
 
 @dataclass
@@ -49,7 +56,7 @@ class DailyConfig:
     db: str | None = None                 # None -> from settings
     settings_path: str | None = None
     out: str | None = None                # dashboard payload path; None -> default
-    steps: tuple[str, ...] = STEPS
+    steps: tuple[str, ...] = DEFAULT_STEPS
 
     # ingest
     max_items_per_feed: int | None = None
@@ -74,6 +81,9 @@ class DailyConfig:
     window_days: int = DEFAULT_WINDOW_DAYS
     history_limit: int = DEFAULT_SERIES_LIMIT
 
+    # digest
+    own_diet: str | None = None           # whose blindspots lead the email
+
     def enabled(self, step: str) -> bool:
         return step in self.steps
 
@@ -84,6 +94,7 @@ class DailyConfig:
         daily = (settings.get("daily", {}) or {})
         bf = (daily.get("backfill", {}) or {})
         snap = (daily.get("snapshot", {}) or {})
+        dig = (settings.get("digest", {}) or {})
         cfg = cls(
             backfill_days=int(bf.get("days", 14)),
             backfill_max_per_source=int(bf.get("max_per_source", 250)),
@@ -91,9 +102,12 @@ class DailyConfig:
             backfill_transformer=bool(bf.get("transformer", False)),
             window_days=int(snap.get("window_days", DEFAULT_WINDOW_DAYS)),
             history_limit=int(snap.get("history_limit", DEFAULT_SERIES_LIMIT)),
+            own_diet=dig.get("own_diet"),
         )
         if not bf.get("enabled", True):
             cfg.steps = tuple(s for s in cfg.steps if s != "backfill")
+        if dig.get("enabled", False):
+            cfg.steps = tuple(s for s in STEPS if s in {*cfg.steps, "digest"})
         return cfg
 
 
@@ -214,6 +228,24 @@ def _step_export(store, cfg: DailyConfig) -> str:
     return f"wrote {out}"
 
 
+def _step_digest(store, cfg: DailyConfig) -> str:
+    """Render the brief and mail it.
+
+    Runs last, after export, so the email describes the same payload the
+    dashboard does rather than a state one step behind.
+    """
+    from dashboard.export import build_payload
+    from digest.render import build_digest
+    from digest.send import NO_CONFIG, send
+
+    digest = build_digest(build_payload(store, cfg.history_limit), own_diet=cfg.own_diet)
+    if send(digest):
+        return f"sent — {digest.subject}"
+    # A step failure, not a silent skip: the digest was switched on deliberately,
+    # so not sending is the thing you need to be told about.
+    raise RuntimeError(NO_CONFIG)
+
+
 def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
               progress=None) -> DailyReport:
     """Run the daily snapshot. Never raises for a step failure — see the report.
@@ -261,6 +293,7 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
             "summarize": lambda: _step_summarize(store, cfg),
             "snapshot": lambda: _step_snapshot(store, cfg),
             "export": lambda: _step_export(store, cfg),
+            "digest": lambda: _step_digest(store, cfg),
         }
         for name in STEPS:
             report.steps.append(_run_step(name, step_args[name], cfg.enabled(name), progress))

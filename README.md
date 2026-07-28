@@ -64,6 +64,7 @@ dashboard. R is there for statistical exploration.
 | `compare/`     | JSD, CLR/Aitchison distance, log-ratios, dated snapshot history.      |
 | `summarize/`   | Map-reduce LLM summarization.                                         |
 | `dashboard/`   | TypeScript + D3.js static site.                                      |
+| `digest/`      | The dashboard rendered into a daily email (`make digest`).            |
 | `daily/`       | One-command snapshot orchestrator (`make daily`).                     |
 | `validation/`  | Hand-coded gold set, agreement metrics, notebooks.                    |
 | `data/`        | Gitignored working data.                                              |
@@ -249,6 +250,33 @@ that pause is indistinguishable from a hang at the very last step.
 
 `-v` adds the reason each individual fetch failed rather than only the count; `--quiet`
 turns the narration off for cron, leaving just the final report.
+
+### The daily brief, by email
+
+A dashboard you have to remember to open is one you check twice and then forget.
+`digest/` renders the same content into a self-contained email so the brief arrives
+on its own:
+
+```bash
+make digest                 # preview it in a browser — no SMTP settings needed
+make digest-send            # render and mail it
+```
+
+The obvious alternative was to host the static page and send yourself a link. That
+puts a dated, running record of one person's news consumption at a URL,
+permanently, to save a scroll — so the email carries everything instead and nothing
+is published anywhere. The cost is real: no hover, no drill-down, no interactivity.
+The radar becomes two aligned bar lists and the JSD series becomes a column chart of
+coloured divs, because mail clients strip JavaScript and block remote images.
+
+Sending needs four environment variables (`.env.example` has them). It is
+all-or-nothing: a partially configured mailer declines to send and names the missing
+variable, rather than half-working at 6am on a machine nobody is watching.
+
+Turn it on in the daily run with `digest.enabled: true`. It is the only one of the
+seven steps that is **off by default** — every other step works without credentials,
+and a step that fails every morning until configured trains you to ignore the report
+that exists to tell you when something actually broke.
 
 Run it every morning with cron:
 

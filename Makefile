@@ -24,6 +24,12 @@ validate:  ## Score the gold set and report agreement (§5 trigger)
 audit-lexicon:  ## Check a lexicon for equality/proportionality asymmetry
 	$(PY) -m validation.lexicon_audit $(if $(LEXICON),--lexicon $(LEXICON))
 
+digest:  ## Render the daily brief to data/digest-preview.html (no email needed)
+	$(PY) -m digest --dry-run --open
+
+digest-send:  ## Render and email the daily brief (needs SMTP settings)
+	$(PY) -m digest
+
 register-probe:  ## Check the liberty rubric scores both registers evenhandedly (costs API calls)
 	$(PY) -m validation.register_probe $(if $(REPEATS),--repeats $(REPEATS))
 
