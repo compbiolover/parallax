@@ -49,6 +49,31 @@ account password outright once 2FA is on (you need an app password), and most
 providers silently drop a message whose `From` doesn't match the authenticated
 user — which is why `PARALLAX_DIGEST_FROM` defaults to `PARALLAX_SMTP_USER`.
 
+### The password crosses this connection
+
+So the TLS has to be *authenticated* TLS, not merely encrypted. `smtplib`'s
+`starttls()` defaults to `ssl._create_stdlib_context()` when handed no context,
+which is `check_hostname=False` and `verify_mode=CERT_NONE` — it will accept a
+self-signed certificate from anyone who can get on the path, with no error to
+tell you it happened. Every Python in range (3.11 through 3.14) still takes that
+default, so this is not a version to grow out of. `send()` passes
+`ssl.create_default_context()` explicitly, and a test pins the premise so the
+explicit context stops being load-bearing only when the stdlib default changes.
+
+Consequences worth knowing before you hit them:
+
+- **Certificate verification failures refuse the send.** The password is not
+  transmitted. That failure looks identical whether the server is misconfigured
+  or the connection is being intercepted, so it is logged as its own message
+  rather than folded into a generic "send failed" — fix the certificate rather
+  than working around the check.
+- **Port 465 is treated as implicit TLS** and wrapped at connect time; 587 and
+  everything else upgrade via STARTTLS.
+- **`PARALLAX_SMTP_STARTTLS=0` against a remote host is refused outright**, before
+  the connection opens. Turning encryption off is a deliberate setting; sending a
+  credential across a network in the clear is a different thing. It remains
+  allowed for `localhost`, which is the local-relay case the option exists for.
+
 ## In the daily run
 
 ```yaml

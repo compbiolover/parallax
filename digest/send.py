@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import smtplib
+import ssl
 from dataclasses import dataclass
 from email.message import EmailMessage
 
@@ -20,12 +21,33 @@ from .render import Digest
 logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 587
+IMPLICIT_TLS_PORT = 465     # TLS from the first byte; no STARTTLS handshake
+TIMEOUT_S = 30
+
+# Sending a password in the clear is defensible to a relay on this machine and
+# nowhere else. `PARALLAX_SMTP_STARTTLS=0` is documented for exactly that case.
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
 
 NO_CONFIG = (
     "email digest not configured. Set PARALLAX_SMTP_HOST, PARALLAX_SMTP_USER, "
     "PARALLAX_SMTP_PASSWORD and PARALLAX_DIGEST_TO in the environment (see "
     ".env.example). Nothing is read from .env automatically, and cron does not "
     "inherit your shell — set them inside the crontab for scheduled runs."
+)
+
+PLAINTEXT_REMOTE = (
+    "refusing to send: PARALLAX_SMTP_STARTTLS=0 disables TLS, and {host} is not "
+    "on this machine, so the SMTP password would cross the network in the clear. "
+    "That option exists for a local relay only. Remove it, or point the digest at "
+    "a relay on localhost."
+)
+
+CERT_FAILED = (
+    "digest send failed: could not verify the TLS certificate for {host} ({exc}). "
+    "This is what a misconfigured server looks like — and also what an intercepted "
+    "connection looks like. The SMTP password was NOT sent. Do not work around it "
+    "by disabling verification; fix the server's certificate, or use a host whose "
+    "certificate validates."
 )
 
 
@@ -81,8 +103,34 @@ def build_message(digest: Digest, config: MailConfig) -> EmailMessage:
     return message
 
 
+def _is_loopback(host: str) -> bool:
+    return host.strip().lower() in LOOPBACK_HOSTS
+
+
+def _connect(config: MailConfig):
+    """Open the connection, with certificate verification where TLS applies.
+
+    Port 465 is implicit TLS — encrypted from the first byte, so it is wrapped
+    at connect time and never sees a STARTTLS handshake. Everything else
+    connects in the clear and upgrades in ``send``.
+    """
+    if config.port == IMPLICIT_TLS_PORT:
+        return smtplib.SMTP_SSL(config.host, config.port, timeout=TIMEOUT_S,
+                                context=ssl.create_default_context())
+    return smtplib.SMTP(config.host, config.port, timeout=TIMEOUT_S)
+
+
 def send(digest: Digest, config: MailConfig | None = None, *, smtp_factory=None) -> bool:
     """Send the digest. Returns False (with a warning) rather than raising.
+
+    The password crosses this connection, so the TLS has to be *authenticated*
+    TLS. ``smtplib``'s ``starttls()`` defaults to ``ssl._create_stdlib_context()``
+    when given no context, which is ``check_hostname=False`` and
+    ``verify_mode=CERT_NONE`` — encryption with no idea who is on the other end,
+    and no error to tell you so. ``ssl.create_default_context()`` is passed
+    explicitly for that reason. This is true on every Python in range (3.11
+    through 3.14 all still take that default), so it is not a version to grow
+    out of.
 
     ``smtp_factory`` exists so the tests can exercise the real message-building
     path without a network or a mailbox.
@@ -92,14 +140,27 @@ def send(digest: Digest, config: MailConfig | None = None, *, smtp_factory=None)
         logger.warning("%s", NO_CONFIG)
         return False
 
+    # Refused before the connection opens, not warned about after the password
+    # is already gone. Encryption off is a deliberate setting; sending a
+    # credential across a network in the clear is a different thing entirely.
+    if not config.starttls and config.port != IMPLICIT_TLS_PORT \
+            and not _is_loopback(config.host):
+        logger.warning("%s", PLAINTEXT_REMOTE.format(host=config.host))
+        return False
+
     message = build_message(digest, config)
-    factory = smtp_factory or (lambda: smtplib.SMTP(config.host, config.port, timeout=30))
+    factory = smtp_factory or (lambda: _connect(config))
     try:
         with factory() as server:
-            if config.starttls:
-                server.starttls()
+            if config.starttls and config.port != IMPLICIT_TLS_PORT:
+                server.starttls(context=ssl.create_default_context())
             server.login(config.user, config.password)
             server.send_message(message)
+    except ssl.SSLCertVerificationError as exc:
+        # Called out separately because the generic message below reads like a
+        # server problem, and this one may not be.
+        logger.warning("%s", CERT_FAILED.format(host=config.host, exc=exc))
+        return False
     except Exception as exc:
         logger.warning("digest send failed (%s: %s)", type(exc).__name__, exc)
         return False

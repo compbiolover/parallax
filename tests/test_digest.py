@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import ssl
 
 import pytest
 
@@ -275,19 +276,119 @@ def test_send_without_configuration_warns_and_returns_false(monkeypatch, caplog)
     assert "crontab" in caplog.text          # cron doesn't inherit your shell
 
 
-def test_send_uses_starttls_login_and_send(monkeypatch):
+class _SMTP:
+    """Records the ordered calls the sender makes, including the TLS context."""
+
+    def __init__(self, calls):
+        self.calls = calls
+
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+    def starttls(self, context=None):
+        self.calls.append(f"starttls:{type(context).__name__}")
+        if context is not None:
+            self.calls.append(f"verify:{context.verify_mode.name}")
+            self.calls.append(f"hostname:{context.check_hostname}")
+
+    def login(self, user, password): self.calls.append(f"login:{user}")
+    def send_message(self, message): self.calls.append(f"send:{message['To']}")
+
+
+def test_send_uses_starttls_login_and_send():
     calls = []
-
-    class _SMTP:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def starttls(self): calls.append("starttls")
-        def login(self, user, password): calls.append(f"login:{user}")
-        def send_message(self, message): calls.append(f"send:{message['To']}")
-
     config = MailConfig.from_env(ENV)
-    assert send(build_digest(_payload()), config, smtp_factory=_SMTP) is True
-    assert calls == ["starttls", "login:me@example.com", "send:me@example.com"]
+    assert send(build_digest(_payload()), config,
+                smtp_factory=lambda: _SMTP(calls)) is True
+    assert calls[0] == "starttls:SSLContext"
+    assert calls[-2:] == ["login:me@example.com", "send:me@example.com"]
+
+
+# -- the credential crosses this connection ---------------------------------
+
+
+def test_starttls_gets_a_verifying_context():
+    """The finding this exists to prevent: smtplib's starttls() with no context
+    uses ssl._create_stdlib_context(), which is CERT_NONE + check_hostname
+    False. That is encryption with no idea who is on the other end, and no
+    error to say so — an on-path attacker presents any certificate and reads
+    the AUTH exchange that follows in the clear."""
+    calls = []
+    send(build_digest(_payload()), MailConfig.from_env(ENV),
+         smtp_factory=lambda: _SMTP(calls))
+    assert "verify:CERT_REQUIRED" in calls
+    assert "hostname:True" in calls
+    # and the password only moves after the handshake is verified
+    assert calls.index("starttls:SSLContext") < calls.index("login:me@example.com")
+
+
+def test_the_stdlib_default_really_is_unverified():
+    """Pins the premise. If a future Python makes starttls() safe by default the
+    explicit context becomes redundant rather than load-bearing — but until this
+    assertion fails, it is load-bearing."""
+    assert ssl._create_stdlib_context().verify_mode is ssl.CERT_NONE
+    assert ssl._create_stdlib_context().check_hostname is False
+    assert ssl.create_default_context().verify_mode is ssl.CERT_REQUIRED
+
+
+def test_plaintext_to_a_remote_host_is_refused_before_connecting(caplog):
+    """Disabling encryption is a deliberate setting. Sending a password across
+    a network in the clear is a different thing, and it is refused rather than
+    warned about after the fact."""
+    opened = []
+    config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_STARTTLS": "0"})
+    with caplog.at_level(logging.WARNING):
+        result = send(build_digest(_payload()), config,
+                      smtp_factory=lambda: opened.append(1) or _SMTP([]))
+    assert result is False
+    assert opened == []                       # never dialled
+    assert "would cross the network in the clear" in caplog.text
+
+
+def test_plaintext_to_a_local_relay_is_allowed():
+    """The documented use for STARTTLS=0 — a relay on this machine, where there
+    is no network for anyone to sit on."""
+    calls = []
+    config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_STARTTLS": "0",
+                                  "PARALLAX_SMTP_HOST": "localhost"})
+    assert send(build_digest(_payload()), config,
+                smtp_factory=lambda: _SMTP(calls)) is True
+    assert not any(c.startswith("starttls") for c in calls)
+    assert "login:me@example.com" in calls
+
+
+def test_implicit_tls_port_skips_the_starttls_upgrade():
+    """465 is TLS from the first byte; a STARTTLS handshake on top of it is an
+    error, not a belt-and-braces."""
+    calls = []
+    config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_PORT": "465"})
+    assert send(build_digest(_payload()), config,
+                smtp_factory=lambda: _SMTP(calls)) is True
+    assert not any(c.startswith("starttls") for c in calls)
+
+
+def test_implicit_tls_is_not_refused_when_starttls_is_off():
+    """465 with STARTTLS=0 is a correct configuration, not a cleartext one."""
+    calls = []
+    config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_PORT": "465",
+                                  "PARALLAX_SMTP_STARTTLS": "0"})
+    assert send(build_digest(_payload()), config,
+                smtp_factory=lambda: _SMTP(calls)) is True
+
+
+def test_a_certificate_failure_is_reported_as_its_own_thing(caplog):
+    """A verification failure is what a misconfigured server looks like and
+    also what an interception looks like. Folding it into the generic 'send
+    failed' invites disabling verification to make the message go away."""
+    def _boom():
+        raise ssl.SSLCertVerificationError("hostname mismatch")
+
+    with caplog.at_level(logging.WARNING):
+        assert send(build_digest(_payload()), MailConfig.from_env(ENV),
+                    smtp_factory=_boom) is False
+    assert "could not verify the TLS certificate" in caplog.text
+    assert "password was NOT sent" in caplog.text
+    assert "Do not work around it" in caplog.text
 
 
 def test_a_send_failure_is_reported_not_raised(monkeypatch, caplog):

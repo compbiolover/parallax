@@ -271,7 +271,10 @@ coloured divs, because mail clients strip JavaScript and block remote images.
 
 Sending needs four environment variables (`.env.example` has them). It is
 all-or-nothing: a partially configured mailer declines to send and names the missing
-variable, rather than half-working at 6am on a machine nobody is watching.
+variable, rather than half-working at 6am on a machine nobody is watching. TLS
+certificates are verified (`smtplib`'s own default is not to verify them, which would
+hand your mail password to anyone on the path), and a verification failure refuses the
+send rather than proceeding — `digest/README.md` has the detail.
 
 Turn it on in the daily run with `digest.enabled: true`. It is the only one of the
 seven steps that is **off by default** — every other step works without credentials,
