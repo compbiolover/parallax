@@ -177,3 +177,18 @@ daily:
   snapshot:
     window_days: 7
     history_limit: 365
+
+# --- Daily email brief (`python -m digest`) ---------------------------------
+# The dashboard rendered into a self-contained email, so the brief arrives on
+# its own and nothing about your media diet is published to a public URL.
+#
+# Off by default: sending needs SMTP credentials (see .env.example), and a step
+# that fails every morning until configured teaches you to ignore the report
+# that is supposed to tell you when something actually broke.
+#
+# Preview it without any of that:  python -m digest --dry-run --open
+digest:
+  enabled: false
+  # Which diet is yours. Your own blindspots lead the email — equal styling is
+  # not equal prominence on a phone, where second means scrolled past.
+  own_diet: self

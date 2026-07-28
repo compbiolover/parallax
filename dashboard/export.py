@@ -216,20 +216,30 @@ def _blindspots(store: Datastore) -> list[dict]:
     ]
 
 
-def write_payload(
-    store: Datastore,
-    out: str | Path = DEFAULT_OUT,
-    history_limit: int | None = DEFAULT_SERIES_LIMIT,
-) -> Path:
+def write_payload_dict(payload: dict, out: str | Path = DEFAULT_OUT) -> Path:
+    """Serialize an already-built payload.
+
+    Split out from ``write_payload`` so a caller that needs the payload for
+    something else as well — the daily run renders it into an email too — can
+    build it once and be sure both surfaces describe the same dict rather than
+    two separately computed ones.
+    """
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    payload = build_payload(store, history_limit)
     body = json.dumps(payload, indent=2)
     if out.suffix == ".js":
         out.write_text(f"window.PARALLAX_DATA = {body};\n", encoding="utf-8")
     else:
         out.write_text(body + "\n", encoding="utf-8")
     return out
+
+
+def write_payload(
+    store: Datastore,
+    out: str | Path = DEFAULT_OUT,
+    history_limit: int | None = DEFAULT_SERIES_LIMIT,
+) -> Path:
+    return write_payload_dict(build_payload(store, history_limit), out)
 
 
 def main(argv: list[str] | None = None) -> int:

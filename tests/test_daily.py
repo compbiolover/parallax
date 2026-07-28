@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import daily.runner as runner
 from daily.__main__ import _parse, build_config
-from daily.runner import STEPS, DailyConfig, format_report, run_daily
+from daily.runner import DEFAULT_STEPS, STEPS, DailyConfig, format_report, run_daily
 from ingestion.datastore import Datastore
 
 
@@ -40,9 +40,12 @@ def _run(monkeypatch, cfg, record, failing=None):
 def test_runs_all_steps_in_dependency_order(monkeypatch):
     record: list[str] = []
     report = _run(monkeypatch, DailyConfig(), record)
-    assert record == list(STEPS)
+    assert record == list(DEFAULT_STEPS)
     assert report.ok
-    assert all(s.status == "ok" for s in report.steps)
+    assert all(s.status == "ok" for s in report.steps if s.name in DEFAULT_STEPS)
+    # digest is the one step outside the defaults — it needs SMTP credentials,
+    # so it is opted into rather than failing every morning until configured.
+    assert report.get("digest").status == "skipped"
 
 
 def test_backfill_included_by_default():
@@ -72,7 +75,7 @@ def test_failed_step_does_not_abort_the_rest(monkeypatch):
     record: list[str] = []
     report = _run(monkeypatch, DailyConfig(), record, failing="backfill")
     # everything still ran...
-    assert record == list(STEPS)
+    assert record == list(DEFAULT_STEPS)
     # ...and the dashboard export in particular still happened
     assert report.get("export").status == "ok"
     assert report.get("backfill").status == "failed"
