@@ -8,6 +8,7 @@ more certain, or a framing that reads as more one-sided, than the data supports.
 from __future__ import annotations
 
 import logging
+import pathlib
 import re
 import ssl
 
@@ -16,7 +17,7 @@ import pytest
 from daily import runner
 from daily.runner import DailyConfig
 from digest.render import _delta, _label, _own_first, build_digest, render_html, render_text
-from digest.send import MailConfig, build_message, send
+from digest.send import NO_CONFIG, MailConfig, build_message, send
 
 FOUNDATIONS = ["care", "fairness", "loyalty", "authority", "sanctity"]
 
@@ -38,8 +39,10 @@ def _payload(**over) -> dict:
         "comparison": {"pair": ["self", "modeled_ce"], "jsd": 0.0841,
                        "log_ratios": {"care": .49, "loyalty": -.54}},
         "history": [
-            {"date": "2026-07-27", "jsd_window": 0.078, "window_days": 7},
-            {"date": "2026-07-28", "jsd_window": 0.0841, "window_days": 7},
+            {"date": "2026-07-27", "jsd_cumulative": 0.078, "jsd_window": 0.061,
+             "window_days": 7},
+            {"date": "2026-07-28", "jsd_cumulative": 0.0841, "jsd_window": 0.095,
+             "window_days": 7},
         ],
         "history_window_days": 7,
         "blindspots": [],
@@ -59,7 +62,7 @@ def _spot(dominant, other, label="a cluster"):
 
 
 def test_no_history_says_so_rather_than_showing_no_movement():
-    delta, reason = _delta([])
+    delta, reason, _ = _delta([])
     assert delta is None
     assert "no divergence recorded yet" in reason
 
@@ -67,24 +70,46 @@ def test_no_history_says_so_rather_than_showing_no_movement():
 def test_a_first_point_has_no_delta_rather_than_a_zero_one():
     """`+0.000` would read as 'nothing moved'. Nothing moved is a claim; having
     no previous day is the absence of one."""
-    delta, reason = _delta([{"jsd_window": 0.08}])
+    delta, reason, _ = _delta([{"jsd_cumulative": 0.08}])
     assert delta is None
     assert "first recorded point" in reason
 
 
 def test_delta_is_newest_minus_previous():
-    delta, _ = _delta([{"jsd_window": 0.070}, {"jsd_window": 0.078}])
+    delta, _, _ = _delta([{"jsd_cumulative": 0.070}, {"jsd_cumulative": 0.078}])
     assert delta == pytest.approx(0.008)
 
 
+def test_delta_reads_the_same_series_as_the_headline():
+    """The headline is comparison.jsd, computed over the whole corpus, so the
+    movement under it has to be the cumulative series. Reading jsd_window put a
+    delta from a different basis under the number — a figure that could even
+    move the opposite way, since the cumulative basis is damped by design."""
+    history = [{"date": "2026-07-27", "jsd_cumulative": 0.070, "jsd_window": 0.200},
+               {"date": "2026-07-28", "jsd_cumulative": 0.078, "jsd_window": 0.100}]
+    delta, _, since = _delta(history)
+    assert delta == pytest.approx(0.008)      # not -0.100
+    assert since == "2026-07-27"
+
+
+def test_the_delta_names_the_date_it_compares_against():
+    """Snapshots are one row per UTC date but nothing makes them consecutive —
+    a machine that was off leaves a gap. 'since yesterday' was a claim the data
+    could not support."""
+    html = render_html(_payload())
+    assert "since 2026-07-27" in html
+    assert "yesterday" not in html
+
+
 def test_points_without_a_windowed_value_are_skipped_not_counted_as_zero():
-    history = [{"jsd_window": 0.07}, {"jsd_window": None}, {"jsd_window": 0.09}]
-    delta, _ = _delta(history)
+    history = [{"jsd_cumulative": 0.07}, {"jsd_cumulative": None},
+               {"jsd_cumulative": 0.09}]
+    delta, _, _ = _delta(history)
     assert delta == pytest.approx(0.02)
 
 
 def test_a_single_usable_point_among_nulls_still_refuses_a_delta():
-    assert _delta([{"jsd_window": None}, {"jsd_window": 0.08}])[0] is None
+    assert _delta([{"jsd_cumulative": None}, {"jsd_cumulative": 0.08}])[0] is None
 
 
 # -- the subject line has to be true on its own -----------------------------
@@ -100,9 +125,10 @@ def test_subject_carries_the_headline_and_its_movement():
 
 
 def test_subject_omits_movement_when_there_is_none_to_report():
-    subject = build_digest(_payload(history=[])).subject
-    assert "0.084" in subject
-    assert "+" not in subject.split("divergence")[-1]
+    """Asserted exactly: `"+" not in ...` would still pass if a negative delta
+    leaked through."""
+    assert build_digest(_payload(history=[])).subject == (
+        "Parallax 2026-07-28 — divergence 0.084")
 
 
 def test_subject_says_so_when_there_is_nothing_to_compare():
@@ -134,10 +160,15 @@ def test_ordering_is_stable_when_no_diet_is_named_as_the_authors():
 
 
 def test_neither_diet_is_described_in_pejorative_terms():
-    """§0: binding foundations are sincere moral commitments, not deficits. The
-    rendering must not editorialise where the data doesn't."""
-    html = render_html(_payload(blindspots=[_spot("modeled_ce", "self")]), own_diet="self")
-    assert not re.search(r"\b(bias(ed)?|extreme|fringe|echo chamber|failure)\b", html, re.I)
+    """§0: binding foundations are sincere moral commitments, not deficits.
+
+    Scoped to the module's own copy rather than the rendered output: cluster
+    labels come from real headlines, so grepping the render would assert a
+    property of the news rather than of the template."""
+    import digest.render as mod
+
+    copy = "\n".join(re.findall(r'"[^"]{12,}"', pathlib.Path(mod.__file__).read_text()))
+    assert not re.search(r"\b(bias(ed)?|extreme|fringe|echo chamber)\b", copy, re.I)
 
 
 def test_the_blindspot_note_declines_to_rank_the_stories():
@@ -182,11 +213,11 @@ def test_a_fairness_split_with_no_evidence_is_not_shown_as_a_ratio():
 
 def test_the_html_loads_nothing_from_the_network():
     """A remote image is a tracking pixel to a mail client, and a blocked one is
-    a broken chart. Everything has to be markup."""
-    html = render_html(_payload(blindspots=[_spot("modeled_ce", "self")]))
-    assert "http://" not in html
-    assert "https://" not in html
-    assert "<img" not in html.lower()
+    a broken chart. Asserted on the tags that *fetch* — a bare URL inside a
+    headline is a property of the data, not a load."""
+    html = render_html(_payload(blindspots=[_spot("modeled_ce", "self")])).lower()
+    for fetching in ("<img", "<link", "<iframe", "url(", "background-image", "@import"):
+        assert fetching not in html
 
 
 def test_the_html_contains_no_script():
@@ -271,7 +302,7 @@ def test_send_without_configuration_warns_and_returns_false(monkeypatch, caplog)
     for key in ENV:
         monkeypatch.delenv(key, raising=False)
     with caplog.at_level(logging.WARNING):
-        assert send(build_digest(_payload())) is False
+        assert send(build_digest(_payload())) is not None
     assert "not configured" in caplog.text
     assert "crontab" in caplog.text          # cron doesn't inherit your shell
 
@@ -299,7 +330,7 @@ def test_send_uses_starttls_login_and_send():
     calls = []
     config = MailConfig.from_env(ENV)
     assert send(build_digest(_payload()), config,
-                smtp_factory=lambda: _SMTP(calls)) is True
+                smtp_factory=lambda: _SMTP(calls)) is None
     assert calls[0] == "starttls:SSLContext"
     assert calls[-2:] == ["login:me@example.com", "send:me@example.com"]
 
@@ -340,7 +371,7 @@ def test_plaintext_to_a_remote_host_is_refused_before_connecting(caplog):
     with caplog.at_level(logging.WARNING):
         result = send(build_digest(_payload()), config,
                       smtp_factory=lambda: opened.append(1) or _SMTP([]))
-    assert result is False
+    assert result is not None
     assert opened == []                       # never dialled
     assert "would cross the network in the clear" in caplog.text
 
@@ -352,7 +383,7 @@ def test_plaintext_to_a_local_relay_is_allowed():
     config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_STARTTLS": "0",
                                   "PARALLAX_SMTP_HOST": "localhost"})
     assert send(build_digest(_payload()), config,
-                smtp_factory=lambda: _SMTP(calls)) is True
+                smtp_factory=lambda: _SMTP(calls)) is None
     assert not any(c.startswith("starttls") for c in calls)
     assert "login:me@example.com" in calls
 
@@ -363,7 +394,7 @@ def test_implicit_tls_port_skips_the_starttls_upgrade():
     calls = []
     config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_PORT": "465"})
     assert send(build_digest(_payload()), config,
-                smtp_factory=lambda: _SMTP(calls)) is True
+                smtp_factory=lambda: _SMTP(calls)) is None
     assert not any(c.startswith("starttls") for c in calls)
 
 
@@ -373,7 +404,7 @@ def test_implicit_tls_is_not_refused_when_starttls_is_off():
     config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_PORT": "465",
                                   "PARALLAX_SMTP_STARTTLS": "0"})
     assert send(build_digest(_payload()), config,
-                smtp_factory=lambda: _SMTP(calls)) is True
+                smtp_factory=lambda: _SMTP(calls)) is None
 
 
 def test_a_certificate_failure_is_reported_as_its_own_thing(caplog):
@@ -385,7 +416,7 @@ def test_a_certificate_failure_is_reported_as_its_own_thing(caplog):
 
     with caplog.at_level(logging.WARNING):
         assert send(build_digest(_payload()), MailConfig.from_env(ENV),
-                    smtp_factory=_boom) is False
+                    smtp_factory=_boom) is not None
     assert "could not verify the TLS certificate" in caplog.text
     assert "password was NOT sent" in caplog.text
     assert "Do not work around it" in caplog.text
@@ -398,7 +429,7 @@ def test_a_send_failure_is_reported_not_raised(monkeypatch, caplog):
 
     with caplog.at_level(logging.WARNING):
         assert send(build_digest(_payload()), MailConfig.from_env(ENV),
-                    smtp_factory=_boom) is False
+                    smtp_factory=_boom) is not None
     assert "connection refused" in caplog.text
 
 
@@ -421,14 +452,287 @@ def test_own_diet_comes_from_settings():
 def test_an_unsendable_digest_fails_the_step_rather_than_passing_quietly(monkeypatch):
     """Switched on and not sending is exactly what you need to be told about —
     you stop checking the dashboard because the email is coming, and it isn't."""
-    monkeypatch.setattr("digest.send.send", lambda *a, **k: False)
+    monkeypatch.setattr("digest.send.send", lambda *a, **k: NO_CONFIG)
     monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
     with pytest.raises(RuntimeError, match="not configured"):
         runner._step_digest(object(), DailyConfig(own_diet="self"))
 
 
+def test_the_step_reports_the_actual_cause_not_a_generic_one(monkeypatch):
+    """send() fails for four different reasons and the daily report is what
+    gets read. Saying "not configured" when the connection was refused sends
+    you to edit environment variables that were already correct."""
+    monkeypatch.setattr("digest.send.send",
+                        lambda *a, **k: "digest send failed (OSError: connection refused)")
+    monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
+    with pytest.raises(RuntimeError, match="connection refused"):
+        runner._step_digest(object(), DailyConfig(own_diet="self"))
+
+
 def test_a_sent_digest_reports_the_subject(monkeypatch):
-    monkeypatch.setattr("digest.send.send", lambda *a, **k: True)
+    monkeypatch.setattr("digest.send.send", lambda *a, **k: None)
     monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
     detail = runner._step_digest(object(), DailyConfig(own_diet="self"))
     assert "0.084" in detail
+
+
+# -- panels the first round left untested -----------------------------------
+
+
+def _history(n, start=0.05, step=0.002):
+    return [{"date": f"2026-07-{d:02d}", "jsd_cumulative": start + i * step,
+             "jsd_window": start + i * step, "window_days": 7}
+            for i, d in enumerate(range(1, n + 1))]
+
+
+def test_the_sparkline_shows_only_the_most_recent_window():
+    """A year of snapshots at phone width is a grey smear. SPARK_DAYS columns
+    is what fits."""
+    from digest.render import SPARK_DAYS
+
+    html = render_html(_payload(history=_history(60)))
+    # One <td> per point, inside the fixed-height sparkline table.
+    spark = html.split("Divergence over time")[1].split("</table>")[0]
+    assert spark.count("<td") == SPARK_DAYS
+
+
+def test_the_sparkline_is_omitted_below_two_points():
+    """One column is not a trend, and a lone bar at full height reads as one."""
+    assert "Divergence over time" not in render_html(_payload(history=_history(1)))
+
+
+def test_sparkline_columns_scale_to_the_peak_and_never_vanish():
+    html = render_html(_payload(history=_history(5)))
+    heights = [int(h) for h in re.findall(r"height:(\d+)px;border-radius:2px", html)]
+    assert len(heights) == 5
+    assert max(heights) == 48                 # the tallest is the peak
+    assert min(heights) >= 2                  # and nothing renders as invisible
+    assert heights == sorted(heights)         # monotone input, monotone output
+
+
+def _ratio_row(value: float, foundation: str = "care") -> str:
+    """The one row of the diverging chart, isolated from the composition panel
+    (which also has a row per foundation)."""
+    html = render_html(_payload(comparison={
+        "pair": ["self", "modeled_ce"], "log_ratios": {foundation: value}}))
+    panel = html.split("Who leans on which foundation")[1]
+    return panel.split(f"{foundation}</td>")[1].split("</tr>")[0]
+
+
+def test_a_positive_log_ratio_lands_on_the_right():
+    """The direction the legend promises. Backwards here inverts every claim
+    about which diet leans on which foundation."""
+    row = _ratio_row(0.5)
+    # The left half is an empty fixed-width cell; the bar sits in the right one.
+    assert '<td style="width:26%;"></td>' in row
+    assert 'align="right"' not in row
+
+
+def test_a_negative_log_ratio_lands_on_the_left():
+    """Left-growing, so both halves extend away from the centre line rather
+    than from the page edges."""
+    row = _ratio_row(-0.5, "loyalty")
+    # The left cell is right-aligned and carries the bar; positive rows have
+    # neither (see the test above).
+    assert 'align="right"' in row
+    assert "border-radius" in row
+
+
+def test_the_two_sides_of_the_ratio_chart_are_coloured_by_diet():
+    from digest.render import DIET_A, DIET_B
+
+    assert DIET_A in _ratio_row(0.5)          # self over-indexes
+    assert DIET_B in _ratio_row(-0.5)         # modeled_ce does
+
+
+# -- one colour per diet, everywhere ----------------------------------------
+
+
+def test_a_diet_keeps_one_colour_across_every_panel():
+    """The bug this replaces: composition coloured by list index, blindspots by
+    the own_diet setting. Under the shipped ids (`modeled_ce` sorts before
+    `self`) the same diet came out blue in one panel and orange in another."""
+    from digest.render import _colours
+
+    payload = _payload(blindspots=[_spot("modeled_ce", "self", "theirs"),
+                                   _spot("self", "modeled_ce", "mine")])
+    colours = _colours(payload)
+    html = render_html(payload, own_diet="self")
+
+    # the composition heading and the blindspot dominated by that diet agree
+    for diet_id in ("self", "modeled_ce"):
+        heading = html.split(_label(diet_id))[1][:200]
+        assert colours[diet_id] in html.split(f"{_label(diet_id)} covered this")[0][-400:] \
+            or colours[diet_id] in heading
+
+
+def test_colours_do_not_depend_on_the_own_diet_setting():
+    """Colour means 'which diet', not 'whose blindspot'. An unset own_diet used
+    to make every blindspot the same colour."""
+    payload = _payload(blindspots=[_spot("modeled_ce", "self", "one"),
+                                   _spot("self", "modeled_ce", "two")])
+    assert render_html(payload, own_diet=None) == render_html(payload, own_diet="self")
+
+
+def test_an_unknown_own_diet_is_warned_about(caplog):
+    """A typo silently disabled the ordering and said nothing."""
+    with caplog.at_level(logging.WARNING):
+        build_digest(_payload(), own_diet="slef")
+    assert "matches no diet" in caplog.text
+    assert "modeled_ce" in caplog.text        # names the ids that do exist
+
+
+# -- confidence bands -------------------------------------------------------
+
+
+def _banded():
+    payload = _payload()
+    payload["diets"][0]["band"] = {
+        "care": {"point": 0.28, "low": 0.19, "high": 0.37,
+                 "dictionary": 0.31, "transformer": 0.25, "disagreement": 0.06}}
+    payload["caveat"] = (
+        "Read every number as a noisy estimate, never ground truth. "
+        "Whiskers on the radar show the dictionary-vs-transformer range — wider "
+        "means the two methods disagree more, so trust that foundation's number less.")
+    return payload
+
+
+def test_the_email_shows_the_ensemble_point_not_the_dictionary_share():
+    """The dashboard plots band.point wherever a band exists. Reading the raw
+    profile here put a different number on each surface for the same
+    foundation, which is exactly the drift the module docstring disclaims."""
+    html = render_html(_banded())
+    assert "0.280" in html                    # the ensemble point
+    assert "0.310" not in html                # not the dictionary-only share
+
+
+def test_the_band_range_travels_with_the_number():
+    """CLAUDE.md §5: ensemble disagreement is the confidence signal. Dropping it
+    from the email left the reader with a point estimate and no idea how much to
+    trust it."""
+    assert "0.19–0.37" in render_html(_banded())
+    assert "[0.19-0.37]" in render_text(_banded())
+
+
+def test_the_caveat_stops_pointing_at_a_radar_that_is_not_there():
+    """The dashboard's caveat ends by explaining whiskers. There is no radar in
+    an email, so it told the reader to go look at something absent."""
+    html = render_html(_banded())
+    assert "Whiskers on the radar" not in html
+    assert "range printed next to each foundation" in html
+
+
+# -- the text part is not a stub --------------------------------------------
+
+
+def test_text_and_html_carry_the_same_sections():
+    """The text part is what a screen reader gets. It was missing the sparkline,
+    the fairness split, liberty, and liberty's provenance caveat."""
+    payload = _payload(
+        history=_history(5),
+        blindspots=[_spot("modeled_ce", "self")],
+        fairness_split={"diets": {"self": {"equality": .71, "proportionality": .29,
+                                           "docs_split": 40, "docs_total": 128,
+                                           "coverage": .31, "thin": False,
+                                           "leans": "equality"}}, "gap": .3},
+        liberty={"scorer": "x", "diets": {"self": {"mean": .31, "salient_share": .18,
+                                                   "docs_scored": 88, "docs_total": 128,
+                                                   "coverage": .69, "thin": False}},
+                 "gap": .1})
+    html, text = render_html(payload), render_text(payload)
+    for section in ("Divergence over time", "equality", "proportionality",
+                    "Liberty", "least corroborated", "Summaries",
+                    "one-sided", "identical pipeline"):
+        assert section.lower() in html.lower(), f"missing from html: {section}"
+        assert section.lower() in text.lower(), f"missing from text: {section}"
+
+
+def test_the_text_log_ratios_name_which_diet_is_which():
+    """'positive = first diet leans harder' left 'first' undefined."""
+    text = render_text(_payload())
+    assert "Self over-indexes" in text
+
+
+# -- a fairness split with nothing in it ------------------------------------
+
+
+def test_a_split_with_no_documents_is_not_rendered_as_zero():
+    """FairnessProfile returns 0.0/0.0 when there is no fairness mass, so the
+    `equality is None` guard never fired and an unsplit diet printed
+    'equality 0.00 / proportionality 0.00' — unscored rendered as zero."""
+    payload = _payload(fairness_split={
+        "diets": {"self": {"equality": 0.0, "proportionality": 0.0, "docs_split": 0,
+                           "docs_total": 128, "coverage": 0.0, "thin": True,
+                           "leans": None}},
+        "gap": None})
+    html = render_html(payload).split("Reported separately")[1]
+    text = render_text(payload).split("Fairness: equality")[1]
+    for rendered in (html, text):
+        assert "not enough split-terms" in rendered
+        assert "0.00" not in rendered
+
+
+# -- port parsing -----------------------------------------------------------
+
+
+def test_an_empty_port_falls_back_instead_of_crashing():
+    """.env.example is a file of `KEY=` lines, so blanking the port is the
+    natural thing to do. int('') was an uncaught traceback out of the CLI."""
+    from digest.send import DEFAULT_PORT
+
+    assert MailConfig.from_env({**ENV, "PARALLAX_SMTP_PORT": ""}).port == DEFAULT_PORT
+
+
+def test_a_nonsense_port_falls_back_and_says_so(caplog):
+    from digest.send import DEFAULT_PORT
+
+    with caplog.at_level(logging.WARNING):
+        config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_PORT": "smtp"})
+    assert config.port == DEFAULT_PORT
+    assert "not a port number" in caplog.text
+
+
+def test_a_real_port_is_honoured():
+    assert MailConfig.from_env({**ENV, "PARALLAX_SMTP_PORT": "465"}).port == 465
+
+
+# -- the CLI ----------------------------------------------------------------
+
+
+def test_dry_run_writes_the_html_and_exits_zero(tmp_path, monkeypatch):
+    from digest.__main__ import main
+
+    monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
+    out = tmp_path / "brief.html"
+    assert main(["--db", ":memory:", "--dry-run", "--out", str(out)]) == 0
+    assert "<!DOCTYPE html>" in out.read_text()
+
+
+def test_dry_run_text_writes_the_plain_part(tmp_path, monkeypatch):
+    from digest.__main__ import main
+
+    monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
+    out = tmp_path / "brief.txt"
+    assert main(["--db", ":memory:", "--dry-run", "--text", "--out", str(out)]) == 0
+    body = out.read_text()
+    assert "PARALLAX" in body
+    assert "<html>" not in body
+
+
+def test_dry_run_only_flags_are_rejected_rather_than_ignored(monkeypatch):
+    """Silently ignoring --open reads as 'it didn't work'."""
+    from digest.__main__ import main
+
+    monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
+    with pytest.raises(SystemExit):
+        main(["--db", ":memory:", "--open"])
+
+
+def test_an_unconfigured_send_exits_nonzero_with_the_reason(tmp_path, monkeypatch, capsys):
+    from digest.__main__ import main
+
+    for key in ENV:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
+    assert main(["--db", ":memory:"]) == 1
+    assert "not configured" in capsys.readouterr().err

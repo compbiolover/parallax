@@ -1,6 +1,6 @@
 """The daily snapshot: one call that refreshes everything the dashboard reads.
 
-Six steps, in dependency order:
+Seven steps, in dependency order:
 
 1. **ingest**    — fetch every RSS source, extract, dedup, score (dictionary +
                    transformer), embed.
@@ -13,6 +13,9 @@ Six steps, in dependency order:
 5. **snapshot**  — record today's compositions and divergence so the run leaves
                    a dated point behind instead of only overwriting yesterday.
 6. **export**    — write the dashboard payload.
+7. **digest**    — render that payload into an email and send it. The only step
+                   outside the defaults: it needs SMTP credentials, so it is
+                   opted into rather than failing every morning until set up.
 
 Two properties matter for something meant to run unattended every morning:
 
@@ -83,6 +86,11 @@ class DailyConfig:
 
     # digest
     own_diet: str | None = None           # whose blindspots lead the email
+
+    # Built once per run by `_payload`, shared by export and digest so the two
+    # cannot describe different dicts. Not configuration — excluded from repr
+    # and comparison so it stays out of the report and out of test assertions.
+    _payload_cache: dict | None = field(default=None, repr=False, compare=False)
 
     def enabled(self, step: str) -> bool:
         return step in self.steps
@@ -221,10 +229,28 @@ def _step_snapshot(store, cfg: DailyConfig) -> str:
     return f"recorded {snap.snapshot_date} ({moved}), {store.snapshot_count()} in history"
 
 
-def _step_export(store, cfg: DailyConfig) -> str:
-    from dashboard.export import DEFAULT_OUT, write_payload
+def _payload(store, cfg: DailyConfig) -> dict:
+    """Today's payload, built once and shared by export and digest.
 
-    out = write_payload(store, cfg.out or DEFAULT_OUT, cfg.history_limit)
+    Both steps used to call ``build_payload`` independently, which re-ran the
+    whole aggregate layer — every diet's score scan, bands, fairness, liberty,
+    blindspots, and a JSON parse of up to a year of snapshots — a second time.
+    Worse than the cost: they were two separately computed dicts with different
+    ``generated_utc`` values, so the email could describe a payload the
+    dashboard never got, including when export had failed outright. That is
+    exactly the drift ``digest/render`` claims cannot happen.
+    """
+    from dashboard.export import build_payload
+
+    if cfg._payload_cache is None:
+        cfg._payload_cache = build_payload(store, cfg.history_limit)
+    return cfg._payload_cache
+
+
+def _step_export(store, cfg: DailyConfig) -> str:
+    from dashboard.export import DEFAULT_OUT, write_payload_dict
+
+    out = write_payload_dict(_payload(store, cfg), cfg.out or DEFAULT_OUT)
     return f"wrote {out}"
 
 
@@ -234,16 +260,17 @@ def _step_digest(store, cfg: DailyConfig) -> str:
     Runs last, after export, so the email describes the same payload the
     dashboard does rather than a state one step behind.
     """
-    from dashboard.export import build_payload
     from digest.render import build_digest
-    from digest.send import NO_CONFIG, send
+    from digest.send import send
 
-    digest = build_digest(build_payload(store, cfg.history_limit), own_diet=cfg.own_diet)
-    if send(digest):
+    digest = build_digest(_payload(store, cfg), own_diet=cfg.own_diet)
+    reason = send(digest)
+    if reason is None:
         return f"sent — {digest.subject}"
     # A step failure, not a silent skip: the digest was switched on deliberately,
-    # so not sending is the thing you need to be told about.
-    raise RuntimeError(NO_CONFIG)
+    # so not sending is the thing you need to be told about — and it says which
+    # of the four failures it was, since the report is what actually gets read.
+    raise RuntimeError(reason)
 
 
 def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,

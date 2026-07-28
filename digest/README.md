@@ -102,7 +102,22 @@ the email describes the same payload the dashboard does.
   rather than printing a ratio; liberty carries its coverage next to its mean.
 - **Uncertainty ships with the numbers.** The caveat is in the email body, not
   trimmed to save height. Liberty is labelled as the least corroborated number
-  in the brief, because it is.
+  in the brief, because it is. Where the transformer has run, each foundation
+  carries its dictionary-vs-transformer range next to the value — printed
+  rather than drawn, since whiskers need geometry email cannot do, but the
+  number is the part that matters (`CLAUDE.md` §5).
+- **The value shown is the ensemble point where one exists**, matching what the
+  dashboard plots. Reading the raw dictionary profile here put a different
+  number on each surface for the same foundation once the transformer had run.
+- **The text part is not a stub.** It carries every section the HTML does —
+  including the sparkline summary, the fairness split, and liberty's
+  provenance line. It is what a screen reader gets, so "uncertainty travels
+  with the numbers" has to hold there too. A test walks a shared list of
+  sections and asserts each appears in both.
+- **Colour means "which diet", nothing else.** One diet→colour map is built
+  once and used by every panel. Keying the composition off list index while
+  keying blindspots off the `own_diet` setting let the same diet come out blue
+  in one panel and orange in another, because `modeled_ce` sorts before `self`.
 - **The subject line has to be true alone.** It carries the divergence and its
   movement, since on a phone that line is frequently the entire reading.
 

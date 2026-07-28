@@ -51,6 +51,24 @@ CERT_FAILED = (
 )
 
 
+def _port(env) -> int:
+    """The SMTP port, falling back rather than raising.
+
+    ``.env.example`` is a file of ``KEY=`` lines, so blanking the port is the
+    natural thing to do — and every other variable treats empty as unset.
+    ``int("")`` here used to be an uncaught traceback out of the CLI and a
+    ``ValueError`` in the daily report, which is exactly what this module's
+    docstring promises not to do.
+    """
+    raw = env.get("PARALLAX_SMTP_PORT", "").strip()
+    if raw.isdigit():
+        return int(raw)
+    if raw:
+        logger.warning("PARALLAX_SMTP_PORT=%r is not a port number; using %d",
+                       raw, DEFAULT_PORT)
+    return DEFAULT_PORT
+
+
 @dataclass(frozen=True)
 class MailConfig:
     host: str
@@ -77,7 +95,7 @@ class MailConfig:
             return None
         return cls(
             host=host,
-            port=int(env.get("PARALLAX_SMTP_PORT", DEFAULT_PORT)),
+            port=_port(env),
             user=user,
             password=password,
             # Defaulting the From to the login address is what most providers
@@ -120,8 +138,14 @@ def _connect(config: MailConfig):
     return smtplib.SMTP(config.host, config.port, timeout=TIMEOUT_S)
 
 
-def send(digest: Digest, config: MailConfig | None = None, *, smtp_factory=None) -> bool:
-    """Send the digest. Returns False (with a warning) rather than raising.
+def send(digest: Digest, config: MailConfig | None = None, *, smtp_factory=None) -> str | None:
+    """Send the digest. Returns ``None`` on success, or the reason it failed.
+
+    The reason is returned rather than a bare ``False`` because the caller puts
+    it in the daily report, and there are four quite different ways this fails:
+    unconfigured, a refused cleartext send, a certificate that would not verify,
+    and everything else. Reporting "not configured" for a refused connection
+    sends you to edit environment variables that were already correct.
 
     The password crosses this connection, so the TLS has to be *authenticated*
     TLS. ``smtplib``'s ``starttls()`` defaults to ``ssl._create_stdlib_context()``
@@ -138,15 +162,16 @@ def send(digest: Digest, config: MailConfig | None = None, *, smtp_factory=None)
     config = config or MailConfig.from_env()
     if config is None:
         logger.warning("%s", NO_CONFIG)
-        return False
+        return NO_CONFIG
 
     # Refused before the connection opens, not warned about after the password
     # is already gone. Encryption off is a deliberate setting; sending a
     # credential across a network in the clear is a different thing entirely.
     if not config.starttls and config.port != IMPLICIT_TLS_PORT \
             and not _is_loopback(config.host):
-        logger.warning("%s", PLAINTEXT_REMOTE.format(host=config.host))
-        return False
+        reason = PLAINTEXT_REMOTE.format(host=config.host)
+        logger.warning("%s", reason)
+        return reason
 
     message = build_message(digest, config)
     factory = smtp_factory or (lambda: _connect(config))
@@ -159,10 +184,12 @@ def send(digest: Digest, config: MailConfig | None = None, *, smtp_factory=None)
     except ssl.SSLCertVerificationError as exc:
         # Called out separately because the generic message below reads like a
         # server problem, and this one may not be.
-        logger.warning("%s", CERT_FAILED.format(host=config.host, exc=exc))
-        return False
+        reason = CERT_FAILED.format(host=config.host, exc=exc)
+        logger.warning("%s", reason)
+        return reason
     except Exception as exc:
-        logger.warning("digest send failed (%s: %s)", type(exc).__name__, exc)
-        return False
+        reason = f"digest send failed ({type(exc).__name__}: {exc})"
+        logger.warning("%s", reason)
+        return reason
     logger.info("digest sent to %s", ", ".join(config.recipients))
-    return True
+    return None
