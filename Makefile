@@ -1,4 +1,9 @@
-.PHONY: daily daily-fast dashboard history test lint validate help
+# Every target is phony. Three of them — daily, dashboard, digest — share a name
+# with a directory in the repo, and without this Make treats that directory as
+# the already-built artifact and refuses to run the recipe ("`digest' is up to
+# date"). Add new targets here as well as below; tests/test_makefile.py checks.
+.PHONY: help daily daily-fast dashboard history validate audit-lexicon \
+        digest digest-send register-probe test lint
 .DEFAULT_GOAL := help
 
 PY ?= python3
