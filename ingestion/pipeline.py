@@ -207,6 +207,7 @@ def run(
         embedder = HashingEmbedder()
     if transformer is None:
         transformer = _build_transformer(cfg)
+    _check_lexicon_change(store, lexicon_name)
     store.set_meta("lexicon", lexicon_name)
     store.set_meta("embedder", getattr(embedder, "name", type(embedder).__name__))
     _store_transformer_meta(store, transformer)
@@ -324,6 +325,7 @@ def backfill(
     if embedder is None:
         embedder = HashingEmbedder()
     client = gdelt or GdeltClient()
+    _check_lexicon_change(store, lexicon_name)
     store.set_meta("lexicon", lexicon_name)
     store.set_meta("embedder", getattr(embedder, "name", type(embedder).__name__))
     robots = (
@@ -418,6 +420,32 @@ def _build_transformer(cfg: PipelineConfig):
             type(exc).__name__, exc,
         )
         return None
+
+
+def _check_lexicon_change(store: Datastore, lexicon_name: str) -> None:
+    """Warn when this run's lexicon differs from the one already in the store.
+
+    Dictionary scores are all written under the single scorer key ``dictionary``
+    (``DocumentScore.scorer``), and ingestion skips documents it already has, so
+    a lexicon swap does not re-score the corpus — it appends new scores from a
+    different instrument into the same column. Every aggregate then blends the
+    two, and the ``lexicon`` meta gets overwritten to the new name, so the
+    dashboard and the email stop showing the demo caveat while most of the
+    corpus is still demo-scored. Silently wrong in the direction of confidence.
+
+    Nothing here can fix that automatically: re-scoring is impossible because
+    raw text is never persisted (``CLAUDE.md`` §0). Starting a fresh datastore
+    is the only clean answer, so the warning says so.
+    """
+    previous = store.get_meta("lexicon")
+    if previous and previous != lexicon_name and store.counts()["documents"] > 0:
+        logger.warning(
+            "lexicon changed: this corpus was scored with %r and this run uses %r. "
+            "Existing documents are NOT re-scored (raw text is never persisted), so "
+            "aggregates will mix both instruments while reporting only the new name. "
+            "Start a fresh datastore for a clean comparison.",
+            previous, lexicon_name,
+        )
 
 
 def _store_transformer_meta(store: Datastore, transformer) -> None:

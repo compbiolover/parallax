@@ -76,7 +76,35 @@ Mformer does not label liberty. That makes it the least corroborated number here
   auditability goal, resolved in favour of the content-handling rule rather than reconciled.
 - **Model changes are silent breaks.** The scorer name records the model, but scores from
   different models sit in the same column. Swapping the tier mid-corpus makes earlier and
-  later documents incomparable, and nothing detects it.
+  later documents incomparable. A run now warns when the model differs from the one the
+  corpus was built with, but warning is all it can do — see the note on instrument changes
+  below.
+
+## Changing an instrument mid-corpus blends two of them
+
+This applies to every scorer, and it is a property of the design rather than a bug that
+can be patched away.
+
+Dictionary scores are all written under the single scorer key `dictionary`, with the
+lexicon name recorded separately as metadata. Ingestion skips documents it already holds,
+and **raw text is never persisted** (`CLAUDE.md` §0), so nothing can be re-scored after
+the fact. Swapping the lexicon therefore appends a second instrument's numbers into the
+same column: every aggregate blends the two, while the metadata reports only the newer
+name. The dashboard caveat would stop saying DEMO while most of the corpus was still
+demo-scored — wrong in the direction of confidence, which is the worst direction.
+
+Two guards exist, and neither is a fix:
+
+- A configured `lexicon_path` that does not resolve now **warns** instead of silently
+  falling back to the demo seed. `config/settings.example.yaml` ships pointing at
+  `data/emfd_scoring.csv`, which is gitignored, so the default configuration lands in
+  exactly that branch until you download the file.
+- A run whose lexicon differs from the one already recorded in the store **warns** and
+  says what it means.
+
+**The only clean answer is a fresh datastore.** Nothing of value is lost — the store holds
+derived metrics, not text — but the snapshot history restarts with it, so change
+instruments deliberately rather than incidentally, and preferably not mid-period.
 
 ## The equality/proportionality split is exploratory
 
