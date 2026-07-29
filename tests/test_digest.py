@@ -736,3 +736,14 @@ def test_an_unconfigured_send_exits_nonzero_with_the_reason(tmp_path, monkeypatc
     monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
     assert main(["--db", ":memory:"]) == 1
     assert "not configured" in capsys.readouterr().err
+
+
+def test_the_password_stays_out_of_the_repr():
+    """A dataclass repr is one `logger.debug(config)` away from writing a live
+    mail password into a log file — and for a Gmail app password that is full
+    mailbox access, not send-only."""
+    config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_PASSWORD": "s3cret-app-pw"})
+    for rendered in (repr(config), str(config), f"{config}"):
+        assert "s3cret-app-pw" not in rendered
+    assert config.password == "s3cret-app-pw"      # still usable for login
+    assert "smtp.example.com" in repr(config)      # the rest still debuggable
