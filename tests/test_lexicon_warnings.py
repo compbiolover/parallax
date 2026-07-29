@@ -54,7 +54,7 @@ def test_a_present_lexicon_loads_without_complaint(tmp_path, caplog):
 # -- swapping the lexicon under an existing corpus --------------------------
 
 
-def _store_with(monkeypatch, docs: int, lexicon: str | None) -> Datastore:
+def _store_with(docs: int, lexicon: str | None) -> Datastore:
     store = Datastore(":memory:")
     if lexicon:
         store.set_meta("lexicon", lexicon)
@@ -67,12 +67,12 @@ def _store_with(monkeypatch, docs: int, lexicon: str | None) -> Datastore:
     return store
 
 
-def test_changing_lexicon_on_a_populated_store_warns(monkeypatch, caplog):
+def test_changing_lexicon_on_a_populated_store_warns(caplog):
     """Dictionary scores all land under the single scorer key 'dictionary', and
     ingestion skips documents it already has — so a swap appends a second
     instrument's numbers into the same column and every aggregate blends them,
     while the meta label reports only the new name."""
-    store = _store_with(monkeypatch, 5, SEED_NAME)
+    store = _store_with(5, SEED_NAME)
     try:
         with caplog.at_level(logging.WARNING):
             _check_lexicon_change(store, "eMFD (emfd_scoring.csv)")
@@ -89,7 +89,7 @@ def test_changing_lexicon_on_a_populated_store_warns(monkeypatch, caplog):
 def test_an_empty_store_does_not_warn(caplog):
     """Nothing to blend yet — the first run after configuring a lexicon is the
     normal case, not a mistake."""
-    store = _store_with(None, 0, SEED_NAME)
+    store = _store_with(0, SEED_NAME)
     try:
         with caplog.at_level(logging.WARNING):
             _check_lexicon_change(store, "eMFD (emfd_scoring.csv)")
@@ -99,7 +99,7 @@ def test_an_empty_store_does_not_warn(caplog):
 
 
 def test_the_same_lexicon_does_not_warn(caplog):
-    store = _store_with(None, 5, "eMFD (emfd_scoring.csv)")
+    store = _store_with(5, "eMFD (emfd_scoring.csv)")
     try:
         with caplog.at_level(logging.WARNING):
             _check_lexicon_change(store, "eMFD (emfd_scoring.csv)")
@@ -111,7 +111,7 @@ def test_the_same_lexicon_does_not_warn(caplog):
 def test_a_store_with_no_recorded_lexicon_does_not_warn(caplog):
     """Pre-dates the meta key; there is nothing to compare against, and guessing
     would produce a warning on every run of an older datastore."""
-    store = _store_with(None, 5, None)
+    store = _store_with(5, None)
     try:
         with caplog.at_level(logging.WARNING):
             _check_lexicon_change(store, "eMFD (emfd_scoring.csv)")
@@ -129,7 +129,7 @@ def test_a_real_run_warns_and_records_the_new_name(monkeypatch, tmp_path, caplog
     """End to end through `run`, because the ordering is the whole trick:
     `set_meta` clobbers the previous name, so a check placed after it would
     compare a value against itself and could never fire."""
-    store = _store_with(None, 3, SEED_NAME)
+    store = _store_with(3, SEED_NAME)
     monkeypatch.setattr(pipeline, "parse_feed", lambda *a, **k: [])
     csv = tmp_path / "emfd_scoring.csv"
     csv.write_text("word,care_p,care_sent\nharm,0.8,-1\n", encoding="utf-8")
@@ -146,7 +146,7 @@ def test_a_real_run_warns_and_records_the_new_name(monkeypatch, tmp_path, caplog
 
 
 def test_a_real_run_with_an_unchanged_lexicon_stays_quiet(monkeypatch, caplog):
-    store = _store_with(None, 3, SEED_NAME)
+    store = _store_with(3, SEED_NAME)
     monkeypatch.setattr(pipeline, "parse_feed", lambda *a, **k: [])
     cfg = pipeline.PipelineConfig(lexicon_path=None, transformer_enabled=False,
                                   liberty_enabled=False)

@@ -485,7 +485,8 @@ data. It is a placeholder, not a validated instrument. For real results, supply 
 ```bash
 # 1. Drop the eMFD CSV in data/ (gitignored), from the eMFDscore repo:
 #    dictionaries/emfd_scoring.csv (columns: word, <foundation>_p, <foundation>_sent).
-# 2. Either set scoring.dictionary.lexicon_path in config/settings.yaml, or:
+# 2. Either set scoring.taggers.dictionary.lexicon_path in config/settings.yaml
+#    (note `taggers` — that is the key PipelineConfig.from_settings reads), or:
 python3 -m ingestion run --lexicon data/emfd_scoring.csv
 ```
 
