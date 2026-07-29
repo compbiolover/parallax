@@ -13,7 +13,7 @@ import logging
 import os
 import smtplib
 import ssl
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from email.message import EmailMessage
 
 from .render import Digest
@@ -74,7 +74,11 @@ class MailConfig:
     host: str
     port: int
     user: str
-    password: str
+    # Kept out of the auto-generated repr. Nothing logs this object today, but a
+    # dataclass repr is one `logger.debug(config)` away from putting a live mail
+    # password in a log file — and for a Gmail app password that is full mailbox
+    # access. Cheap to prevent, tedious to clean up after.
+    password: str = field(repr=False)
     sender: str
     recipients: tuple[str, ...]
     starttls: bool = True
