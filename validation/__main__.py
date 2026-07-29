@@ -2,7 +2,7 @@
 
     python -m validation                          # dictionary (built-in seed lexicon)
     python -m validation --lexicon data/emfd_scoring.csv
-    python -m validation --scorer transformer     # needs parallax[scoring]
+    python -m validation --scorer transformer     # needs pip install -e ".[scoring]"
     python -m validation --scorer liberty         # Claude; needs ANTHROPIC_API_KEY
     python -m validation --gold validation/gold/seed.json
 

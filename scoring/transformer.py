@@ -6,7 +6,7 @@ of five fine-tuned RoBERTa binary classifiers — one per classic foundation —
 that do meaningfully better in-domain. This wraps them behind the same
 ``text -> {foundation: score}`` interface the dictionary and evaluation use.
 
-Heavy: requires ``transformers`` + ``torch`` (``pip install parallax[scoring]``)
+Heavy: requires ``transformers`` + ``torch`` (``pip install -e ".[scoring]"``)
 and downloads ~5 RoBERTa models on first use, so it is imported lazily and only
 constructed when actually selected. ``predict_fn`` lets tests inject a stub so
 the aggregation is testable without the models.

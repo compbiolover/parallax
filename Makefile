@@ -1,12 +1,12 @@
 .PHONY: daily daily-fast dashboard history test lint validate help
 .DEFAULT_GOAL := help
 
-PY ?= python
+PY ?= python3
 
 help:  ## Show these targets
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-12s %s\n", $$1, $$2}'
 
-daily:  ## Full snapshot: ingest + backfill + cluster + summarize + snapshot + export
+daily:  ## Full snapshot: ingest -> backfill -> cluster -> summarize -> snapshot -> export (+ digest if enabled)
 	$(PY) -m daily
 
 daily-fast:  ## Today's feeds only — skips the slow GDELT backfill

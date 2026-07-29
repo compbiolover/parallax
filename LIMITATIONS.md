@@ -45,7 +45,7 @@ Mformer does not label liberty. That makes it the least corroborated number here
   liberty, precisely because a one-sided rubric would produce a clean, wrong finding: one
   diet engaged with liberty, the other silent. That symmetry is asserted by a test, but a
   test only checks that the words are present in the prompt — not that the model obeys
-  them. `python -m validation.register_probe` measures the obedience: ten templates, each
+  them. `python3 -m validation.register_probe` measures the obedience: ten templates, each
   rendered once with a state actor and once with a private one and otherwise identical
   word for word, scored several times per condition. It reports register-classification
   accuracy, the mean presence gap between the two registers, and the pooled within-cell
@@ -54,7 +54,7 @@ Mformer does not label liberty. That makes it the least corroborated number here
   support a significance test, and a gap smaller than the noise floor is absence of
   evidence rather than evidence of evenhandedness.
 - **Not validated at all yet.** No public corpus labels liberty, so the gold set does not
-  either. `python -m validation --scorer liberty` refuses to run until liberty labels are
+  either. `python3 -m validation --scorer liberty` refuses to run until liberty labels are
   hand-coded, rather than reporting an AUC against all-zero labels. Until that coding
   happens, every liberty number on the dashboard is unvalidated in the strict sense — not
   "weakly validated", but never checked against a human coder.
@@ -121,7 +121,7 @@ reports that division, with heavier caveats than anything else on the dashboard.
   `scoring/fairness_split.py`'s hand-built terms intersect the lexicon: 10 equality and 16
   proportionality terms for the eMFD. It measures that intersection, not "the eMFD's
   fairness vocabulary" in any absolute sense. Re-run it whenever the term lists change:
-  `python -m validation.lexicon_audit --lexicon data/emfd_scoring.csv`.
+  `python3 -m validation.lexicon_audit --lexicon data/emfd_scoring.csv`.
 - **Unsplit is recorded as unsplit.** Documents without enough evidence get NULL, never an
   even split, and coverage is reported next to every share. A 70/30 split over 4% of
   documents is not a finding.
@@ -161,7 +161,7 @@ they are the same noisy estimates, dated. Read movement, not decimals.
   scored on the day it was written. Swapping the lexicon or the transformer makes older
   rows incomparable with newer ones, and nothing currently detects that. After changing a
   scorer, treat the series as starting over — or rebuild it with
-  `python -m compare.history --backfill N --overwrite`.
+  `python3 -m compare.history --backfill N --overwrite`.
 - **The corpus is not a stable panel.** Sources are added and feeds break. A move in
   either series can reflect a change in what was collected rather than a change in how
   either diet framed anything. The source registry is versioned so this is at least
@@ -194,7 +194,7 @@ they are the same noisy estimates, dated. Read movement, not decimals.
   confidence interval, and the two compositions are on the same simplex but built
   differently (dictionary argmax rates vs transformer presence probabilities), so read the
   band as "how much the methods argue here," not as error bars. Transformer scoring needs
-  `parallax[scoring]`; without it, ingestion degrades to dictionary-only and no band shows.
+  `pip install -e ".[scoring]"`; without it, ingestion degrades to dictionary-only and no band shows.
 - **The validation gold set is a starter.** `validation/gold/seed.json` is 42 hand-coded
   items by a single coder — enough to run the harness and fire the §5 trigger, but far
   short of the 200–400 multi-coder items §5 targets. Agreement numbers below are indicative
@@ -206,7 +206,7 @@ they are the same noisy estimates, dated. Read movement, not decimals.
   every binding foundation at ≥ 0.94 (macro-AUC 0.71 → 0.95). This is exactly the §5
   prediction, now empirical: dictionary numbers on the binding foundations should be
   treated with particular caution, and the transformer tagger (`--scorer transformer`,
-  `pip install parallax[scoring]`) is the more trustworthy source there.
+  `pip install -e ".[scoring]"`) is the more trustworthy source there.
 - **The eMFD is supported, and reveals its own low discriminative power.** Point the
   scorer at the real eMFD via `scoring.dictionary.lexicon_path`. Note two things the eMFD
   forces:
@@ -276,7 +276,7 @@ they are the same noisy estimates, dated. Read movement, not decimals.
   has many stories covered by multiple outlets in one diet and none in the other, so
   blindspot lists can be short and some entries rest on 2 stories. Treat them as candidates,
   not verdicts; they strengthen as coverage accumulates over time and across more sources.
-  The **GDELT backfill** (`python -m ingestion backfill`, and included in `make daily`)
+  The **GDELT backfill** (`python3 -m ingestion backfill`, and included in `make daily`)
   is the fix — it pulls weeks of per-outlet history so clusters rest on real volume.
   Caveats specific to GDELT:
   - **Titles only.** GDELT returns article metadata, not bodies, so backfilled documents are

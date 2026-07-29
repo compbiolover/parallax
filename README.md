@@ -109,7 +109,7 @@ that check is now a command rather than a memory:
 
 ```bash
 make audit-lexicon                                            # the built-in seed
-python -m validation.lexicon_audit --lexicon data/emfd_scoring.csv
+python3 -m validation.lexicon_audit --lexicon data/emfd_scoring.csv
 ```
 
 It reports whether either half of fairness is missing outright, which is the seed's
@@ -165,8 +165,8 @@ than failing. At roughly 200 documents a day the batched cost is about $17/month
 Sonnet 5, $8 on Haiku 4.5, $42 on Opus 5 — but don't take the tier on faith:
 
 ```bash
-python -m validation --scorer liberty --model claude-haiku-4-5 --limit 40
-python -m validation --scorer liberty --model claude-sonnet-5  --limit 40
+python3 -m validation --scorer liberty --model claude-haiku-4-5 --limit 40
+python3 -m validation --scorer liberty --model claude-sonnet-5  --limit 40
 ```
 
 That reports AUC/F1/kappa against hand-coded liberty labels, the same as every other
@@ -197,12 +197,18 @@ roadmap.
 ### The daily snapshot (one command)
 
 ```bash
-make daily          # or: python -m daily
+make daily          # or: python3 -m daily
 ```
 
-That runs the whole chain, ingest through GDELT backfill, cluster, summarize, snapshot,
-and export, and leaves a refreshed dashboard. Then `make dashboard` and open
+That runs the whole chain — **ingest → backfill → cluster → summarize → snapshot →
+export** — and leaves a refreshed dashboard. Then `make dashboard` and open
 <http://localhost:8000>.
+
+There is a seventh step, `digest`, which mails you the result. It is **off until you
+configure it**, so the command above deliberately sends nothing; see
+[the daily brief, by email](#the-daily-brief-by-email) for the four steps to turn it
+on. Once enabled, `make daily` is the single command that builds the snapshot *and*
+sends it.
 
 Steps are isolated. If one fails (GDELT throttling, no API key), the rest still run so the
 dashboard reflects whatever data landed, the report names what broke, and the exit code is
@@ -210,9 +216,9 @@ non-zero so cron notices. The transformer is loaded once and shared across steps
 
 ```bash
 make daily-fast                      # today's feeds only; skips the slow backfill
-python -m daily --skip backfill
-python -m daily --only cluster export
-python -m daily --backfill-days 3 --max-per-source 100   # cheaper daily window
+python3 -m daily --skip backfill
+python3 -m daily --only cluster export
+python3 -m daily --backfill-days 3 --max-per-source 100   # cheaper daily window
 ```
 
 The backfill is included by default because blindspots are only trustworthy with real
@@ -255,11 +261,64 @@ turns the narration off for cron, leaving just the final report.
 
 A dashboard you have to remember to open is one you check twice and then forget.
 `digest/` renders the same content into a self-contained email so the brief arrives
-on its own:
+on its own.
+
+**`make daily` does not send email until you set it up.** The `digest` step is the
+only one of the seven that is off by default — every other step works without
+credentials, and a step that fails every morning until configured trains you to
+ignore the report that exists to tell you when something actually broke. So a fresh
+`make daily` refreshes the dashboard and stops there. Four steps to change that:
+
+**1. See what the email looks like, before configuring anything.**
 
 ```bash
-make digest                 # preview it in a browser — no SMTP settings needed
-make digest-send            # render and mail it
+make digest          # renders to data/digest-preview.html and opens it
+```
+
+No SMTP settings, no API calls, no network. If this looks wrong, fix it here rather
+than by sending yourself test mail.
+
+**2. Put the four SMTP variables in your shell profile.** All four are required; a
+partially configured mailer declines to send and names the missing one, rather than
+half-working at 6am on a machine nobody is watching.
+
+```bash
+# in ~/.zshrc or ~/.bashrc — editing the file beats typing `export`, which would
+# leave the password in your shell history
+export PARALLAX_SMTP_HOST=smtp.gmail.com
+export PARALLAX_SMTP_USER=you@gmail.com
+export PARALLAX_SMTP_PASSWORD=abcd-efgh-ijkl-mnop   # Gmail: an app password
+export PARALLAX_DIGEST_TO=you@gmail.com
+```
+
+For Gmail, that password must be an [app password](https://myaccount.google.com/apppasswords)
+— with 2FA on, Google rejects your account password outright. Most providers also
+silently drop mail whose `From` doesn't match the authenticated user, which is why
+`PARALLAX_DIGEST_FROM` defaults to `PARALLAX_SMTP_USER`.
+
+**3. Send one now, to prove the credentials work.**
+
+```bash
+make digest-send
+```
+
+Success is silent apart from an exit code of 0 and mail in your inbox. Failure prints
+the actual reason — unconfigured, refused connection, rejected login, or a
+certificate that would not verify.
+
+**4. Turn it on in the daily run**, in `config/settings.yaml`:
+
+```yaml
+digest:
+  enabled: true
+  own_diet: self      # your diet's id from sources.yaml — puts your blindspots first
+```
+
+From then on `make daily` ends by mailing you the brief it just built. To send one
+without re-running the whole pipeline:
+
+```bash
+python3 -m daily --only digest
 ```
 
 The obvious alternative was to host the static page and send yourself a link. That
@@ -269,22 +328,15 @@ is published anywhere. The cost is real: no hover, no drill-down, no interactivi
 The radar becomes two aligned bar lists and the JSD series becomes a column chart of
 coloured divs, because mail clients strip JavaScript and block remote images.
 
-Sending needs four environment variables (`.env.example` has them). It is
-all-or-nothing: a partially configured mailer declines to send and names the missing
-variable, rather than half-working at 6am on a machine nobody is watching. TLS
-certificates are verified (`smtplib`'s own default is not to verify them, which would
-hand your mail password to anyone on the path), and a verification failure refuses the
-send rather than proceeding — `digest/README.md` has the detail.
-
-Turn it on in the daily run with `digest.enabled: true`. It is the only one of the
-seven steps that is **off by default** — every other step works without credentials,
-and a step that fails every morning until configured trains you to ignore the report
-that exists to tell you when something actually broke.
+TLS certificates are verified — `smtplib`'s own default is *not* to verify them,
+which would hand your mail password to anyone on the network path — and a
+verification failure refuses the send rather than proceeding. `digest/README.md` has
+the detail, including why `PARALLAX_SMTP_STARTTLS=0` is refused for a remote host.
 
 Run it every morning with cron:
 
 ```cron
-0 6 * * *  cd /path/to/parallax && /path/to/.venv/bin/python -m daily >> data/daily.log 2>&1
+0 6 * * *  cd /path/to/parallax && /path/to/.venv/bin/python3 -m daily >> data/daily.log 2>&1
 ```
 
 ### Divergence over time
@@ -304,10 +356,10 @@ Every snapshot is computed on two bases, because they answer different questions
 Neither is the truer number, and the dashboard labels both rather than picking one.
 
 ```bash
-python -m compare.history                      # print the recorded series
-python -m compare.history --backfill 30        # reconstruct 30 past days
-python -m daily --window-days 14               # widen the trailing window
-python -m dashboard.export --history-limit 90  # ship 90 days to the dashboard
+python3 -m compare.history                      # print the recorded series
+python3 -m compare.history --backfill 30        # reconstruct 30 past days
+python3 -m daily --window-days 14               # widen the trailing window
+python3 -m dashboard.export --history-limit 90  # ship 90 days to the dashboard
 ```
 
 `--backfill` reconstructs past days from publication dates already in the store, so the
@@ -325,42 +377,42 @@ and reconstruction will not overwrite a live row unless you pass `--overwrite`.
 #    store derived metrics to SQLite (raw text is never persisted). Every article
 #    is scored by BOTH the dictionary and the transformer (Mformer) so the
 #    dashboard can show a dictionary-vs-transformer confidence band; add
-#    --no-transformer for the fast dictionary-only path (parallax[scoring] needed
+#    --no-transformer for the fast dictionary-only path (pip install -e ".[scoring]" needed
 #    for the transformer, else it degrades to dictionary-only automatically):
-python -m ingestion run --max-items 25
+python3 -m ingestion run --max-items 25
 #    Prints a line per source as it goes; -v explains individual fetch failures,
 #    -q suppresses the narration.
 
 # 1b. Backfill weeks of history per outlet from GDELT (title-based, so it's fast
 #     and needs no API key). This is the volume that makes blindspots reliable:
-python -m ingestion backfill --days 14 --max-per-source 250
+python3 -m ingestion backfill --days 14 --max-per-source 250
 #     (add --extract to also fetch article bodies for full scoring; slower)
 
 # 2. Print each diet's foundation composition, the Jensen-Shannon divergence,
 #    and the per-foundation log-ratios:
-python -m ingestion compare
+python3 -m ingestion compare
 
 # 3. Cluster stories from the stored embeddings and detect blindspots: the
 #    clusters one diet covers heavily and the other barely touches, both
 #    directions (scikit-learn is a core dependency):
-python -m cluster run
+python3 -m cluster run
 
 # 4. Generate a charitable daily summary per diet + a cross-diet executive
 #    summary (uses Claude when ANTHROPIC_API_KEY is set, else a deterministic,
 #    clearly-labeled numbers-only fallback):
-python -m summarize
+python3 -m summarize
 
 # 5. Export the dashboard data payload:
-python -m dashboard.export
+python3 -m dashboard.export
 
 # 6. View the dashboard (radar, JSD, log-ratio bars, summaries, blindspot lists):
-cd dashboard && python -m http.server   # then open http://localhost:8000
+cd dashboard && python3 -m http.server   # then open http://localhost:8000
 
 # Validate a scorer against the hand-coded gold set: per-foundation AUC/F1/kappa
 # and the §5 trigger (binding foundations below 0.7 AUC warrant the transformer):
-python -m validation --lexicon data/emfd_scoring.csv
-python -m validation --scorer transformer   # Mformer; needs parallax[scoring]
-python -m validation --scorer ensemble      # dictionary + transformer, with a
+python3 -m validation --lexicon data/emfd_scoring.csv
+python3 -m validation --scorer transformer   # Mformer; needs the scoring extra
+python3 -m validation --scorer ensemble      # dictionary + transformer, with a
                                             # disagreement-based confidence report
 ```
 
@@ -377,7 +429,7 @@ data. It is a placeholder, not a validated instrument. For real results, supply 
 # 1. Drop the eMFD CSV in data/ (gitignored), from the eMFDscore repo:
 #    dictionaries/emfd_scoring.csv (columns: word, <foundation>_p, <foundation>_sent).
 # 2. Either set scoring.dictionary.lexicon_path in config/settings.yaml, or:
-python -m ingestion run --lexicon data/emfd_scoring.csv
+python3 -m ingestion run --lexicon data/emfd_scoring.csv
 ```
 
 The active lexicon is recorded with the scores, so the dashboard caveat and summaries
@@ -393,10 +445,9 @@ classic foundations only; liberty/oppression arrives with the Claude tagger in P
 # 1. Create and activate a virtual environment
 python3 -m venv .venv && source .venv/bin/activate
 
-# 2. Install the package. `llm` brings in the anthropic SDK, which the liberty
-#    tagger and the Claude summaries both need — without it they degrade to
-#    "not scored" and "numbers-only" respectively.
-pip install -e ".[dev,llm]"
+# 2. Install the package, with the extras you actually want (see the table below).
+#    This is the full set; it pulls in torch, so it is a few hundred MB.
+pip install -e ".[dev,llm,scoring]"
 
 # 3. Install the pre-commit hooks (secret scanning)
 pre-commit install
@@ -404,6 +455,20 @@ pre-commit install
 # 4. Copy the example configuration and fill in your own diet
 cp config/settings.example.yaml config/settings.yaml
 ```
+
+Every extra is optional, and the pipeline degrades with a logged reason rather than
+failing when one is missing — but each omission costs you something specific:
+
+| extra | brings in | without it |
+| --- | --- | --- |
+| *(none)* | dictionary scoring, dedup, clustering, JSD | the pipeline runs and the dashboard renders |
+| `scoring` | `torch`, `transformers` (Mformer) | **`transformer tagger unavailable (No module named 'torch')`** — dictionary-only scoring, and no confidence bands anywhere, which are the §5 payoff |
+| `llm` | the `anthropic` SDK | summaries fall back to a deterministic numbers-only template; liberty is never scored |
+| `embeddings` | `sentence-transformers` | clustering uses the built-in hashing embedder — workable, but blindspots are sharper with neural embeddings |
+| `dev` | pytest, ruff, pre-commit | you cannot run the test suite or the hooks |
+
+If you have already installed and want to add one, re-run the install with the extra
+added — `pip install -e ".[dev,llm,scoring]"` is idempotent.
 
 ### The API key
 
@@ -422,7 +487,7 @@ Then check the whole path — key, SDK, rubric, structured output, parser — wi
 call costing a fraction of a cent:
 
 ```bash
-python -m scoring.liberty
+python3 -m scoring.liberty
 ```
 
 It prints a scored probe if everything is wired up, and names the missing piece if not.

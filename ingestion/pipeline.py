@@ -409,9 +409,12 @@ def _build_transformer(cfg: PipelineConfig):
             revision=cfg.transformer_revision,
         )
     except Exception as exc:  # missing torch/transformers, offline, etc.
+        # The command is spelled out rather than named: `parallax[scoring]` is not
+        # something you can paste into a shell from a local checkout, and this
+        # warning is the only place most people will meet the extras at all.
         logger.warning(
             "transformer tagger unavailable (%s: %s) — scoring dictionary-only, "
-            "no confidence band. Install parallax[scoring] to enable it.",
+            'no confidence bands. Enable it with: pip install -e ".[scoring]"',
             type(exc).__name__, exc,
         )
         return None

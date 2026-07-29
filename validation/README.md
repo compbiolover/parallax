@@ -6,9 +6,9 @@ The gold set and agreement metrics that keep every foundation number honest
 ## Run it
 
 ```bash
-python -m validation                                  # dictionary, built-in seed lexicon
-python -m validation --lexicon data/emfd_scoring.csv  # dictionary, real eMFD
-python -m validation --scorer transformer             # Mformer (needs parallax[scoring])
+python3 -m validation                                  # dictionary, built-in seed lexicon
+python3 -m validation --lexicon data/emfd_scoring.csv  # dictionary, real eMFD
+python3 -m validation --scorer transformer             # Mformer (needs `pip install -e ".[scoring]"`)
 ```
 
 Reports per-foundation **AUC / F1 / Cohen's kappa** against the hand-coded gold
@@ -62,7 +62,7 @@ disagree, don't. Note the ensemble's *point-estimate* AUC (macro 0.86) is below
 the transformer alone (0.95) — the ensemble's job is the confidence flag, not a
 better score.
 
-## The liberty register probe (`python -m validation.register_probe`)
+## The liberty register probe (`python3 -m validation.register_probe`)
 
 The gold set cannot validate liberty yet — no public corpus labels it. But one
 specific liberty failure can be tested without any hand-coding, and it is the
@@ -74,7 +74,7 @@ wrong finding about media rather than a property of the prompt.
 ```bash
 make register-probe               # 10 pairs x 2 registers x 3 repeats = 60 calls
 make register-probe REPEATS=5
-python -m validation.register_probe --model claude-haiku-4-5 --yes
+python3 -m validation.register_probe --model claude-haiku-4-5 --yes
 ```
 
 Ten templates across compulsion, surveillance, speech, medical disclosure,

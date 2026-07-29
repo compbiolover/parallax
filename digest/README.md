@@ -21,8 +21,8 @@ account, and no link to anything.
 
 ```bash
 make digest                     # render to data/digest-preview.html and open it
-python -m digest --dry-run --text   # the plain-text part instead
-python -m digest --dry-run --out /tmp/brief.html
+python3 -m digest --dry-run --text   # the plain-text part instead
+python3 -m digest --dry-run --out /tmp/brief.html
 ```
 
 `--dry-run` needs no SMTP settings and costs nothing, which is the right way to
@@ -37,7 +37,7 @@ export PARALLAX_SMTP_HOST=smtp.gmail.com
 export PARALLAX_SMTP_USER=you@gmail.com
 export PARALLAX_SMTP_PASSWORD=...      # Gmail: an app password, not your login
 export PARALLAX_DIGEST_TO=you@gmail.com
-python -m digest                       # or: make digest-send
+python3 -m digest                       # or: make digest-send
 ```
 
 All-or-nothing on purpose. A half-configured mailer is precisely the thing that
@@ -88,7 +88,7 @@ morning until configured teaches you to ignore the report that exists to tell
 you when something actually broke. Once enabled it runs last, after `export`, so
 the email describes the same payload the dashboard does.
 
-`python -m daily --only digest` sends one on demand without re-running anything.
+`python3 -m daily --only digest` sends one on demand without re-running anything.
 
 ## What the rendering commits to
 

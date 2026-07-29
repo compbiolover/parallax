@@ -99,7 +99,7 @@ scoring:
       #
       # Cost sketch at ~200 documents/day: roughly $17/month on Sonnet 5 with
       # batching, ~$8 on Haiku 4.5, ~$42 on Opus 5. Compare tiers empirically
-      # before committing: `python -m validation --scorer liberty --model X --limit 40`.
+      # before committing: `python3 -m validation --scorer liberty --model X --limit 40`.
       enabled: true
       model: claude-sonnet-5
       effort: low                 # low | medium | high | xhigh | max
@@ -153,7 +153,7 @@ output:
   dashboard_data_dir: dashboard/public/data   # generated JSON for the static site
   show_confidence_bands: true
 
-# --- Daily snapshot (`make daily` / `python -m daily`) ----------------------
+# --- Daily snapshot (`make daily` / `python3 -m daily`) ----------------------
 # One command runs: ingest -> backfill -> cluster -> summarize -> export.
 # Steps are isolated: if one fails the rest still run, so the dashboard is
 # refreshed from whatever data landed, and the CLI exits non-zero for cron.
@@ -178,7 +178,7 @@ daily:
     window_days: 7
     history_limit: 365
 
-# --- Daily email brief (`python -m digest`) ---------------------------------
+# --- Daily email brief (`python3 -m digest`) ---------------------------------
 # The dashboard rendered into a self-contained email, so the brief arrives on
 # its own and nothing about your media diet is published to a public URL.
 #
@@ -186,7 +186,7 @@ daily:
 # that fails every morning until configured teaches you to ignore the report
 # that is supposed to tell you when something actually broke.
 #
-# Preview it without any of that:  python -m digest --dry-run --open
+# Preview it without any of that:  python3 -m digest --dry-run --open
 digest:
   enabled: false
   # Which diet is yours. Your own blindspots lead the email — equal styling is
