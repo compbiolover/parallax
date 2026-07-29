@@ -15,7 +15,7 @@ private family communications are ever ingested.
 
 Four commitments shape every part of it:
 
-| | |
+| Commitment | What it requires |
 | --- | --- |
 | **Charitable understanding** | Summaries steelman each side. The binding foundations (loyalty, authority, sanctity) are sincere moral commitments in MFT's framework, not deficits. Parallax does not mock, pathologize, or "dunk on" either diet. |
 | **Symmetry** | The identical pipeline runs on both diets. The author's own blindspots and foundation skew are surfaced with equal prominence. |
