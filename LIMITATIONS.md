@@ -74,9 +74,43 @@ Mformer does not label liberty. That makes it the least corroborated number here
   text, which §0 forbids. Quotes and rationales are visible during validation, where the
   gold texts are on disk anyway. This is a real tension with `CLAUDE.md` §3(a)'s
   auditability goal, resolved in favour of the content-handling rule rather than reconciled.
-- **Model changes are silent breaks.** The scorer name records the model, but scores from
-  different models sit in the same column. Swapping the tier mid-corpus makes earlier and
-  later documents incomparable, and nothing detects it.
+- **Model changes are silent breaks, and nothing detects them.** The scorer name records
+  the model, but scores from different models sit in the same column, so swapping the tier
+  mid-corpus makes earlier and later documents incomparable. The dictionary has a warning
+  for the equivalent hazard (see the next section); **liberty does not** — `liberty_scorer`
+  is recorded in the store and read back for display, but never compared against the model
+  a new run is about to use. Changing `scoring.taggers.liberty.model` on an existing corpus
+  is currently undetectable from the inside.
+
+## Changing an instrument mid-corpus blends two of them
+
+This applies to every scorer, and it is a property of the design rather than a bug that
+can be patched away.
+
+Dictionary scores are all written under the single scorer key `dictionary`, with the
+lexicon name recorded separately as metadata. Ingestion skips documents it already holds,
+and **raw text is never persisted** (`CLAUDE.md` §0), so nothing can be re-scored after
+the fact. Swapping the lexicon therefore appends a second instrument's numbers into the
+same column: every aggregate blends the two, while the metadata reports only the newer
+name. The dashboard caveat would stop saying DEMO while most of the corpus was still
+demo-scored — wrong in the direction of confidence, which is the worst direction.
+
+Two guards exist. Both cover the **dictionary lexicon only**, and neither is a fix:
+
+- A configured `lexicon_path` that does not resolve now **warns** instead of silently
+  falling back to the demo seed. `config/settings.example.yaml` ships pointing at
+  `data/emfd_scoring.csv`, which is gitignored, so the default configuration lands in
+  exactly that branch until you download the file.
+- A run whose lexicon differs from the one already recorded in the store **warns** and
+  says what it means.
+
+The same hazard applies to the transformer model and the Claude liberty model, and
+**neither is checked**. Both record their scorer name in the store, so the comparison is
+available and simply not implemented. Until it is, changing either mid-corpus is silent.
+
+**The only clean answer is a fresh datastore.** Nothing of value is lost — the store holds
+derived metrics, not text — but the snapshot history restarts with it, so change
+instruments deliberately rather than incidentally, and preferably not mid-period.
 
 ## The equality/proportionality split is exploratory
 

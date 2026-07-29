@@ -17,6 +17,7 @@ rows match exactly unless they carry a trailing ``*``.
 from __future__ import annotations
 
 import csv
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,6 +76,8 @@ class Lexicon:
         yield from self._prefixes
 
 
+logger = logging.getLogger(__name__)
+
 SEED_NAME = "built-in demo seed"
 
 
@@ -85,11 +88,25 @@ def build_lexicon(path: str | Path | None = None) -> tuple[Lexicon, str]:
     otherwise returns the built-in demo seed. The name is recorded in the
     datastore so summaries and the dashboard can state which lexicon produced
     the scores (and soften the demo caveat once the real eMFD is in use).
+
+    A configured path that does not resolve is **warned about**, not silently
+    ignored. ``config/settings.example.yaml`` ships pointing at
+    ``data/emfd_scoring.csv``, which is gitignored and absent until you download
+    it — so the default configuration lands in exactly this branch, and the only
+    signal used to be a caveat at the bottom of a rendered page. A whole corpus
+    can get scored by a demo lexicon before anyone notices.
     """
     if path:
         p = Path(path)
         if p.exists():
             return load_emfd_csv(p), f"eMFD ({p.name})"
+        logger.warning(
+            "lexicon_path is set to %s but no such file exists — scoring with the "
+            "%s instead, which is illustrative only and not a validated instrument. "
+            "Download emfd_scoring.csv from the eMFDscore repo and put it there, or "
+            "clear scoring.taggers.dictionary.lexicon_path to silence this.",
+            p, SEED_NAME,
+        )
     return load_seed(), SEED_NAME
 
 

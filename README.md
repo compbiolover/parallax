@@ -485,9 +485,18 @@ data. It is a placeholder, not a validated instrument. For real results, supply 
 ```bash
 # 1. Drop the eMFD CSV in data/ (gitignored), from the eMFDscore repo:
 #    dictionaries/emfd_scoring.csv (columns: word, <foundation>_p, <foundation>_sent).
-# 2. Either set scoring.dictionary.lexicon_path in config/settings.yaml, or:
+# 2. Either set scoring.taggers.dictionary.lexicon_path in config/settings.yaml
+#    (note `taggers` — that is the key PipelineConfig.from_settings reads), or:
 python3 -m ingestion run --lexicon data/emfd_scoring.csv
 ```
+
+**Switch the lexicon on a fresh datastore.** Dictionary scores all land under one scorer
+key, ingestion never re-scores documents it already holds, and raw text is not persisted —
+so swapping the lexicon appends a second instrument's numbers into the same column and
+every aggregate blends the two, while the caveat reports only the newer name. A run warns
+when it notices the change, but warning is all it can do. `rm data/parallax.sqlite` (or
+move it aside) before the first run on a new lexicon; the store holds derived metrics, not
+text, so nothing irreplaceable is lost — though the snapshot history restarts with it.
 
 The active lexicon is recorded with the scores, so the dashboard caveat and summaries state
 which one produced the numbers. Because eMFD words carry probability across all five
