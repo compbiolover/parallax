@@ -17,10 +17,10 @@ needed for personal use.
 ## Generate and view
 
 ```bash
-python -m ingestion run          # ingest + score
-python -m summarize              # daily summaries
-python -m dashboard.export       # -> dashboard/public/data/latest.js
-cd dashboard && python -m http.server   # open http://localhost:8000
+python3 -m ingestion run          # ingest + score
+python3 -m summarize              # daily summaries
+python3 -m dashboard.export       # -> dashboard/public/data/latest.js
+cd dashboard && python3 -m http.server   # open http://localhost:8000
 ```
 
 The generated `public/data/` payload is gitignored (regenerate it locally). Every
