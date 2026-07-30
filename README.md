@@ -190,11 +190,89 @@ detail, including why `PARALLAX_SMTP_STARTTLS=0` is refused for a remote host.
 
 </details>
 
-Run it every morning with cron:
+## Running it every morning
+
+<details>
+<summary><b>macOS: launchd, with secrets kept out of the plist</b></summary>
+
+Use `launchd`, not cron. Cron does not fire while the lid is shut and simply skips
+the run; a `launchd` agent runs the missed job on the next wake.
+
+`scripts/parallax-daily.sh` is a wrapper that fetches secrets at run time instead of
+storing them in the plist, so the plist holds nothing sensitive.
+
+```bash
+cp scripts/bitwarden.conf.example ~/.config/parallax/bitwarden.conf
+chmod 600 ~/.config/parallax/bitwarden.conf      # the wrapper refuses looser modes
+$EDITOR ~/.config/parallax/bitwarden.conf        # token, addresses, secret UUIDs
+
+make check-secrets                               # resolves everything, runs nothing
+
+cp scripts/com.parallax.daily.plist.example \
+   ~/Library/LaunchAgents/com.parallax.daily.plist
+$EDITOR ~/Library/LaunchAgents/com.parallax.daily.plist   # absolute paths
+launchctl load ~/Library/LaunchAgents/com.parallax.daily.plist
+launchctl start com.parallax.daily                # test now; don't wait for 06:00
+tail -f data/daily.log
+```
+
+`make check-secrets` prints each variable, where it came from, and its length —
+never its value, since that output can land in a log. Run it before trusting a
+scheduled run; a wrapper that fails at 6am on a machine nobody is watching is the
+whole failure mode this is meant to avoid.
+
+**What the secret handling does and does not buy you.** An unattended job cannot type
+a master password, so something readable without a human has to exist on the disk.
+This does not remove that; it changes what the readable thing unlocks:
+
+| | readable secret | what it unlocks |
+| --- | --- | --- |
+| secrets in the plist | Gmail app password | the whole mailbox, read and send |
+| this wrapper | Secrets Manager access token | read-only, one project, revocable on its own |
+
+That is a genuine improvement in blast radius, and it is the entire benefit. Anyone
+claiming a scheduled job can hold no secret at all is describing a job that needs a
+human every morning.
+
+It also means the Bitwarden **password manager** CLI (`bw`) is the wrong tool: `bw`
+needs a master password or a live `BW_SESSION` to unlock, so making it unattended
+means storing the master password — strictly worse than the app password it replaces.
+**Secrets Manager** (`bws`) exists for this case, with a machine account and a scoped
+token. Set `BWS_BIN` if yours isn't in the usual Homebrew or cargo location; a bare
+name will not resolve under launchd, which inherits no `PATH`.
+
+Two more things that bite:
+
+- **launchd inherits nothing** — no `PATH`, no working directory, none of your shell
+  exports. Every path in the plist and the config is absolute for that reason. It is
+  the most common way a working manual run fails on a schedule.
+- **launchd will not wake a sleeping Mac.** A closed lid at 06:00 means a late run,
+  not a missed one — but a Mac asleep past the next scheduled time runs only once.
+  Gaps show up in the divergence series; `python3 -m compare.history --backfill`
+  partially reconstructs them.
+
+If you would rather not keep any token on disk, macOS Keychain is the other reasonable
+answer on a single machine: encrypted at rest, unlocked at login, and readable from a
+user agent via `security find-generic-password`. It trades portability for having no
+secret file at all.
+
+</details>
+
+<details>
+<summary><b>Linux and always-on machines: systemd or cron</b></summary>
+
+A systemd user timer is the equivalent, and the same wrapper works — point
+`ExecStart` at `scripts/parallax-daily.sh`. On a machine that never sleeps, plain
+cron is fine too:
 
 ```cron
-0 6 * * *  cd /path/to/parallax && /path/to/.venv/bin/python3 -m daily >> data/daily.log 2>&1
+0 6 * * *  cd /path/to/parallax && ./scripts/parallax-daily.sh >> data/daily.log 2>&1
 ```
+
+Without the wrapper, remember that **cron does not inherit your shell environment**,
+so the variables have to be set inside the crontab itself.
+
+</details>
 
 ---
 

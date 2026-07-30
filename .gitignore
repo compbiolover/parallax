@@ -27,6 +27,12 @@ dashboard/public/data/*
 !dashboard/public/data/.gitkeep
 
 # ---- Secrets ----
+# The scheduled-run config holds a Secrets Manager access token. Only the
+# .example is tracked; a real one must never be committed.
+bitwarden.conf
+scripts/bitwarden.conf
+*.plist
+!scripts/*.plist.example
 .env
 .env.*
 !.env.example

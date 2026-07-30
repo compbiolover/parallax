@@ -1,0 +1,39 @@
+# Parallax scheduled-run configuration — EXAMPLE
+#
+#   cp scripts/bitwarden.conf.example ~/.config/parallax/bitwarden.conf
+#   chmod 600 ~/.config/parallax/bitwarden.conf
+#
+# The wrapper refuses to run if this file is not mode 600 or 400, because it
+# holds the access token below.
+#
+# Values are either literal or fetched from Bitwarden Secrets Manager at run
+# time. Prefix a value with `bws:` followed by the secret's UUID to fetch it.
+# Only put things in Bitwarden that are actually secret — routing an email
+# address through a vault is indirection without benefit.
+
+# --- the one irreducible secret --------------------------------------------
+# A Secrets Manager machine-account token, scoped read-only to the project
+# holding the two secrets below. This is the thing an attacker with your disk
+# gets, so the point of the exercise is that it unlocks two revocable secrets
+# rather than your mailbox. Rotate it from the Bitwarden web vault; nothing here
+# needs updating when you do, as long as you paste the new one in.
+BWS_ACCESS_TOKEN=0.replace-me
+
+# Absolute path to the bws binary. Optional — the wrapper checks the usual
+# Homebrew and cargo locations — but set it if yours is somewhere else. A bare
+# name will not resolve under launchd, which inherits no PATH.
+# BWS_BIN=/opt/homebrew/bin/bws
+
+# --- not secret: literal values --------------------------------------------
+PARALLAX_SMTP_HOST=smtp.gmail.com
+PARALLAX_SMTP_USER=you@gmail.com
+PARALLAX_DIGEST_TO=you@gmail.com
+
+# --- secret: fetched at run time -------------------------------------------
+# The UUIDs come from the Secrets Manager UI, or `bws secret list`.
+PARALLAX_SMTP_PASSWORD=bws:00000000-0000-0000-0000-000000000000
+ANTHROPIC_API_KEY=bws:00000000-0000-0000-0000-000000000000
+
+# Optional. Only affects Hugging Face download rate limits; not sensitive
+# enough to be worth a vault round-trip unless you want it there.
+# HF_TOKEN=bws:00000000-0000-0000-0000-000000000000
