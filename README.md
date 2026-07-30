@@ -201,6 +201,26 @@ the run; a `launchd` agent runs the missed job on the next wake.
 `scripts/parallax-daily.sh` is a wrapper that fetches secrets at run time instead of
 storing them in the plist, so the plist holds nothing sensitive.
 
+> **The checkout itself cannot live in `~/Documents`, `~/Desktop`, or `~/Downloads`.**
+> macOS blocks background processes from reading those folders unless the specific
+> process has been granted access, and a `launchd` agent has no way to request it —
+> there is no one to show the permission dialog to. The job fails with an error
+> that looks nothing like a permissions problem:
+>
+> ```
+> shell-init: error retrieving current directory: getcwd: cannot access parent
+> directories: Operation not permitted
+> /bin/bash: .../scripts/parallax-daily.sh: Operation not permitted
+> ```
+>
+> Terminal itself has a standing grant for those folders from when you use them
+> interactively, which is why `make daily` typed by hand works fine from the same
+> path — the restriction is specific to unattended processes. Clone or move the
+> repo somewhere outside them first, e.g. `~/parallax` or `~/Developer/parallax`.
+> If you've already been developing from inside `~/Documents`, moving it after the
+> fact needs the venv rebuilt (its paths are absolute) and the plist's paths
+> updated to match — both covered below.
+
 ```bash
 mkdir -p ~/.config/parallax                      # cp will not create it for you
 cp scripts/bitwarden.conf.example ~/.config/parallax/bitwarden.conf
@@ -212,7 +232,7 @@ make check-secrets                               # resolves everything, runs not
 mkdir -p ~/Library/LaunchAgents
 cp scripts/com.parallax.daily.plist.example \
    ~/Library/LaunchAgents/com.parallax.daily.plist
-nano ~/Library/LaunchAgents/com.parallax.daily.plist   # absolute paths, 3 places
+nano ~/Library/LaunchAgents/com.parallax.daily.plist   # absolute paths, 4 places
 launchctl load ~/Library/LaunchAgents/com.parallax.daily.plist
 launchctl start com.parallax.daily                # test now; don't wait for 06:00
 tail -f data/daily.log
