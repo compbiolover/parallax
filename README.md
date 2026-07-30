@@ -218,6 +218,32 @@ launchctl start com.parallax.daily                # test now; don't wait for 06:
 tail -f data/daily.log
 ```
 
+**If you downloaded `bws` by hand** rather than via Homebrew, move it somewhere
+stable and make it executable first — macOS also quarantines downloaded binaries:
+
+```bash
+mkdir -p ~/.local/bin
+mv ~/Documents/bws ~/.local/bin/
+chmod +x ~/.local/bin/bws
+xattr -d com.apple.quarantine ~/.local/bin/bws 2>/dev/null   # Gatekeeper
+~/.local/bin/bws --version                                    # confirm it runs
+```
+
+Then set `BWS_BIN=~/.local/bin/bws` in the config and the wrapper will find it — it
+needs a *path*, not `PATH`. For interactive use (`bws secret list`) add the directory
+to your shell as well:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh
+```
+
+Those are two separate mechanisms and both are worth having: `PATH` is for you at a
+prompt, `BWS_BIN` is for `launchd`, which inherits no `PATH` at all.
+
+**Do not leave it in `~/Documents` or `~/Desktop`.** With iCloud Drive syncing those
+folders — the macOS default — the binary can be evicted to a placeholder, and the 6am
+run then fails intermittently with nothing obvious to point at.
+
 `nano` because it is always present; substitute whatever you use (`vim`, `code -w`,
 `open -a TextEdit`). **Do not `sudo` any of this** — everything above lives in your own
 home directory and needs no elevation. Worse, `sudo` leaves the files owned by root,

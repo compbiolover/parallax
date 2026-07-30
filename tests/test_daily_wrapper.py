@@ -251,3 +251,35 @@ def test_an_unreadable_config_names_the_sudo_cause(tmp_path):
         conf.chmod(0o600)
     assert r.returncode == 1
     assert "sudo chown" in r.stderr
+def test_a_tilde_in_bws_bin_is_expanded(tmp_path, monkeypatch):
+    """Values read from a file are plain strings — bash does no tilde expansion on
+    them, so `BWS_BIN=~/.local/bin/bws` failed as "not executable" while looking
+    perfectly correct. The most likely thing for someone to write."""
+    home = tmp_path / "home"
+    (home / ".local" / "bin").mkdir(parents=True)
+    bws = home / ".local" / "bin" / "bws"
+    bws.write_text(FAKE_BWS)
+    bws.chmod(0o755)
+
+    conf = tmp_path / "bitwarden.conf"
+    conf.write_text(f"BWS_BIN=~/.local/bin/bws\n"
+                    f"BWS_ACCESS_TOKEN=0.t\n"
+                    f"PARALLAX_SMTP_PASSWORD=bws:{SMTP_ID}\n")
+    conf.chmod(0o600)
+
+    r = subprocess.run(
+        ["bash", str(WRAPPER), "--check"], capture_output=True, text=True,
+        env={**os.environ, "HOME": str(home), "PARALLAX_BITWARDEN_CONF": str(conf)},
+        cwd=ROOT,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "1 variable(s) resolved" in r.stdout
+
+
+def test_a_tilde_in_a_secret_value_is_left_alone(env):
+    """Expansion is confined to BWS_BIN. Silently rewriting a password that
+    happened to start with ~/ would be a far worse surprise than a path that has
+    to be absolute."""
+    r = env("PARALLAX_SMTP_PASSWORD=~/not-a-path\n", python=ECHO_ENV)
+    assert r.returncode == 0, r.stderr
+    assert "SMTP_PASSWORD=~/not-a-path" in r.stdout

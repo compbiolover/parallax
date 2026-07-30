@@ -118,7 +118,14 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     || die "not a usable variable name in $CONFIG: '$key'"
   case "$key" in
     BWS_ACCESS_TOKEN) token="$val" ;;
-    BWS_BIN)          BWS_BIN="$val" ;;
+                      # A leading ~/ is expanded here and nowhere else. Values
+                      # read from a file are plain strings, so bash does no tilde
+                      # expansion on them — `BWS_BIN=~/.local/bin/bws` would fail
+                      # as "not executable" while looking perfectly correct.
+                      # Confined to this key on purpose: silently rewriting a
+                      # token or password that happened to start with ~/ would be
+                      # a much worse surprise than a path that has to be absolute.
+    BWS_BIN)          BWS_BIN="${val/#\~\//$HOME/}" ;;
     *)                names+=("$key"); values+=("$val")
                       if [[ "$val" == "$PREFIX"* ]]; then sources+=("bitwarden")
                       else sources+=("literal"); fi ;;
