@@ -6,18 +6,19 @@
 
     cp scripts/com.parallax.daily.plist.example \
        ~/Library/LaunchAgents/com.parallax.daily.plist
-    # replace /ABSOLUTE/PATH/TO/parallax throughout
+    # replace /ABSOLUTE/PATH/TO/parallax below (4 occurrences)
     launchctl load ~/Library/LaunchAgents/com.parallax.daily.plist
     launchctl start com.parallax.daily      # test now, do not wait for 06:00
 
-  The four paths above CANNOT point inside ~/Documents, ~/Desktop, or
-  ~/Downloads. macOS blocks background processes from reading those folders
-  unless individually granted, and a launchd agent has no way to be prompted for
-  that grant — it just fails, with an error that does not look like a
-  permissions problem ("getcwd: cannot access parent directories: Operation not
-  permitted"). Terminal has its own standing grant, which is why running the
-  same command by hand from the same path works fine. Clone the repo outside
-  those three folders, e.g. ~/parallax.
+  None of the /ABSOLUTE/PATH/TO/parallax occurrences below — there are four,
+  in ProgramArguments, WorkingDirectory, and the two log paths — can point
+  inside ~/Documents, ~/Desktop, or ~/Downloads. macOS blocks background
+  processes from reading those folders unless individually granted, and a
+  launchd agent has no way to be prompted for that grant — it just fails, with
+  an error that does not look like a permissions problem ("getcwd: cannot
+  access parent directories: Operation not permitted"). Terminal has its own
+  standing grant, which is why running the same command by hand from the same
+  path works fine. Clone the repo outside those three folders, e.g. ~/parallax.
 
   There are no secrets in this file. The wrapper fetches them from Bitwarden
   Secrets Manager at run time, so this can sit at default permissions and be
@@ -27,7 +28,7 @@
   next wake instead, so a closed lid at 06:00 means a late run rather than a
   missed one — but a machine that stays asleep past the next scheduled time only
   runs once. Missed mornings show up as gaps in the divergence series, which
-  `python3 -m compare.history --backfill` can partially reconstruct.
+  `python3 -m compare.history` (with its backfill flag) can partially reconstruct.
 -->
 <plist version="1.0">
 <dict>

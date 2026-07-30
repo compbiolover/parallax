@@ -232,7 +232,7 @@ make check-secrets                               # resolves everything, runs not
 mkdir -p ~/Library/LaunchAgents
 cp scripts/com.parallax.daily.plist.example \
    ~/Library/LaunchAgents/com.parallax.daily.plist
-nano ~/Library/LaunchAgents/com.parallax.daily.plist   # absolute paths, 3 places
+nano ~/Library/LaunchAgents/com.parallax.daily.plist   # absolute paths, 4 places
 launchctl load ~/Library/LaunchAgents/com.parallax.daily.plist
 launchctl start com.parallax.daily                # test now; don't wait for 06:00
 tail -f data/daily.log
