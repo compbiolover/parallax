@@ -185,6 +185,42 @@ class ProbeResult:
                    if len(c.presences) > 1]
         return statistics.mean(spreads) if spreads else 0.0
 
+    def concentration(self, factor: float = 2.0) -> tuple[list[str], list[str]]:
+        """Split topics into those carrying the gap and those within noise.
+
+        Returns ``(carrying, evenhanded)``, thresholded at ``factor`` x the noise
+        floor. This exists because the aggregate gap can be a badly misleading
+        summary: a mean of +0.06 reads as "everything tilts slightly" when the
+        real shape was four topics at +0.115 and six indistinguishable from
+        zero. Those two worlds call for different responses — a uniform tilt
+        invites a calibration offset, a concentrated one means a flat offset
+        would overcorrect most of the set.
+
+        Guarded on ``repeats``, not on the noise floor. A pooled noise of exactly
+        0.0 is legitimate — the presence values are coarse, so a model can return
+        the same number on every repeat of a cell — and it means the opposite of
+        "cannot classify": with no sampling variance to attribute a difference
+        to, a reproducible gap is as certain as this probe gets. Guarding on
+        ``noise <= 0`` skipped the analysis in exactly the case it was most
+        confident about, while ``format_report`` went on interpreting the
+        magnitude regardless.
+
+        With a zero threshold the comparison has to be strict: ``>=`` would
+        classify a topic whose gap is exactly 0.0 as carrying, which is
+        backwards.
+        """
+        if self.repeats < 2:
+            return [], []
+        threshold = factor * self.noise
+        carrying, evenhanded = [], []
+        for topic in self.state:
+            gap = abs(self.topic_gap(topic))
+            (carrying if gap > 0 and gap >= threshold else evenhanded).append(topic)
+        return carrying, evenhanded
+
+    def topic_gap(self, topic: str) -> float:
+        return self.state[topic].mean - self.private[topic].mean
+
     def register_accuracy(self, side: dict[str, Cell], expected: str) -> float:
         """Fraction of samples labelled with the register their actor implies."""
         labels = [r for cell in side.values() for r in cell.registers]
@@ -258,6 +294,22 @@ def format_report(result: ProbeResult) -> str:
         "",
     ]
 
+    carrying, evenhanded = result.concentration()
+    if carrying and evenhanded:
+        hot = statistics.mean(result.topic_gap(t) for t in carrying)
+        cool = statistics.mean(result.topic_gap(t) for t in evenhanded)
+        lines += _wrap(
+            f"Concentrated, not uniform: {len(carrying)} of "
+            f"{len(carrying) + len(evenhanded)} topics carry the gap "
+            f"(mean {hot:+.3f}), while {len(evenhanded)} sit within noise "
+            f"({cool:+.3f}). Carrying: {', '.join(sorted(carrying))}. The "
+            f"aggregate above averages those together, so read it as a summary "
+            f"of two different behaviours rather than one small tilt — and note "
+            f"that a single calibration offset would overcorrect the "
+            f"{len(evenhanded)} that are already even."
+        )
+        lines.append("")
+
     if result.failures:
         lines.append(f"  {result.failures} call(s) returned no verdict and were dropped.")
         lines.append("")
@@ -275,6 +327,17 @@ def format_report(result: ProbeResult) -> str:
         )
     else:
         favoured = "state" if result.gap > 0 else "private-power"
+        if result.noise == 0:
+            # "Exceeds the noise floor" is true but reads as uninformative when
+            # the floor is zero, and a floor of exactly zero across every cell is
+            # itself worth remarking on.
+            lines += _wrap(
+                "Every cell returned the same value on every repeat, so the noise "
+                "floor is exactly zero. Any gap below is therefore reproducible "
+                "rather than sampling variance — but check the model is not "
+                "returning canned values before reading much into the size."
+            )
+            lines.append("")
         lines += _wrap(
             f"The gap exceeds the noise floor, leaning toward {favoured} framing. "
             "Descriptive only — this is a handful of samples per cell, not a "

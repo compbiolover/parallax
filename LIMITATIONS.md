@@ -53,6 +53,30 @@ Mformer does not label liberty. That makes it the least corroborated number here
   **The reading is descriptive, not inferential** — a handful of samples per cell cannot
   support a significance test, and a gap smaller than the noise floor is absence of
   evidence rather than evidence of evenhandedness.
+- **The probe has now been run, and it found a tilt.** On `claude-sonnet-5` (two runs, 60
+  and 140 calls, 2026-07-29): register *classification* is clean — 100% correct across 200
+  samples, not one crossed label. Presence *magnitude* is not. State-actor sentences score
+  **~0.06 higher** than word-for-word identical private-actor ones, 1.7× the noise floor,
+  with 9 of 10 topics leaning the same way (sign test p ≈ 0.021). The gap is
+  **concentrated, not uniform**: four topics (surveillance, speech, property, data) carry
+  +0.115 while the other six sit within noise at +0.020, and that per-topic ordering
+  reproduced in 38 of 40 pairwise comparisons across the two runs.
+
+  **What it means for any cross-diet liberty comparison.** The modeled diet claims liberty
+  largely in the state register (mandates, overreach, censorship, conscience); the author's
+  diet leans on the private and structural register (corporate power, surveillance,
+  employer control). A rubric that scores state framing higher therefore inflates the
+  modeled diet's liberty engagement relative to the author's — a property of the prompt
+  wearing the clothes of a finding, which is precisely what this probe exists to catch.
+  Treat any liberty gap between the diets as containing roughly this much instrument
+  before it contains anything about media. It also interacts with a threshold:
+  `salient_share` counts documents above 0.5, so a systematic shift moves borderline items
+  asymmetrically and the effect there can exceed 0.06.
+
+  **The rubric was deliberately not retuned**, because editing it until the gap closes
+  would overfit to the ten templates that measure it, and a flat correction would
+  overcorrect the six domains already even. `validation/README.md` records the numbers and
+  what a defensible revision would require.
 - **Not validated at all yet.** No public corpus labels liberty, so the gold set does not
   either. `python3 -m validation --scorer liberty` refuses to run until liberty labels are
   hand-coded, rather than reporting an AUC against all-zero labels. Until that coding

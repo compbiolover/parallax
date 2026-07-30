@@ -109,7 +109,62 @@ often doesn't get dragged toward the middle.
 
 This costs real API calls; the CLI prints the call count and asks before
 spending (`--yes` skips it). Re-run it whenever the rubric text or the model
-changes — both are the instrument, and both drift.
+changes — both are the instrument, and both drift. It is **not** a nightly job:
+it measures the rubric and the model, neither of which changes overnight.
+
+### The first real result (claude-sonnet-5, 2026-07-29)
+
+Two runs, 3 and 7 repeats per cell (60 and 140 calls).
+
+**Register classification: 100% / 100% in both runs.** Not one crossed label
+across 200 samples. Private-power coercion is reliably identified *as*
+private-power coercion. That was the failure that would have been fatal, and it
+is not there.
+
+**Presence magnitude: a consistent tilt toward state framing.**
+
+| | 3 repeats | 7 repeats |
+| --- | --- | --- |
+| state mean | 0.705 | 0.709 |
+| private mean | 0.632 | 0.651 |
+| gap | +0.073 | **+0.058** |
+| noise floor | 0.035 | 0.034 |
+| gap ÷ noise | 2.1× | 1.7× |
+| topics leaning state | 7 of 8 non-tied | **9 of 10** |
+| sign test across topics | p ≈ 0.070 | **p ≈ 0.021** |
+
+The point estimate shrank 21% between runs, so treat the magnitude as ~0.06
+± 0.02 rather than a precise figure. The *direction* got firmer, not softer.
+
+**The aggregate is a misleading summary, and this is the actual finding.** The
+gap is not spread evenly — it is concentrated in four topics:
+
+| group | topics | mean gap | vs noise |
+| --- | --- | --- | --- |
+| carrying | surveillance, speech, property, data | **+0.115** | 3.4× |
+| evenhanded | compulsion, medical disclosure, livelihood, exit, conscience, assembly | +0.020 | 0.6× |
+
+Per-topic ordering reproduced across the two independent runs in **38 of 40**
+pairwise comparisons, so the per-topic structure is signal rather than noise.
+`ProbeResult.concentration()` now reports this split, because a mean of +0.06
+reads as "everything tilts slightly" when the truth was two distinct
+behaviours.
+
+**A hypothesis, not a finding:** the four carrying topics are the ones whose
+state version maps onto a canonical constitutional-rights frame — search and
+seizure, free speech, surveillance — while the private analogue has no equally
+established framing. The six evenhanded ones are domains where private coercion
+already has its own liberty discourse (employment, healthcare, contracts). That
+is testable by adding templates to each putative group and checking whether new
+members land where predicted; it has not been tested.
+
+**Why the rubric was not retuned.** Editing `SYSTEM_PROMPT` until the gap
+closes would overfit the rubric to the ten templates that measure it, and the
+concentration makes it worse: a flat correction would overcorrect the six
+domains that are already even. The measured offset is disclosed in
+`LIMITATIONS.md` instead. If the rubric is ever revised for this, the honest
+sequence is to expand `PAIRS` first, tune against the old topics, and validate
+on the held-out new ones.
 
 ## Guarding against confirmation bias
 

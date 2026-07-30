@@ -266,3 +266,129 @@ def test_probe_pair_renders_the_actor_into_the_slot():
     pair = ProbePair("t", "{actor} did the thing.", "The board", "The firm")
     assert pair.state_text() == "The board did the thing."
     assert pair.private_text() == "The firm did the thing."
+
+
+# -- an aggregate gap can hide two different behaviours ----------------------
+
+
+def _result(gaps: dict[str, float], spread: float = 0.024, base: float = 0.70):
+    """A result whose per-topic gaps are exactly `gaps`, with a known noise floor."""
+    r = ProbeResult(model="m", repeats=7)
+    for topic, gap in gaps.items():
+        r.state[topic] = Cell(presences=[base - spread, base + spread],
+                              registers=[STATE] * 2)
+        r.private[topic] = Cell(presences=[base - gap - spread, base - gap + spread],
+                                registers=[PRIVATE] * 2)
+    return r
+
+
+def test_concentration_separates_carrying_topics_from_even_ones():
+    """The finding that motivated this: a mean of +0.06 was four topics at
+    +0.115 and six indistinguishable from zero. Those call for different
+    responses, and the aggregate cannot tell them apart."""
+    result = _result({"a": 0.12, "b": 0.12, "c": 0.01, "d": 0.02, "e": 0.00})
+    carrying, evenhanded = result.concentration()
+    assert sorted(carrying) == ["a", "b"]
+    assert sorted(evenhanded) == ["c", "d", "e"]
+
+
+def test_a_uniform_tilt_reports_no_concentration():
+    """Every topic carrying it equally is the case where a single offset would
+    be defensible — so it must not be described as concentrated."""
+    result = _result({k: 0.12 for k in "abcde"})
+    carrying, evenhanded = result.concentration()
+    assert len(carrying) == 5
+    assert evenhanded == []
+
+
+def test_an_evenhanded_rubric_reports_no_concentration():
+    result = _result({k: 0.00 for k in "abcde"})
+    carrying, _ = result.concentration()
+    assert carrying == []
+
+
+def test_concentration_counts_a_private_leaning_topic_by_magnitude():
+    """Direction is reported separately; a large gap either way is a topic the
+    rubric treats asymmetrically."""
+    result = _result({"a": -0.12, "b": 0.01})
+    carrying, _ = result.concentration()
+    assert carrying == ["a"]
+
+
+def test_no_noise_floor_means_no_concentration_claim():
+    """With one sample per cell there is no threshold to compare against, and
+    calling everything 'carrying' would be an artefact of the sample size."""
+    result = ProbeResult(model="m", repeats=1)
+    result.state["a"] = Cell(presences=[0.8], registers=[STATE])
+    result.private["a"] = Cell(presences=[0.6], registers=[PRIVATE])
+    assert result.concentration() == ([], [])
+
+
+def test_the_report_names_the_carrying_topics():
+    text = _flat(_result({"surveillance": 0.12, "property": 0.12,
+                          "compulsion": 0.01, "exit": -0.01}))
+    assert "Concentrated, not uniform" in text
+    assert "surveillance" in text and "property" in text
+    assert "would overcorrect" in text          # why it matters
+
+
+def test_a_uniform_result_does_not_claim_concentration_in_the_report():
+    assert "Concentrated" not in _flat(_result({k: 0.12 for k in "abcde"}))
+
+
+# -- a zero noise floor is a real measurement, not a missing one -------------
+
+
+def _deterministic(gaps: dict[str, float], repeats: int = 7, base: float = 0.70):
+    """Every repeat of a cell returns the same value, so the noise floor is 0.0.
+
+    Realistic: presence values are coarse, so a model can easily land on the
+    same number seven times for a short sentence.
+    """
+    r = ProbeResult(model="m", repeats=repeats)
+    for topic, gap in gaps.items():
+        r.state[topic] = Cell(presences=[base] * repeats, registers=[STATE] * repeats)
+        r.private[topic] = Cell(presences=[base - gap] * repeats,
+                                registers=[PRIVATE] * repeats)
+    return r
+
+
+def test_a_zero_noise_floor_still_classifies_topics():
+    """The regression: `concentration()` guarded on `noise <= 0`, so a
+    deterministic run skipped the analysis in exactly the case it was most
+    confident about — while format_report went on interpreting the magnitude
+    anyway. With no sampling variance, a reproducible gap is as certain as this
+    probe gets."""
+    result = _deterministic({"a": 0.12, "b": 0.12, "c": 0.00, "d": 0.00})
+    assert result.noise == 0.0
+    carrying, evenhanded = result.concentration()
+    assert sorted(carrying) == ["a", "b"]
+    assert sorted(evenhanded) == ["c", "d"]
+
+
+def test_a_zero_gap_is_never_carrying_even_at_a_zero_threshold():
+    """`factor * 0.0` is 0.0, and `abs(gap) >= 0` is true for every topic — so a
+    naive threshold comparison would call an exactly-even topic 'carrying',
+    which is backwards. The comparison has to be strict at zero."""
+    carrying, evenhanded = _deterministic({"even": 0.00}).concentration()
+    assert carrying == []
+    assert evenhanded == ["even"]
+
+
+def test_one_repeat_still_refuses_to_classify():
+    """No repetition means no noise floor was *measured*, which is different
+    from measuring one and finding it zero."""
+    assert _deterministic({"a": 0.12, "b": 0.00}, repeats=1).concentration() == ([], [])
+
+
+def test_a_zero_noise_floor_is_remarked_on():
+    """'The gap exceeds the noise floor' is true but uninformative when the
+    floor is zero, and zero variance across every cell is itself worth a look —
+    it can mean the model is returning canned values."""
+    text = _flat(_deterministic({"a": 0.12, "b": 0.00}))
+    assert "noise floor is exactly zero" in text
+    assert "canned values" in text
+
+
+def test_a_normal_run_is_not_told_its_floor_is_zero():
+    assert "exactly zero" not in _flat(_result({"a": 0.12, "b": 0.01}))
