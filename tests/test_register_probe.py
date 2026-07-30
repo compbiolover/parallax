@@ -266,3 +266,71 @@ def test_probe_pair_renders_the_actor_into_the_slot():
     pair = ProbePair("t", "{actor} did the thing.", "The board", "The firm")
     assert pair.state_text() == "The board did the thing."
     assert pair.private_text() == "The firm did the thing."
+
+
+# -- an aggregate gap can hide two different behaviours ----------------------
+
+
+def _result(gaps: dict[str, float], spread: float = 0.024, base: float = 0.70):
+    """A result whose per-topic gaps are exactly `gaps`, with a known noise floor."""
+    r = ProbeResult(model="m", repeats=7)
+    for topic, gap in gaps.items():
+        r.state[topic] = Cell(presences=[base - spread, base + spread],
+                              registers=[STATE] * 2)
+        r.private[topic] = Cell(presences=[base - gap - spread, base - gap + spread],
+                                registers=[PRIVATE] * 2)
+    return r
+
+
+def test_concentration_separates_carrying_topics_from_even_ones():
+    """The finding that motivated this: a mean of +0.06 was four topics at
+    +0.115 and six indistinguishable from zero. Those call for different
+    responses, and the aggregate cannot tell them apart."""
+    result = _result({"a": 0.12, "b": 0.12, "c": 0.01, "d": 0.02, "e": 0.00})
+    carrying, evenhanded = result.concentration()
+    assert sorted(carrying) == ["a", "b"]
+    assert sorted(evenhanded) == ["c", "d", "e"]
+
+
+def test_a_uniform_tilt_reports_no_concentration():
+    """Every topic carrying it equally is the case where a single offset would
+    be defensible — so it must not be described as concentrated."""
+    result = _result({k: 0.12 for k in "abcde"})
+    carrying, evenhanded = result.concentration()
+    assert len(carrying) == 5
+    assert evenhanded == []
+
+
+def test_an_evenhanded_rubric_reports_no_concentration():
+    result = _result({k: 0.00 for k in "abcde"})
+    carrying, _ = result.concentration()
+    assert carrying == []
+
+
+def test_concentration_counts_a_private_leaning_topic_by_magnitude():
+    """Direction is reported separately; a large gap either way is a topic the
+    rubric treats asymmetrically."""
+    result = _result({"a": -0.12, "b": 0.01})
+    carrying, _ = result.concentration()
+    assert carrying == ["a"]
+
+
+def test_no_noise_floor_means_no_concentration_claim():
+    """With one sample per cell there is no threshold to compare against, and
+    calling everything 'carrying' would be an artefact of the sample size."""
+    result = ProbeResult(model="m", repeats=1)
+    result.state["a"] = Cell(presences=[0.8], registers=[STATE])
+    result.private["a"] = Cell(presences=[0.6], registers=[PRIVATE])
+    assert result.concentration() == ([], [])
+
+
+def test_the_report_names_the_carrying_topics():
+    text = _flat(_result({"surveillance": 0.12, "property": 0.12,
+                          "compulsion": 0.01, "exit": -0.01}))
+    assert "Concentrated, not uniform" in text
+    assert "surveillance" in text and "property" in text
+    assert "would overcorrect" in text          # why it matters
+
+
+def test_a_uniform_result_does_not_claim_concentration_in_the_report():
+    assert "Concentrated" not in _flat(_result({k: 0.12 for k in "abcde"}))

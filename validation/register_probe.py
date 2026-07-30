@@ -185,6 +185,29 @@ class ProbeResult:
                    if len(c.presences) > 1]
         return statistics.mean(spreads) if spreads else 0.0
 
+    def concentration(self, factor: float = 2.0) -> tuple[list[str], list[str]]:
+        """Split topics into those carrying the gap and those within noise.
+
+        Returns ``(carrying, evenhanded)``, thresholded at ``factor`` x the noise
+        floor. This exists because the aggregate gap can be a badly misleading
+        summary: a mean of +0.06 reads as "everything tilts slightly" when the
+        real shape was four topics at +0.115 and six indistinguishable from
+        zero. Those two worlds call for different responses — a uniform tilt
+        invites a calibration offset, a concentrated one means a flat offset
+        would overcorrect most of the set.
+        """
+        if self.noise <= 0:
+            return [], []
+        threshold = factor * self.noise
+        carrying, evenhanded = [], []
+        for topic in self.state:
+            gap = self.state[topic].mean - self.private[topic].mean
+            (carrying if abs(gap) >= threshold else evenhanded).append(topic)
+        return carrying, evenhanded
+
+    def topic_gap(self, topic: str) -> float:
+        return self.state[topic].mean - self.private[topic].mean
+
     def register_accuracy(self, side: dict[str, Cell], expected: str) -> float:
         """Fraction of samples labelled with the register their actor implies."""
         labels = [r for cell in side.values() for r in cell.registers]
@@ -257,6 +280,22 @@ def format_report(result: ProbeResult) -> str:
         f"     noise floor  {result.noise:.3f}   (mean within-cell spread on repetition)",
         "",
     ]
+
+    carrying, evenhanded = result.concentration()
+    if carrying and evenhanded:
+        hot = statistics.mean(result.topic_gap(t) for t in carrying)
+        cool = statistics.mean(result.topic_gap(t) for t in evenhanded)
+        lines += _wrap(
+            f"Concentrated, not uniform: {len(carrying)} of "
+            f"{len(carrying) + len(evenhanded)} topics carry the gap "
+            f"(mean {hot:+.3f}), while {len(evenhanded)} sit within noise "
+            f"({cool:+.3f}). Carrying: {', '.join(sorted(carrying))}. The "
+            f"aggregate above averages those together, so read it as a summary "
+            f"of two different behaviours rather than one small tilt — and note "
+            f"that a single calibration offset would overcorrect the "
+            f"{len(evenhanded)} that are already even."
+        )
+        lines.append("")
 
     if result.failures:
         lines.append(f"  {result.failures} call(s) returned no verdict and were dropped.")

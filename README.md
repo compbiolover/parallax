@@ -320,6 +320,14 @@ higher, with the run-to-run noise floor printed next to the gap so a few samples
 read as a result. A gap under the noise is absence of evidence, not a clean bill of health,
 and the report says so in those words.
 
+**It has been run, and it found something.** Classification is clean — 100% correct across
+200 samples on Sonnet 5. Magnitude is not: state-actor sentences score ~0.06 higher than
+word-for-word identical private-actor ones, and the gap is concentrated in four of ten
+domains rather than spread evenly. So a liberty gap between the two diets contains some
+instrument before it contains any media. The rubric was deliberately not retuned — that
+would overfit it to the templates that measure it. `validation/README.md` has the numbers
+and `LIMITATIONS.md` has what they mean for reading the dashboard.
+
 ```yaml
 scoring:
   taggers:
