@@ -202,19 +202,28 @@ the run; a `launchd` agent runs the missed job on the next wake.
 storing them in the plist, so the plist holds nothing sensitive.
 
 ```bash
+mkdir -p ~/.config/parallax                      # cp will not create it for you
 cp scripts/bitwarden.conf.example ~/.config/parallax/bitwarden.conf
 chmod 600 ~/.config/parallax/bitwarden.conf      # the wrapper refuses looser modes
-$EDITOR ~/.config/parallax/bitwarden.conf        # token, addresses, secret UUIDs
+nano ~/.config/parallax/bitwarden.conf           # token, addresses, secret UUIDs
 
 make check-secrets                               # resolves everything, runs nothing
 
+mkdir -p ~/Library/LaunchAgents
 cp scripts/com.parallax.daily.plist.example \
    ~/Library/LaunchAgents/com.parallax.daily.plist
-$EDITOR ~/Library/LaunchAgents/com.parallax.daily.plist   # absolute paths
+nano ~/Library/LaunchAgents/com.parallax.daily.plist   # absolute paths, 3 places
 launchctl load ~/Library/LaunchAgents/com.parallax.daily.plist
 launchctl start com.parallax.daily                # test now; don't wait for 06:00
 tail -f data/daily.log
 ```
+
+`nano` because it is always present; substitute whatever you use (`vim`, `code -w`,
+`open -a TextEdit`). **Do not `sudo` any of this** — everything above lives in your own
+home directory and needs no elevation. Worse, `sudo` leaves the files owned by root,
+which the wrapper cannot read when `launchd` runs it as you: the mode check passes at
+0600 and the read fails afterwards. If you already did, `sudo chown "$(whoami)"` the
+file to undo it.
 
 `make check-secrets` prints each variable, where it came from, and its length —
 never its value, since that output can land in a log. Run it before trusting a

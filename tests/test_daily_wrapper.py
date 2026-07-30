@@ -230,3 +230,24 @@ def test_no_bws_needed_when_nothing_is_fetched(tmp_path):
     )
     assert r.returncode == 0, r.stderr
     assert "1 variable(s) resolved" in r.stdout
+
+
+def test_an_unreadable_config_names_the_sudo_cause(tmp_path):
+    """0600 owned by root passes the mode check and then fails the read with a
+    bare permission error. `sudo cp` is the ordinary way to get there, and the
+    agent runs as the user, not as root."""
+    conf = tmp_path / "bitwarden.conf"
+    conf.write_text("PARALLAX_SMTP_HOST=smtp.example.com\n")
+    conf.chmod(0o600)
+    if os.geteuid() == 0:
+        pytest.skip("root can read anything, so the branch is unreachable")
+    conf.chmod(0o000)          # stand-in for "owner-only, different owner"
+    try:
+        r = subprocess.run(
+            ["bash", str(WRAPPER), "--check"], capture_output=True, text=True,
+            env={**os.environ, "PARALLAX_BITWARDEN_CONF": str(conf)}, cwd=ROOT,
+        )
+    finally:
+        conf.chmod(0o600)
+    assert r.returncode == 1
+    assert "sudo chown" in r.stderr

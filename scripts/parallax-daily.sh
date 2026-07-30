@@ -85,6 +85,15 @@ if [[ "$perms" != "600" && "$perms" != "400" ]]; then
        400 (owner-only). Run: chmod 600 $CONFIG"
 fi
 
+# Owner-only *and* owned by someone else is the sudo footgun: the mode check
+# above passes, and then the read fails with a bare permission error further
+# down. launchd runs this agent as you, not as root.
+if [[ ! -r "$CONFIG" ]]; then
+  die "$CONFIG is not readable by $(id -un). If you created it with sudo it is
+       owned by root, which launchd cannot read when it runs this as you. Fix
+       with: sudo chown $(id -un) $CONFIG"
+fi
+
 names=()
 values=()
 sources=()
