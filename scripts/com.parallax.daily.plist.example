@@ -10,6 +10,15 @@
     launchctl load ~/Library/LaunchAgents/com.parallax.daily.plist
     launchctl start com.parallax.daily      # test now, do not wait for 06:00
 
+  The four paths above CANNOT point inside ~/Documents, ~/Desktop, or
+  ~/Downloads. macOS blocks background processes from reading those folders
+  unless individually granted, and a launchd agent has no way to be prompted for
+  that grant — it just fails, with an error that does not look like a
+  permissions problem ("getcwd: cannot access parent directories: Operation not
+  permitted"). Terminal has its own standing grant, which is why running the
+  same command by hand from the same path works fine. Clone the repo outside
+  those three folders, e.g. ~/parallax.
+
   There are no secrets in this file. The wrapper fetches them from Bitwarden
   Secrets Manager at run time, so this can sit at default permissions and be
   diffed, backed up, or pasted into a support thread without thought.
