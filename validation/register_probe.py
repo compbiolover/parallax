@@ -195,14 +195,27 @@ class ProbeResult:
         zero. Those two worlds call for different responses — a uniform tilt
         invites a calibration offset, a concentrated one means a flat offset
         would overcorrect most of the set.
+
+        Guarded on ``repeats``, not on the noise floor. A pooled noise of exactly
+        0.0 is legitimate — the presence values are coarse, so a model can return
+        the same number on every repeat of a cell — and it means the opposite of
+        "cannot classify": with no sampling variance to attribute a difference
+        to, a reproducible gap is as certain as this probe gets. Guarding on
+        ``noise <= 0`` skipped the analysis in exactly the case it was most
+        confident about, while ``format_report`` went on interpreting the
+        magnitude regardless.
+
+        With a zero threshold the comparison has to be strict: ``>=`` would
+        classify a topic whose gap is exactly 0.0 as carrying, which is
+        backwards.
         """
-        if self.noise <= 0:
+        if self.repeats < 2:
             return [], []
         threshold = factor * self.noise
         carrying, evenhanded = [], []
         for topic in self.state:
-            gap = self.state[topic].mean - self.private[topic].mean
-            (carrying if abs(gap) >= threshold else evenhanded).append(topic)
+            gap = abs(self.topic_gap(topic))
+            (carrying if gap > 0 and gap >= threshold else evenhanded).append(topic)
         return carrying, evenhanded
 
     def topic_gap(self, topic: str) -> float:
@@ -314,6 +327,17 @@ def format_report(result: ProbeResult) -> str:
         )
     else:
         favoured = "state" if result.gap > 0 else "private-power"
+        if result.noise == 0:
+            # "Exceeds the noise floor" is true but reads as uninformative when
+            # the floor is zero, and a floor of exactly zero across every cell is
+            # itself worth remarking on.
+            lines += _wrap(
+                "Every cell returned the same value on every repeat, so the noise "
+                "floor is exactly zero. Any gap below is therefore reproducible "
+                "rather than sampling variance — but check the model is not "
+                "returning canned values before reading much into the size."
+            )
+            lines.append("")
         lines += _wrap(
             f"The gap exceeds the noise floor, leaning toward {favoured} framing. "
             "Descriptive only — this is a handful of samples per cell, not a "

@@ -334,3 +334,61 @@ def test_the_report_names_the_carrying_topics():
 
 def test_a_uniform_result_does_not_claim_concentration_in_the_report():
     assert "Concentrated" not in _flat(_result({k: 0.12 for k in "abcde"}))
+
+
+# -- a zero noise floor is a real measurement, not a missing one -------------
+
+
+def _deterministic(gaps: dict[str, float], repeats: int = 7, base: float = 0.70):
+    """Every repeat of a cell returns the same value, so the noise floor is 0.0.
+
+    Realistic: presence values are coarse, so a model can easily land on the
+    same number seven times for a short sentence.
+    """
+    r = ProbeResult(model="m", repeats=repeats)
+    for topic, gap in gaps.items():
+        r.state[topic] = Cell(presences=[base] * repeats, registers=[STATE] * repeats)
+        r.private[topic] = Cell(presences=[base - gap] * repeats,
+                                registers=[PRIVATE] * repeats)
+    return r
+
+
+def test_a_zero_noise_floor_still_classifies_topics():
+    """The regression: `concentration()` guarded on `noise <= 0`, so a
+    deterministic run skipped the analysis in exactly the case it was most
+    confident about — while format_report went on interpreting the magnitude
+    anyway. With no sampling variance, a reproducible gap is as certain as this
+    probe gets."""
+    result = _deterministic({"a": 0.12, "b": 0.12, "c": 0.00, "d": 0.00})
+    assert result.noise == 0.0
+    carrying, evenhanded = result.concentration()
+    assert sorted(carrying) == ["a", "b"]
+    assert sorted(evenhanded) == ["c", "d"]
+
+
+def test_a_zero_gap_is_never_carrying_even_at_a_zero_threshold():
+    """`factor * 0.0` is 0.0, and `abs(gap) >= 0` is true for every topic — so a
+    naive threshold comparison would call an exactly-even topic 'carrying',
+    which is backwards. The comparison has to be strict at zero."""
+    carrying, evenhanded = _deterministic({"even": 0.00}).concentration()
+    assert carrying == []
+    assert evenhanded == ["even"]
+
+
+def test_one_repeat_still_refuses_to_classify():
+    """No repetition means no noise floor was *measured*, which is different
+    from measuring one and finding it zero."""
+    assert _deterministic({"a": 0.12, "b": 0.00}, repeats=1).concentration() == ([], [])
+
+
+def test_a_zero_noise_floor_is_remarked_on():
+    """'The gap exceeds the noise floor' is true but uninformative when the
+    floor is zero, and zero variance across every cell is itself worth a look —
+    it can mean the model is returning canned values."""
+    text = _flat(_deterministic({"a": 0.12, "b": 0.00}))
+    assert "noise floor is exactly zero" in text
+    assert "canned values" in text
+
+
+def test_a_normal_run_is_not_told_its_floor_is_zero():
+    assert "exactly zero" not in _flat(_result({"a": 0.12, "b": 0.01}))
