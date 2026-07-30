@@ -19,10 +19,15 @@
 # needs updating when you do, as long as you paste the new one in.
 BWS_ACCESS_TOKEN=0.replace-me
 
-# Absolute path to the bws binary. Optional — the wrapper checks the usual
-# Homebrew and cargo locations — but set it if yours is somewhere else. A bare
-# name will not resolve under launchd, which inherits no PATH.
-# BWS_BIN=/opt/homebrew/bin/bws
+# Path to the bws binary. Optional — the wrapper checks the usual Homebrew and
+# cargo locations first — but set it if yours is elsewhere, e.g. downloaded by
+# hand. A bare `bws` will not resolve under launchd, which inherits no PATH, so
+# this must be a path rather than a name. A leading ~/ is expanded.
+#
+# Do not leave it in ~/Documents or ~/Desktop: with iCloud Drive syncing those
+# folders (the macOS default) the binary can be evicted to a placeholder and the
+# 6am run fails intermittently with no obvious cause. ~/.local/bin is a good home.
+# BWS_BIN=~/.local/bin/bws
 
 # --- not secret: literal values --------------------------------------------
 PARALLAX_SMTP_HOST=smtp.gmail.com

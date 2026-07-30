@@ -8,16 +8,34 @@ matters is not a wrong number — it is 6am on a machine nobody is watching, and
 from __future__ import annotations
 
 import os
+import pathlib
+import pwd
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
+
+
+def _uid_exists(uid: int) -> bool:
+    try:
+        pwd.getpwuid(uid)
+        return True
+    except KeyError:
+        return False
+
 
 ROOT = Path(__file__).resolve().parent.parent
 WRAPPER = ROOT / "scripts" / "parallax-daily.sh"
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+
+# `nobody` where it exists, else any non-root uid — only used by the one test that
+# needs the wrapper to run as a user who does not own the config.
+UNPRIVILEGED_UID = next(
+    (uid for uid in (65534, 1, 2) if _uid_exists(uid)), None
+)
 
 SMTP_ID = "aaaa0000-0000-0000-0000-000000000000"
 KEY_ID = "bbbb0000-0000-0000-0000-000000000000"
@@ -230,3 +248,73 @@ def test_no_bws_needed_when_nothing_is_fetched(tmp_path):
     )
     assert r.returncode == 0, r.stderr
     assert "1 variable(s) resolved" in r.stdout
+
+
+@pytest.mark.skipif(os.geteuid() != 0,
+                    reason="needs root to create a file owned by another user")
+def test_an_unreadable_config_names_the_sudo_cause():
+    """0600 owned by someone else passes the mode check and then fails the read.
+
+    Constructing it needs two uids: the file stays 0600 — so the mode check is
+    satisfied — while the wrapper runs as a user who does not own it. `chmod 000`
+    does not stand in for this, because mode 0 trips the mode check first and
+    never reaches the branch; an earlier version of this test made exactly that
+    mistake and was skipped everywhere it would have failed.
+    """
+    # Not tmp_path: pytest's ancestors are owner-only, so an unprivileged process
+    # cannot even stat through them and the wrapper dies at "no config at" — the
+    # earlier check, on a file that does exist. The whole chain has to be
+    # traversable for the readability branch to be the one under test.
+    home = pathlib.Path(tempfile.mkdtemp(prefix="parallax-wrapper-", dir="/tmp"))
+    home.chmod(0o755)
+    conf = home / "bitwarden.conf"
+    conf.write_text("PARALLAX_SMTP_HOST=smtp.example.com\n")
+    conf.chmod(0o600)                       # owned by root, owner-only
+
+    try:
+        r = subprocess.run(
+            ["bash", str(WRAPPER), "--check"], capture_output=True, text=True,
+            env={**os.environ, "PARALLAX_BITWARDEN_CONF": str(conf)}, cwd=ROOT,
+            user=UNPRIVILEGED_UID, group=UNPRIVILEGED_UID,
+        )
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+    assert r.returncode == 1
+    assert "not readable by" in r.stderr
+    assert "sudo chown" in r.stderr
+    assert "created with sudo" in r.stderr      # the likely cause, named as likely
+    assert "ACL" in r.stderr                    # but not the only one
+
+
+def test_a_tilde_in_bws_bin_is_expanded(tmp_path, monkeypatch):
+    """Values read from a file are plain strings — bash does no tilde expansion on
+    them, so `BWS_BIN=~/.local/bin/bws` failed as "not executable" while looking
+    perfectly correct. The most likely thing for someone to write."""
+    home = tmp_path / "home"
+    (home / ".local" / "bin").mkdir(parents=True)
+    bws = home / ".local" / "bin" / "bws"
+    bws.write_text(FAKE_BWS)
+    bws.chmod(0o755)
+
+    conf = tmp_path / "bitwarden.conf"
+    conf.write_text(f"BWS_BIN=~/.local/bin/bws\n"
+                    f"BWS_ACCESS_TOKEN=0.t\n"
+                    f"PARALLAX_SMTP_PASSWORD=bws:{SMTP_ID}\n")
+    conf.chmod(0o600)
+
+    r = subprocess.run(
+        ["bash", str(WRAPPER), "--check"], capture_output=True, text=True,
+        env={**os.environ, "HOME": str(home), "PARALLAX_BITWARDEN_CONF": str(conf)},
+        cwd=ROOT,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "1 variable(s) resolved" in r.stdout
+
+
+def test_a_tilde_in_a_secret_value_is_left_alone(env):
+    """Expansion is confined to BWS_BIN. Silently rewriting a password that
+    happened to start with ~/ would be a far worse surprise than a path that has
+    to be absolute."""
+    r = env("PARALLAX_SMTP_PASSWORD=~/not-a-path\n", python=ECHO_ENV)
+    assert r.returncode == 0, r.stderr
+    assert "SMTP_PASSWORD=~/not-a-path" in r.stdout

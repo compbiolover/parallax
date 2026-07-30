@@ -202,19 +202,54 @@ the run; a `launchd` agent runs the missed job on the next wake.
 storing them in the plist, so the plist holds nothing sensitive.
 
 ```bash
+mkdir -p ~/.config/parallax                      # cp will not create it for you
 cp scripts/bitwarden.conf.example ~/.config/parallax/bitwarden.conf
 chmod 600 ~/.config/parallax/bitwarden.conf      # the wrapper refuses looser modes
-$EDITOR ~/.config/parallax/bitwarden.conf        # token, addresses, secret UUIDs
+nano ~/.config/parallax/bitwarden.conf           # token, addresses, secret UUIDs
 
 make check-secrets                               # resolves everything, runs nothing
 
+mkdir -p ~/Library/LaunchAgents
 cp scripts/com.parallax.daily.plist.example \
    ~/Library/LaunchAgents/com.parallax.daily.plist
-$EDITOR ~/Library/LaunchAgents/com.parallax.daily.plist   # absolute paths
+nano ~/Library/LaunchAgents/com.parallax.daily.plist   # absolute paths, 3 places
 launchctl load ~/Library/LaunchAgents/com.parallax.daily.plist
 launchctl start com.parallax.daily                # test now; don't wait for 06:00
 tail -f data/daily.log
 ```
+
+**If you downloaded `bws` by hand** rather than via Homebrew, move it somewhere
+stable and make it executable first — macOS also quarantines downloaded binaries:
+
+```bash
+mkdir -p ~/.local/bin
+mv ~/Documents/bws ~/.local/bin/
+chmod +x ~/.local/bin/bws
+xattr -d com.apple.quarantine ~/.local/bin/bws 2>/dev/null   # Gatekeeper
+~/.local/bin/bws --version                                    # confirm it runs
+```
+
+Then set `BWS_BIN=~/.local/bin/bws` in the config and the wrapper will find it — it
+needs a *path*, not `PATH`. For interactive use (`bws secret list`) add the directory
+to your shell as well:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh
+```
+
+Those are two separate mechanisms and both are worth having: `PATH` is for you at a
+prompt, `BWS_BIN` is for `launchd`, which inherits no `PATH` at all.
+
+**Do not leave it in `~/Documents` or `~/Desktop`.** With iCloud Drive syncing those
+folders — the macOS default — the binary can be evicted to a placeholder, and the 6am
+run then fails intermittently with nothing obvious to point at.
+
+`nano` because it is always present; substitute whatever you use (`vim`, `code -w`,
+`open -a TextEdit`). **Do not `sudo` any of this** — everything above lives in your own
+home directory and needs no elevation. Worse, `sudo` leaves the files owned by root,
+which the wrapper cannot read when `launchd` runs it as you: the mode check passes at
+0600 and the read fails afterwards. If you already did, `sudo chown "$(whoami)"` the
+file to undo it.
 
 `make check-secrets` prints each variable, where it came from, and its length —
 never its value, since that output can land in a log. Run it before trusting a

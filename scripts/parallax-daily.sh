@@ -82,7 +82,20 @@ import os, stat, sys
 print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode))[2:])' "$CONFIG")"
 if [[ "$perms" != "600" && "$perms" != "400" ]]; then
   die "$CONFIG is mode $perms — it holds the access token, so it must be 600 or
-       400 (owner-only). Run: chmod 600 $CONFIG"
+       400 (owner-only). Run: chmod 600 \"$CONFIG\""
+fi
+
+# Owner-only *and* owned by someone else is the sudo footgun: the mode check
+# above passes, and then the read fails with a bare permission error further
+# down. launchd runs this agent as you, not as root. Other causes are possible —
+# another owner entirely, an ACL, a parent directory you cannot traverse — so
+# name sudo as the likely one rather than the only one.
+if [[ ! -r "$CONFIG" ]]; then
+  die "$CONFIG is not readable by $(id -un), so the mode above is owner-only for
+       an owner that is not you. Most often that means it was created with sudo
+       and belongs to root, which launchd cannot read when it runs this as you;
+       an ACL or an untraversable parent directory would also do it. If it is
+       the common case: sudo chown \"$(id -un)\" \"$CONFIG\""
 fi
 
 names=()
@@ -109,7 +122,14 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     || die "not a usable variable name in $CONFIG: '$key'"
   case "$key" in
     BWS_ACCESS_TOKEN) token="$val" ;;
-    BWS_BIN)          BWS_BIN="$val" ;;
+                      # A leading ~/ is expanded here and nowhere else. Values
+                      # read from a file are plain strings, so bash does no tilde
+                      # expansion on them — `BWS_BIN=~/.local/bin/bws` would fail
+                      # as "not executable" while looking perfectly correct.
+                      # Confined to this key on purpose: silently rewriting a
+                      # token or password that happened to start with ~/ would be
+                      # a much worse surprise than a path that has to be absolute.
+    BWS_BIN)          BWS_BIN="${val/#\~\//$HOME/}" ;;
     *)                names+=("$key"); values+=("$val")
                       if [[ "$val" == "$PREFIX"* ]]; then sources+=("bitwarden")
                       else sources+=("literal"); fi ;;
