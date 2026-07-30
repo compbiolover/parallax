@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Parallax daily snapshot, as a launchd user agent.
+
+    cp scripts/com.parallax.daily.plist.example \
+       ~/Library/LaunchAgents/com.parallax.daily.plist
+    # replace /ABSOLUTE/PATH/TO/parallax throughout
+    launchctl load ~/Library/LaunchAgents/com.parallax.daily.plist
+    launchctl start com.parallax.daily      # test now, do not wait for 06:00
+
+  There are no secrets in this file. The wrapper fetches them from Bitwarden
+  Secrets Manager at run time, so this can sit at default permissions and be
+  diffed, backed up, or pasted into a support thread without thought.
+
+  launchd on macOS will not wake a sleeping Mac for this. It runs the job on the
+  next wake instead, so a closed lid at 06:00 means a late run rather than a
+  missed one — but a machine that stays asleep past the next scheduled time only
+  runs once. Missed mornings show up as gaps in the divergence series, which
+  `python3 -m compare.history --backfill` can partially reconstruct.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.parallax.daily</string>
+
+  <!-- Absolute path: launchd inherits no PATH and no working directory. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/ABSOLUTE/PATH/TO/parallax/scripts/parallax-daily.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/ABSOLUTE/PATH/TO/parallax</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>6</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <!-- The run is minutes long and network-bound; niceness keeps it out of the
+       way if you happen to be at the machine when it fires. -->
+  <key>Nice</key>
+  <integer>5</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- The wrapper's own output plus the pipeline's narration. Rotate or truncate
+       this yourself; nothing here prunes it. -->
+  <key>StandardOutPath</key>
+  <string>/ABSOLUTE/PATH/TO/parallax/data/daily.log</string>
+  <key>StandardErrorPath</key>
+  <string>/ABSOLUTE/PATH/TO/parallax/data/daily.log</string>
+</dict>
+</plist>
