@@ -81,7 +81,8 @@ perms="$(/usr/bin/env python3 -c '
 import os, stat, sys
 print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode))[2:])' "$CONFIG")"
 if [[ "$perms" != "600" && "$perms" != "400" ]]; then
-  die "$CONFIG is mode $perms — it holds the access token. chmod 600 it."
+  die "$CONFIG is mode $perms — it holds the access token, so it must be 600 or
+       400 (owner-only). Run: chmod 600 $CONFIG"
 fi
 
 names=()
@@ -97,6 +98,15 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   [[ "$line" == *=* ]] || die "cannot parse line in $CONFIG: $line"
   key="${line%%=*}"
   val="${line#*=}"
+  # Trim around the `=` as well as around the line. `KEY = VALUE` is ordinary
+  # conf-file formatting, and without this it produced a key with a trailing
+  # space (falling through the case below) and a value with a leading one — so
+  # a spaced-out SMTP host would have been exported with a space in it and
+  # failed at connect time, which is a long way from the cause.
+  key="${key%"${key##*[![:space:]]}"}"
+  val="${val#"${val%%[![:space:]]*}"}"
+  [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+    || die "not a usable variable name in $CONFIG: '$key'"
   case "$key" in
     BWS_ACCESS_TOKEN) token="$val" ;;
     BWS_BIN)          BWS_BIN="$val" ;;
