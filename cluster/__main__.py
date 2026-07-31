@@ -32,9 +32,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dominance", type=float, default=0.75,
                         help="min share of one diet for a cluster to be a blindspot")
     parser.add_argument("--min-blindspot-size", type=int, default=2)
+    parser.add_argument("--no-claude-themes", action="store_true",
+                        help="name blindspot themes from the built-in taxonomy "
+                             "only, without an API call")
+    parser.add_argument("--theme-model", help="model for theme naming")
     args = parser.parse_args(argv)
 
-    store = Datastore(_db_path(args, load_settings(args.settings)))
+    settings = load_settings(args.settings)
+    themes_cfg = ((settings.get("cluster", {}) or {}).get("themes", {}) or {})
+    store = Datastore(_db_path(args, settings))
     try:
         if store.embedding_count() == 0:
             print("No embeddings found — run `python -m ingestion run` first.")
@@ -44,17 +50,21 @@ def main(argv: list[str] | None = None) -> int:
             min_cluster_size=args.min_cluster_size,
             dominance=args.dominance,
             min_blindspot_size=args.min_blindspot_size,
+            theme_model=args.theme_model or themes_cfg.get("model"),
+            claude_themes=(not args.no_claude_themes)
+                          and bool(themes_cfg.get("claude", True)),
         )
         print(
             f"Clustered {outcome.n_docs} docs -> {outcome.n_clusters} clusters "
-            f"({outcome.n_noise} noise). {len(outcome.blindspots)} blindspots:\n"
+            f"({outcome.n_noise} noise). {len(outcome.blindspots)} blindspots "
+            f"in {len(outcome.themes)} themes:\n"
         )
-        for b in outcome.blindspots:
-            counts = ", ".join(f"{d}={n}" for d, n in sorted(b.counts.items()))
-            print(f"  [{b.dominant_diet} covers, {b.other_diet} misses] "
-                  f"{b.label}  ({counts}; {b.dominant_share:.0%})")
-            for t in b.representative_titles:
-                print(f"      - {t}")
+        for t in outcome.themes:
+            print(f"  [{t.dominant_diet} covers, {t.other_diet} misses] "
+                  f"{t.title}  ({t.story_count} stories in {t.cluster_count} "
+                  f"clusters; {t.one_sided:.0%} one-sided; named by {t.method})")
+            for story in t.stories[:5]:
+                print(f"      - {story}")
     finally:
         store.close()
     return 0

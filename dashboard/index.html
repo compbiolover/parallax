@@ -384,11 +384,17 @@ function liberty(app, d, colors) {
   p.appendChild(cap);
 }
 
+// Blindspots, read by theme. The clusters underneath stay one click away in the
+// payload (`d.blindspots`) — they are the unit the asymmetry is measured on —
+// but a couple of dozen c-TF-IDF labels is a readout, not a finding. `themes`
+// falls back to grouping nothing when an older payload has no themes; the
+// clusters are still listed so the page never goes blank on old data.
 function blindspots(app, d, colors) {
+  const themes = d.blindspot_themes || [];
   const bs = d.blindspots || [];
   const p = panel(app, "Blindspots — what each diet covers that the other doesn't");
   p.style.marginTop = "18px";
-  if (!bs.length) {
+  if (!themes.length && !bs.length) {
     p.innerHTML += `<p class="sub">No blindspots yet. Run <code>python -m cluster run</code> to cluster stories and detect coverage asymmetry.</p>`;
     return;
   }
@@ -397,18 +403,28 @@ function blindspots(app, d, colors) {
     const col = document.createElement("div"); col.className = "panel card";
     col.style.background = "transparent"; col.style.borderStyle = "dashed";
     col.innerHTML = `<h2 style="color:${colors[di.id]}">${di.label} covers · other misses</h2>`;
-    const mine = bs.filter(b => b.dominant_diet === di.id);
+    const mine = themes.filter(t => t.dominant_diet === di.id);
     if (!mine.length) { col.innerHTML += `<p class="sub">— none —</p>`; }
-    mine.forEach(b => {
-      const rep = (b.representative_titles || []).map(t => `<li>${escapeHtml(t)}</li>`).join("");
-      col.innerHTML += `<div style="margin-bottom:12px">
-        <div style="font-weight:600">${escapeHtml(b.label)}</div>
-        <div class="sub">${b.size} stories · ${Math.round(b.dominant_share*100)}% one-sided</div>
-        <ul style="margin:6px 0 0; padding-left:18px; color:var(--muted); font-size:13px">${rep}</ul>
+    mine.forEach(t => {
+      const stories = (t.stories || []).map(s => `<li>${escapeHtml(s)}</li>`).join("");
+      const rest = (t.story_count || 0) - (t.stories || []).length;
+      col.innerHTML += `<div style="margin-bottom:14px; border-left:3px solid ${colors[di.id]}; padding-left:10px">
+        <div style="font-weight:600">${escapeHtml(t.title)}</div>
+        <div class="sub">${t.story_count} ${t.story_count === 1 ? "story" : "stories"} · ${t.cluster_count} ${t.cluster_count === 1 ? "cluster" : "clusters"} · ${Math.round((t.one_sided||0)*100)}% one-sided</div>
+        <ul style="margin:6px 0 0; padding-left:18px; color:var(--muted); font-size:13px">${stories}</ul>
+        ${rest > 0 ? `<div class="sub" style="margin-top:4px">+${rest} more</div>` : ""}
       </div>`;
     });
     grid.appendChild(col);
   });
+  const named = themes.filter(t => t.method === "claude").length;
+  const note = document.createElement("p"); note.className = "sub";
+  note.style.marginTop = "10px";
+  note.textContent = `${themes.length} themes over ${bs.length} clusters. ` +
+    (named ? "Theme names by Claude, from the headlines in each cluster. " :
+             "Theme names from the built-in taxonomy (cluster/themes.py). ") +
+    "Coverage asymmetry is not a judgement about which story mattered more.";
+  p.appendChild(note);
 }
 
 function panel(parent, title) {

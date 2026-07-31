@@ -95,6 +95,17 @@ CREATE TABLE IF NOT EXISTS document_clusters (
     cluster_id  INTEGER NOT NULL
 );
 
+-- Which theme each blindspot cluster reads under. Written by the cluster run
+-- (which is where a model call belongs) and read by the exporter, so naming a
+-- theme costs one API call a day rather than one per surface that shows it.
+-- Rewritten whole each run, like the clustering it describes.
+CREATE TABLE IF NOT EXISTS blindspot_themes (
+    cluster_id  INTEGER PRIMARY KEY,
+    theme_key   TEXT NOT NULL,
+    theme_title TEXT NOT NULL,
+    method      TEXT NOT NULL            -- 'taxonomy' | 'claude'
+);
+
 -- One aggregate snapshot per UTC date. Re-running the daily job on the same
 -- day overwrites that day's row rather than appending, so the series has one
 -- point per day regardless of how many times the pipeline ran.
@@ -588,6 +599,10 @@ class Datastore:
         with self._tx() as conn:
             conn.execute("DELETE FROM clusters")
             conn.execute("DELETE FROM document_clusters")
+            # Cluster ids are positions in a fresh HDBSCAN run, not stable
+            # identities. Leaving yesterday's themes behind would file today's
+            # cluster 3 under whatever cluster 3 was about yesterday.
+            conn.execute("DELETE FROM blindspot_themes")
             conn.executemany(
                 "INSERT INTO clusters (cluster_id, label, size) VALUES (?,?,?)", clusters
             )
@@ -595,6 +610,20 @@ class Datastore:
                 "INSERT INTO document_clusters (document_id, cluster_id) VALUES (?,?)",
                 assignments,
             )
+
+    def replace_blindspot_themes(
+        self, themes: list[tuple[int, str, str, str]]   # (cluster_id, key, title, method)
+    ) -> None:
+        with self._tx() as conn:
+            conn.execute("DELETE FROM blindspot_themes")
+            conn.executemany(
+                "INSERT INTO blindspot_themes (cluster_id, theme_key, theme_title, "
+                "method) VALUES (?,?,?,?)",
+                themes,
+            )
+
+    def blindspot_theme_rows(self) -> list[sqlite3.Row]:
+        return list(self.conn.execute("SELECT * FROM blindspot_themes"))
 
     def cluster_rows(self) -> list[sqlite3.Row]:
         return list(self.conn.execute("SELECT * FROM clusters ORDER BY size DESC"))

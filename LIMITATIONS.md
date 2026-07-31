@@ -362,6 +362,25 @@ they are the same noisy estimates, dated. Read movement, not decimals.
   doesn't" is descriptive. The tool reports both directions with equal prominence
   (including the author's own blindspots) and never editorializes about which absence is
   worse.
+- **The theme over a cluster is presentation, not measurement.** Asymmetry is computed per
+  cluster; a theme is those clusters grouped by subject so the result can be read. The
+  grouping comes from a keyword taxonomy in `cluster/themes.py`, or from Claude given the
+  headlines when a key is set — neither is validated, and neither changes a number. Two
+  consequences worth holding onto: a mis-grouped cluster is a mis-labelled card over
+  correct arithmetic, and the taxonomy's vocabulary is a choice, so a subject it has no
+  words for lands under "Other coverage" rather than under a name that fits. Which method
+  named a theme travels with it (`method` in the payload) and is printed on the dashboard.
+- **What the email shows is a sample of what was found.** The brief caps the cards per
+  direction and the headlines per card; the dashboard carries the full set. The cap is
+  per direction rather than per section, so a diet with a noisy clustering day cannot
+  crowd the other diet out — but the counts on a card describe the theme, not the three
+  headlines under it.
+- **Headline cleaning is a heuristic over titles alone.** `cluster/titles.py` detokenizes
+  GDELT's spacing, strips a trailing outlet stamp, and drops feed index pages. It is
+  deliberately conservative — a mangled real headline costs more than a surviving ugly one
+  — but it can still take a title-cased second clause for a publisher's name, and it never
+  removes the last headline in a cluster even when every candidate looks like boilerplate.
+  Nothing here touches scoring, embedding, or clustering, all of which ran before it.
 
 ## Theory caveats
 

@@ -97,6 +97,21 @@ the email describes the same payload the dashboard does.
   isn't equal prominence on a phone, where second means scrolled past. A test
   asserts the ordering, and another asserts the copy never editorialises about
   either diet.
+- **Blindspots are read by theme, not by cluster.** A cluster is two to five
+  stories and a day makes a couple of dozen of them, each labelled with whatever
+  terms c-TF-IDF found distinctive ("kidney stone · bret · institutional").
+  `cluster/themes.py` groups them by subject *and* direction, and the email
+  renders each group as a card: a name a person would use, the counts, and three
+  headlines. Three cards per direction, capped per direction rather than per
+  section so a diet having a noisy day cannot push the other diet's blindspots
+  off the page. Whatever the cap leaves out is named on the line beneath, since
+  a theme you are not shown is otherwise indistinguishable from one that was
+  never found.
+- **Headlines are cleaned before they are shown.** GDELT stores them tokenized
+  and outlet-stamped ("U . S . Senate Articles - Christianity Today");
+  `cluster/titles.py` puts the punctuation back, drops the stamp, and recognizes
+  feed index pages, which are not stories and which used to lend the outlet's
+  name to whatever cluster they landed in.
 - **Unscored is never zero.** A first-ever snapshot reports "no previous day to
   compare" rather than `+0.000`; a fairness split with no evidence says so
   rather than printing a ratio; liberty carries its coverage next to its mean.

@@ -6,8 +6,14 @@ the author's diet doesn't, and vice versa — so the author's own blindspots are
 surfaced with equal prominence (the symmetry requirement, ``CLAUDE.md`` §0).
 
 Cluster labels and representative headlines come from the persisted document
-titles (raw bodies are long gone). This module also persists the clustering and
-returns everything the exporter needs.
+titles (raw bodies are long gone), cleaned by :mod:`cluster.titles` first —
+labels built from raw GDELT strings inherited their tokenization and their
+outlet stamps, which is how a cluster came to be called "christianity today ·
+christianity · today".
+
+A cluster is the unit the asymmetry is *measured* on. The unit it is *read* on
+is a theme (:mod:`cluster.themes`), assigned here so the naming happens once per
+run rather than once per surface.
 """
 
 from __future__ import annotations
@@ -19,6 +25,8 @@ from dataclasses import dataclass, field
 from ingestion.datastore import Datastore
 
 from .cluster import ClusterResult, compute_clustering
+from .themes import Theme, ThemeAssignment, assign_themes, group_blindspots
+from .titles import clean_titles
 
 _WORD_RE = re.compile(r"[a-z][a-z'-]+")
 _STOP = {
@@ -29,6 +37,12 @@ _STOP = {
     "have", "had", "not", "no", "new", "says", "say", "said", "after", "over",
     "how", "why", "what", "who", "amid", "into", "out", "up", "down", "about",
 }
+
+
+# How many headlines to keep per blindspot. Wider than any one surface shows,
+# because a theme pools the headlines of every cluster under it and then picks —
+# keeping three per cluster capped a six-cluster theme at material from two.
+REPRESENTATIVE_LIMIT = 6
 
 
 @dataclass
@@ -50,14 +64,13 @@ class ClusteringOutcome:
     n_noise: int
     blindspots: list[Blindspot]
     diets: list[str]
+    themes: list[Theme] = field(default_factory=list)
 
 
 def label_cluster(titles: list[str | None], top: int = 4) -> str:
     """Simple frequency label (no sklearn) — the fallback labeler."""
     counter: Counter[str] = Counter()
-    for t in titles:
-        if not t:
-            continue
+    for t in clean_titles(titles):
         for w in _WORD_RE.findall(t.lower()):
             if w not in _STOP and len(w) > 2:
                 counter[w] += 1
@@ -72,8 +85,14 @@ def label_clusters(cluster_titles: dict[int, list[str | None]], top: int = 3) ->
     TF-IDF across clusters, so generic words shared by every cluster ("trump",
     "new") are down-weighted in favor of what sets a cluster apart. Falls back to
     the frequency labeler when sklearn is unavailable or the vocabulary is empty.
+
+    These labels are a technical readout — the theme (:mod:`cluster.themes`) is
+    what a reader is given. They still run on cleaned titles: an outlet stamp
+    repeated across every headline in a cluster is exactly the kind of term
+    c-TF-IDF finds distinctive, and it names the publisher, not the story.
     """
-    cids = [c for c, ts in cluster_titles.items() if any(t for t in ts)]
+    cleaned = {c: clean_titles(ts) for c, ts in cluster_titles.items()}
+    cids = [c for c, ts in cleaned.items() if ts]
     if not cids:
         return {}
     try:
@@ -81,7 +100,7 @@ def label_clusters(cluster_titles: dict[int, list[str | None]], top: int = 3) ->
     except ImportError:
         return {c: label_cluster(cluster_titles[c]) for c in cids}
 
-    docs = [" ".join(t for t in cluster_titles[c] if t) for c in cids]
+    docs = [" ".join(cleaned[c]) for c in cids]
     try:
         vec = TfidfVectorizer(
             stop_words="english",
@@ -103,9 +122,14 @@ def label_clusters(cluster_titles: dict[int, list[str | None]], top: int = 3) ->
     return labels
 
 
-def _representative(titles: list[str]) -> list[str]:
-    """Most descriptive headlines first (longer titles carry more story detail)."""
-    return sorted((t for t in titles if t), key=len, reverse=True)
+def _representative(titles: list[str | None]) -> list[str]:
+    """Most descriptive headlines first, cleaned, index pages dropped.
+
+    Longer titles carry more story detail, so they lead — but length is measured
+    after cleaning, or an outlet stamp counts as detail and a headline wins on
+    the strength of the name attached to it.
+    """
+    return clean_titles(sorted((t for t in titles if t), key=len, reverse=True))
 
 
 def _members_by_cluster(result: ClusterResult) -> dict[int, list[int]]:
@@ -154,7 +178,7 @@ def detect_blindspots(
                 other_diet=other,
                 dominant_share=share,
                 size=size,
-                representative_titles=rep[:3],
+                representative_titles=rep[:REPRESENTATIVE_LIMIT],
             )
         )
     out.sort(key=lambda b: (b.size, b.dominant_share), reverse=True)
@@ -195,11 +219,29 @@ def blindspots_from_store(
                 other_diet=other,
                 dominant_share=share,
                 size=size,
-                representative_titles=rep[:3],
+                representative_titles=rep[:REPRESENTATIVE_LIMIT],
             )
         )
     out.sort(key=lambda b: (b.size, b.dominant_share), reverse=True)
     return out
+
+
+def themes_from_store(store: Datastore, blindspots: list[Blindspot] | None = None) -> list[Theme]:
+    """Themed blindspots from the datastore, for a surface that only reads.
+
+    Uses the assignments the cluster run persisted. When there are none — an
+    older datastore, or a run that predates theming — it themes from the stored
+    headlines with the taxonomy instead of returning nothing, so the dashboard
+    and the email never fall back to the unreadable cluster labels.
+    """
+    spots = blindspots if blindspots is not None else blindspots_from_store(store)
+    stored = {
+        row["cluster_id"]: ThemeAssignment(
+            row["theme_key"], row["theme_title"], row["method"]
+        )
+        for row in store.blindspot_theme_rows()
+    }
+    return group_blindspots(spots, stored)
 
 
 def run_clustering(
@@ -207,8 +249,11 @@ def run_clustering(
     min_cluster_size: int = 2,
     dominance: float = 0.75,
     min_blindspot_size: int = 2,
+    theme_model: str | None = None,
+    theme_client: object | None = None,
+    claude_themes: bool = True,
 ) -> ClusteringOutcome:
-    """Cluster, persist the assignment, and detect blindspots."""
+    """Cluster, persist the assignment, detect blindspots, and theme them."""
     result = compute_clustering(store, min_cluster_size=min_cluster_size)
 
     members = _members_by_cluster(result)
@@ -226,6 +271,7 @@ def run_clustering(
     store.replace_clustering(cluster_rows, assignments)
 
     blindspots = detect_blindspots(result, dominance, min_blindspot_size, labels=labels)
+    themes = _theme_blindspots(store, blindspots, theme_model, theme_client, claude_themes)
     n_noise = sum(1 for lbl in result.labels if lbl == -1)
     return ClusteringOutcome(
         n_docs=result.n_docs,
@@ -233,4 +279,33 @@ def run_clustering(
         n_noise=n_noise,
         blindspots=blindspots,
         diets=sorted(set(result.diets)),
+        themes=themes,
     )
+
+
+def _theme_blindspots(
+    store: Datastore,
+    blindspots: list[Blindspot],
+    theme_model: str | None,
+    theme_client: object | None,
+    claude_themes: bool,
+) -> list[Theme]:
+    """Name the themes once, here, and persist them.
+
+    The cluster run is the only step that is allowed to spend a model call on
+    this. Doing it at export time instead would bill a call per surface and let
+    the email and the dashboard disagree about what a theme is called on the
+    same day's data.
+    """
+    if not blindspots:
+        store.replace_blindspot_themes([])
+        return []
+    entries = [(b.cluster_id, b.representative_titles) for b in blindspots]
+    kwargs = {"use_claude": claude_themes}
+    if theme_model:
+        kwargs["model"] = theme_model
+    assignments = assign_themes(entries, client=theme_client, **kwargs)
+    store.replace_blindspot_themes(
+        [(cid, a.key, a.title, a.method) for cid, a in assignments.items()]
+    )
+    return group_blindspots(blindspots, assignments)
