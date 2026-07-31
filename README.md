@@ -598,7 +598,8 @@ python3 -m ingestion compare
 python3 -m cluster run
 
 # 4. Charitable daily summary per diet + a cross-diet executive summary (Claude when
-#    ANTHROPIC_API_KEY is set, else a clearly-labeled numbers-only fallback):
+#    ANTHROPIC_API_KEY is set, else a clearly-labeled numbers-only fallback).
+#    Model: --model, else `summarize.model` in settings, else claude-opus-5:
 python3 -m summarize
 
 # 5. Export the dashboard payload, then view it:

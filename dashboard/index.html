@@ -34,9 +34,11 @@
   .cards { margin-top: 18px; display:grid; grid-template-columns:1fr 1fr; gap:18px; }
   @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
   .card .meta { color: var(--muted); font-size:12px; margin-bottom:8px; }
-  .card p { margin: 0; white-space: pre-wrap; }
+  .card p { margin: 0 0 10px; }
   .exec { margin-top:18px; }
-  .exec p { margin:0; white-space: pre-wrap; }
+  .exec p { margin:0 0 10px; max-width: 68ch; }
+  .exec p:last-child { margin-bottom:0; }
+  .card p:last-child { margin-bottom:0; }
   .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px;
     background:var(--line); color:var(--muted); vertical-align:middle; margin-left:8px; }
   .caveat { margin-top:22px; background:var(--warn); border:1px solid var(--line);
@@ -89,7 +91,7 @@ function render(d) {
       <div class="scale">Jensen–Shannon · 0 = identical emphasis, 1 = disjoint</div></div>`;
   } else { jp.innerHTML += `<p class="sub">Need two scored diets to compare.</p>`; }
   const leg = document.createElement("div"); leg.className = "legend";
-  d.diets.forEach(di => leg.innerHTML += `<span><i class="dot" style="background:${colors[di.id]}"></i>${di.label} · ${di.doc_count}</span>`);
+  d.diets.forEach(di => leg.innerHTML += `<span><i class="dot" style="background:${colors[di.id]}"></i>${dietName(di)} · ${di.doc_count}</span>`);
   jp.appendChild(leg);
 
   // Radar panel
@@ -103,6 +105,10 @@ function render(d) {
     rp.appendChild(cap);
   }
 
+  // The sentence that says what the number above means, before the evidence
+  // for it. Same placement as the email.
+  execSummary(app, d);
+
   // JSD over time
   jsdSeries(app, d);
 
@@ -114,7 +120,7 @@ function render(d) {
 
   // Diverging bars (log-ratios)
   if (d.comparison) {
-    const bp = panel(app, `Over / under-indexing — ${d.comparison.pair[0]} vs ${d.comparison.pair[1]} (log-ratio)`);
+    const bp = panel(app, `Over / under-indexing — ${named(d, d.comparison.pair[0])} vs ${named(d, d.comparison.pair[1])} (log-ratio)`);
     bp.style.marginTop = "18px";
     bars(bp, d.foundations, d.comparison.log_ratios, colors[d.comparison.pair[0]]);
   }
@@ -123,16 +129,11 @@ function render(d) {
   if (d.diets.some(x => x.summary)) {
     const cards = document.createElement("div"); cards.className = "cards"; app.appendChild(cards);
     d.diets.forEach(di => {
-      const card = panel(cards, di.label);
+      const card = panel(cards, dietName(di));
       card.className = "panel card";
-      card.innerHTML += `<div class="meta">${di.doc_count} stories</div><p>${escapeHtml(di.summary || "—")}</p>`;
+      card.innerHTML += `<div class="meta">${di.doc_count} stories</div>` + paragraphs(di.summary || "—");
     });
   }
-  if (d.executive_summary) {
-    const ep = panel(app, "Cross-diet executive summary"); ep.className = "panel exec";
-    ep.innerHTML += `<p>${escapeHtml(d.executive_summary)}</p>`;
-  }
-
   blindspots(app, d, colors);
 
   const cav = document.createElement("div"); cav.className = "caveat";
@@ -404,7 +405,7 @@ function blindspots(app, d, colors) {
   d.diets.forEach(di => {
     const col = document.createElement("div"); col.className = "panel card";
     col.style.background = "transparent"; col.style.borderStyle = "dashed";
-    col.innerHTML = `<h2 style="color:${colors[di.id]}">${di.label} covers · other misses</h2>`;
+    col.innerHTML = `<h2 style="color:${colors[di.id]}">${dietName(di)} covers · other misses</h2>`;
     const mine = (themes.length ? themes : bs).filter(x => x.dominant_diet === di.id);
     if (!mine.length) { col.innerHTML += `<p class="sub">— none —</p>`; }
     mine.forEach(x => themes.length ? themeCard(col, x, colors[di.id])
@@ -415,10 +416,10 @@ function blindspots(app, d, colors) {
   const note = document.createElement("p"); note.className = "sub";
   note.style.marginTop = "10px";
   note.textContent = (themes.length
-      ? `${themes.length} themes over ${bs.length} clusters. ` +
+      ? `${themes.length} ${themes.length === 1 ? "theme" : "themes"} over ${bs.length} ${bs.length === 1 ? "cluster" : "clusters"}. ` +
         (named ? "Theme names by Claude, from the headlines in each cluster. " :
                  "Theme names from the built-in taxonomy (cluster/themes.py). ")
-      : `${bs.length} clusters, ungrouped — this payload predates theming. ` +
+      : `${bs.length} ${bs.length === 1 ? "cluster" : "clusters"}, ungrouped — this payload predates theming. ` +
         "Re-run `python -m cluster run` to read them by theme. ") +
     "Coverage asymmetry is not a judgement about which story mattered more.";
   p.appendChild(note);
@@ -450,6 +451,32 @@ function clusterEntry(col, b, colour) {
 function panel(parent, title) {
   const p = document.createElement("div"); p.className = "panel";
   p.innerHTML = `<h2>${title}</h2>`; parent.appendChild(p); return p;
+}
+// What a heading or legend calls a diet: the registry's short label, then its
+// full one, then the machine id. The full label is written to read as a noun
+// phrase inside a sentence ("Modeled conservative-evangelical diet"), which is
+// right for the summaries and too long for a legend.
+function dietName(di) { return escapeHtml(di.short_label || di.label || di.id); }
+// The same name where only the id is at hand (the log-ratio heading), so one
+// page does not call the same diet two things.
+function named(d, id) {
+  const di = (d.diets || []).find(x => x.id === id);
+  return di ? dietName(di) : escapeHtml(id);
+}
+
+// Blank lines in the generated prose are paragraph breaks; a line break inside
+// a paragraph is the model's wrap, not one the reader should see.
+function paragraphs(text) {
+  return text.split(/\n\s*\n/).map(b => b.split(/\s+/).join(" ").trim())
+    .filter(Boolean).map(b => `<p>${escapeHtml(b)}</p>`).join("");
+}
+
+function execSummary(app, d) {
+  const text = (d.executive_summary || "").trim();
+  if (!text) return;
+  const ep = panel(app, "The short version");
+  ep.className = "panel exec";
+  ep.innerHTML += paragraphs(text);
 }
 function escapeHtml(s) { const e = document.createElement("div"); e.textContent = s; return e.innerHTML; }
 

@@ -328,8 +328,89 @@ def test_the_preheader_summarises_without_the_body():
 
 
 def test_diet_ids_render_initialisms_in_caps():
+    """The last-resort naming, for a payload with no labels in it at all."""
     assert _label("modeled_ce") == "Modeled CE"
     assert _label("self") == "Self"
+
+
+# -- the executive summary is prose, and gets read like prose ---------------
+
+
+def test_the_executive_summary_is_its_own_panel_above_the_charts():
+    """It used to open the "What each diet said" panel, below every chart. That
+    is both a wrong claim about what it is and the wrong place: it is the
+    sentence that says what the headline number means."""
+    html = render_html(_payload())
+    assert "The short version" in html
+    assert html.index("The short version") < html.index("Foundation composition")
+    assert html.index("The short version") < html.index("What each diet said")
+
+
+def test_paragraph_breaks_survive_into_the_email():
+    """A twelve-sentence summary in one block is a wall. The model is asked for
+    short paragraphs; they have to arrive as paragraphs."""
+    payload = _payload(executive_summary="First para.\n\nSecond para.\n\nThird.")
+    html = render_html(payload)
+    assert html.count("First para.") == 1
+    # three separate blocks, the first two carrying the gap after them
+    assert "First para.</div>" in html and "Third.</div>" in html
+    assert "padding-bottom:10px;\">First para." in html
+    assert "padding-bottom:0px;\">Third." in html
+
+
+def test_a_hard_wrap_inside_a_paragraph_is_not_a_break():
+    html = render_html(_payload(executive_summary="One sentence\nwrapped by the model."))
+    assert "One sentence wrapped by the model." in html
+
+
+def test_the_summary_provenance_survives_when_only_the_executive_ran():
+    """The method note is a footnote to whichever panel carried prose."""
+    payload = _payload(summary_method="claude-opus-5")
+    for diet in payload["diets"]:
+        diet["summary"] = ""
+    html = render_html(payload)
+    assert "Summaries: claude-opus-5." in html
+
+
+# -- the diets are named, not keyed ----------------------------------------
+
+
+def _labelled(**over) -> dict:
+    payload = _payload(**over)
+    for diet in payload["diets"]:
+        diet["label"] = ("My diet" if diet["id"] == "self"
+                         else "Modeled conservative-evangelical diet")
+        diet["short_label"] = "My diet" if diet["id"] == "self" else "The modeled diet"
+    return payload
+
+
+def test_no_machine_id_reaches_the_reader():
+    """`modeled_ce` is a database key. It appeared in the composition heading,
+    the log-ratio legend, the blindspot headings, and the summary prose."""
+    html = render_html(_labelled(
+        blindspots=[_spot("modeled_ce", "self", titles=["A church story"])],
+        liberty={"scorer": "claude-liberty", "diets": {
+            "self": {"mean": .3, "salient_share": .2, "docs_scored": 8,
+                     "docs_total": 10, "coverage": .8, "thin": False}}},
+    ), own_diet="self")
+    assert "modeled_ce" not in html
+    assert "The modeled diet covered" in html
+    text = render_text(_labelled(), own_diet="self")
+    assert "modeled_ce" not in text
+
+
+def test_the_short_label_is_what_headings_use():
+    """The full label is written to read as a noun phrase inside a sentence, so
+    it wraps to two lines in a legend."""
+    html = render_html(_labelled())
+    assert "The modeled diet" in html
+    assert "Modeled conservative-evangelical diet" not in html
+
+
+def test_a_payload_without_a_short_label_falls_back_to_the_full_one():
+    payload = _payload()
+    payload["diets"][1]["label"] = "Modeled conservative-evangelical diet"
+    assert "Modeled conservative-evangelical diet" in render_html(payload)
 
 
 # -- sending ----------------------------------------------------------------
@@ -715,7 +796,8 @@ def test_text_and_html_carry_the_same_sections():
     html, text = render_html(payload), render_text(payload)
     for section in ("Divergence over time", "equality", "proportionality",
                     "Liberty", "least corroborated", "Summaries",
-                    "one-sided", "identical pipeline"):
+                    "one-sided", "identical pipeline",
+                    "the short version", "what each diet said"):
         assert section.lower() in html.lower(), f"missing from html: {section}"
         assert section.lower() in text.lower(), f"missing from text: {section}"
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -93,8 +94,32 @@ def _label(diet_id: str) -> str:
 
 
 def _diet_label(diet: dict) -> str:
-    label = (diet.get("label") or "").strip()
-    return label if label and label != diet.get("id") else _label(diet["id"])
+    """What a heading or legend calls this diet.
+
+    Prefers the registry's short label, then its full one, then the id
+    prettified. The short label exists because the full one is written to read
+    as a noun phrase inside a sentence ("Modeled conservative-evangelical
+    diet"), and a phrase that reads well in prose wraps to two lines in a
+    legend.
+    """
+    for key in ("short_label", "label"):
+        value = (diet.get(key) or "").strip()
+        if value and value != diet.get("id"):
+            return value
+    return _label(diet["id"])
+
+
+def _named(payload: dict, diet_id: str) -> str:
+    """The same name, for the panels that hold an id rather than a diet dict.
+
+    Without this the blindspot headings and the log-ratio legend fell back to
+    the id prettifier while the panel above them used the registry's label, so
+    one email called the same diet two things.
+    """
+    for diet in payload.get("diets") or []:
+        if diet.get("id") == diet_id:
+            return _diet_label(diet)
+    return _label(diet_id)
 
 
 def _signed(value: float, places: int = 3) -> str:
@@ -325,9 +350,9 @@ def _log_ratio_panel(payload: dict) -> str:
 
     note = (
         f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};padding-top:10px;">'
-        f'<span style="color:{colours[a]};">&#9632;</span> right = {_esc(_label(a))} '
+        f'<span style="color:{colours[a]};">&#9632;</span> right = {_esc(_named(payload, a))} '
         f'over-indexes &nbsp; <span style="color:{colours[b]};">&#9632;</span> left = '
-        f"{_esc(_label(b))} does. Natural log of the ratio of shares; 0 is parity.</div>"
+        f"{_esc(_named(payload, b))} does. Natural log of the ratio of shares; 0 is parity.</div>"
     )
     return _panel(
         "Who leans on which foundation",
@@ -469,7 +494,7 @@ def _blindspot_panel(payload: dict, own: str | None) -> str:
         # Coloured by who covered it, so the colour means the same thing here as
         # in every other panel. "Whose blindspot" is carried by the heading.
         colour = colours.get(dominant, DIET_A)
-        missing = _label(group[0].get("other_diet") or "?")
+        missing = _named(payload, group[0].get("other_diet") or "?")
         shown, rest = group[:MAX_CARDS_PER_DIRECTION], group[MAX_CARDS_PER_DIRECTION:]
         # The overflow belongs to its direction, not to the end of the section:
         # a theme the modeled diet covered, listed under both halves, reads as a
@@ -481,7 +506,7 @@ def _blindspot_panel(payload: dict, own: str | None) -> str:
         blocks.append(
             f'<div style="font:600 13px -apple-system,sans-serif;color:{colour};'
             f'padding:{"2px" if not blocks else "12px"} 0 6px;">'
-            f"{_esc(_label(dominant))} covered · {_esc(missing)} barely did</div>"
+            f"{_esc(_named(payload, dominant))} covered · {_esc(missing)} barely did</div>"
             + "".join(_theme_card(t, colour) for t in shown) + overflow
         )
     note = (
@@ -493,14 +518,55 @@ def _blindspot_panel(payload: dict, own: str | None) -> str:
     return _panel("Blindspots by theme", "".join(blocks) + note)
 
 
+def _paragraphs(text: str, font: str) -> str:
+    """Prose as separate paragraphs with air between them.
+
+    The previous rendering was one ``white-space:pre-wrap`` block, which put a
+    twelve-sentence executive summary on the screen as a single slab. Blank
+    lines in the source become real paragraph breaks; a line break inside a
+    paragraph becomes a space, since a hard wrap at the model's line length is
+    not a break the reader should see at the phone's.
+    """
+    blocks = [" ".join(b.split()) for b in re.split(r"\n\s*\n", text) if b.strip()]
+    last = len(blocks) - 1
+    return "".join(
+        f'<div style="font:{font} -apple-system,BlinkMacSystemFont,sans-serif;'
+        f'color:{INK};padding-bottom:{0 if i == last else 10}px;">{_esc(b)}</div>'
+        for i, b in enumerate(blocks)
+    )
+
+
+def _method_note(payload: dict) -> str:
+    method = payload.get("summary_method")
+    if not method:
+        return ""
+    return (
+        f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};'
+        f'padding-top:12px;">Summaries: {_esc(method)}.</div>'
+    )
+
+
+def _executive_panel(payload: dict) -> str:
+    """The cross-diet summary, on its own and one step larger than body text.
+
+    It used to open the "What each diet said" panel, under that panel's title —
+    which is a claim about what it is, and the wrong one: it is the paragraph
+    about both diets at once, and it is the part most likely to be the whole
+    reading on a phone.
+    """
+    executive = (payload.get("executive_summary") or "").strip()
+    if not executive:
+        return ""
+    body = _paragraphs(executive, "15px/1.65")
+    # The provenance note goes under the last panel carrying prose, so it reads
+    # as a footnote to the summaries rather than an orphan mid-page.
+    if not any((d.get("summary") or "").strip() for d in payload.get("diets") or []):
+        body += _method_note(payload)
+    return _panel("The short version", body)
+
+
 def _summary_panel(payload: dict) -> str:
     parts = []
-    executive = (payload.get("executive_summary") or "").strip()
-    if executive:
-        parts.append(
-            f'<div style="font:14px/1.55 -apple-system,sans-serif;color:{INK};'
-            f'white-space:pre-wrap;">{_esc(executive)}</div>'
-        )
     colours = _colours(payload)
     for diet in payload.get("diets") or []:
         text = (diet.get("summary") or "").strip()
@@ -508,20 +574,16 @@ def _summary_panel(payload: dict) -> str:
             continue
         colour = colours[diet["id"]]
         parts.append(
-            f'<div style="padding-top:14px;"><div style="font:600 13px -apple-system,'
-            f'sans-serif;color:{colour};padding-bottom:4px;">{_esc(_diet_label(diet))}</div>'
-            f'<div style="font:14px/1.55 -apple-system,sans-serif;color:{INK};'
-            f'white-space:pre-wrap;">{_esc(text)}</div></div>'
+            f'<div style="padding-top:{14 if parts else 0}px;">'
+            f'<div style="font:600 13px -apple-system,'
+            f'sans-serif;color:{colour};padding-bottom:6px;">{_esc(_diet_label(diet))}</div>'
+            f'{_paragraphs(text, "14px/1.6")}</div>'
         )
     if not parts:
+        # The method note belongs to whichever panel actually rendered prose.
+        # On its own it is a footnote to nothing.
         return ""
-    method = payload.get("summary_method")
-    if method:
-        parts.append(
-            f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};'
-            f'padding-top:12px;">Summaries: {_esc(method)}.</div>'
-        )
-    return _panel("What each diet said", "".join(parts))
+    return _panel("What each diet said", "".join(parts) + _method_note(payload))
 
 
 def _extra_panel(payload: dict) -> str:
@@ -547,7 +609,7 @@ def _extra_panel(payload: dict) -> str:
             if not values.get("docs_split"):
                 rows.append(
                     f'<div style="font:13px -apple-system,sans-serif;color:{MUTED};'
-                    f'padding:2px 0;">{_esc(_label(diet_id))}: not enough split-terms '
+                    f'padding:2px 0;">{_esc(_named(payload, diet_id))}: not enough split-terms '
                     f"to partition</div>"
                 )
                 continue
@@ -555,7 +617,7 @@ def _extra_panel(payload: dict) -> str:
             thin = " (thin coverage)" if values.get("thin") else ""
             rows.append(
                 f'<div style="font:13px -apple-system,sans-serif;color:{INK};'
-                f'padding:2px 0;">{_esc(_label(diet_id))}: equality {equality:.2f} / '
+                f'padding:2px 0;">{_esc(_named(payload, diet_id))}: equality {equality:.2f} / '
                 f"proportionality {values.get('proportionality', 0):.2f}"
                 f'<span style="color:{MUTED};"> · '
                 f"{100 * values.get('coverage', 0):.0f}% of docs{thin}</span></div>"
@@ -575,7 +637,8 @@ def _extra_panel(payload: dict) -> str:
             thin = " (thin coverage)" if values.get("thin") else ""
             rows.append(
                 f'<div style="font:13px -apple-system,sans-serif;color:{INK};'
-                f'padding:2px 0;">{_esc(_label(diet_id))}: mean {values.get("mean", 0):.2f}, '
+                f'padding:2px 0;">{_esc(_named(payload, diet_id))}: '
+                f'mean {values.get("mean", 0):.2f}, '
                 f"{100 * values.get('salient_share', 0):.0f}% salient"
                 f'<span style="color:{MUTED};"> · '
                 f"{100 * values.get('coverage', 0):.0f}% of docs scored{thin}</span></div>"
@@ -643,7 +706,8 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
             )
         pair_note = (
             f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding-top:6px;">'
-            f"{_esc(_label(pair[0]))} vs {_esc(_label(pair[1]))}</div>" if pair else ""
+            f"{_esc(_named(payload, pair[0]))} vs {_esc(_named(payload, pair[1]))}</div>"
+            if pair else ""
         )
         head = (
             f'<div style="text-align:center;padding:4px 0 2px;">'
@@ -656,6 +720,11 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
 
     panels = "".join([
         _panel("Today", head),
+        # Directly under the headline number, because it is the sentence that
+        # says what the number means. It used to sit below every chart, which
+        # asks the reader to interpret the evidence before being told what it
+        # was evidence of.
+        _executive_panel(payload),
         _composition_panel(payload),
         _log_ratio_panel(payload),
         _sparkline_panel(payload),
@@ -724,11 +793,11 @@ def _extra_text(payload: dict) -> list[str]:
         rows = []
         for diet_id, values in (split.get("diets") or {}).items():
             if not values.get("docs_split"):
-                rows.append(f"  {_label(diet_id)}: not enough split-terms to partition")
+                rows.append(f"  {_named(payload, diet_id)}: not enough split-terms to partition")
                 continue
             thin = " (thin coverage)" if values.get("thin") else ""
             rows.append(
-                f"  {_label(diet_id)}: equality {values.get('equality') or 0.0:.2f} / "
+                f"  {_named(payload, diet_id)}: equality {values.get('equality') or 0.0:.2f} / "
                 f"proportionality {values.get('proportionality') or 0.0:.2f} · "
                 f"{100 * values.get('coverage', 0):.0f}% of docs{thin}"
             )
@@ -743,7 +812,7 @@ def _extra_text(payload: dict) -> list[str]:
                 continue
             thin = " (thin coverage)" if values.get("thin") else ""
             rows.append(
-                f"  {_label(diet_id)}: mean {values.get('mean', 0):.2f}, "
+                f"  {_named(payload, diet_id)}: mean {values.get('mean', 0):.2f}, "
                 f"{100 * values.get('salient_share', 0):.0f}% salient · "
                 f"{100 * values.get('coverage', 0):.0f}% of docs scored{thin}"
             )
@@ -771,7 +840,13 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
                      else f"  {reason}")
         pair = _pair(payload)
         if pair:
-            lines.append(f"  {_label(pair[0])} vs {_label(pair[1])}")
+            lines.append(f"  {_named(payload, pair[0])} vs {_named(payload, pair[1])}")
+
+    # Directly under the number, as in the HTML. The two parts are one brief
+    # and a screen reader should not meet the sections in a different order.
+    executive = (payload.get("executive_summary") or "").strip()
+    if executive:
+        lines += ["", "THE SHORT VERSION", "", executive]
 
     foundations = payload.get("foundations") or []
     for diet in payload.get("diets") or []:
@@ -785,7 +860,8 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
     ratios = (payload.get("comparison") or {}).get("log_ratios") or {}
     pair = _pair(payload)
     if ratios:
-        who = (f"positive = {_label(pair[0])} over-indexes, negative = {_label(pair[1])}"
+        who = (f"positive = {_named(payload, pair[0])} over-indexes, "
+               f"negative = {_named(payload, pair[1])}"
                if pair else "positive = the first diet leans harder")
         lines += ["", f"Over/under-indexing (log-ratio; {who})"]
         lines += [f"  {f:<10} {_signed(ratios[f], 2)}" for f in ratios]
@@ -804,8 +880,8 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
         lines += ["", "Blindspots by theme (both directions; not a judgement about "
                       "which story mattered more)"]
         for dominant, group in _theme_groups(themes, own_diet):
-            missing = _label(group[0].get("other_diet") or "?")
-            lines += ["", f"  {_label(dominant)} covered · {missing} barely did"]
+            missing = _named(payload, group[0].get("other_diet") or "?")
+            lines += ["", f"  {_named(payload, dominant)} covered · {missing} barely did"]
             for theme in group[:MAX_CARDS_PER_DIRECTION]:
                 total = theme.get("story_count") or 0
                 lines.append(
@@ -823,15 +899,13 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
             if rest:
                 lines.append(f"    +{_more_themes(rest, escape=False)}")
 
-    executive = (payload.get("executive_summary") or "").strip()
-    if executive:
-        lines += ["", "Executive summary", executive]
-    for diet in payload.get("diets") or []:
-        text = (diet.get("summary") or "").strip()
-        if text:
-            lines += ["", _diet_label(diet), text]
+    said = [d for d in (payload.get("diets") or []) if (d.get("summary") or "").strip()]
+    if said:
+        lines += ["", "WHAT EACH DIET SAID"]
+        for diet in said:
+            lines += ["", _diet_label(diet), "", (diet.get("summary") or "").strip()]
     method = payload.get("summary_method")
-    if method:
+    if method and (said or executive):
         lines += ["", f"Summaries: {method}."]
 
     lines += _extra_text(payload)

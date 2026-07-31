@@ -115,6 +115,9 @@ class DailyConfig:
             history_limit=int(snap.get("history_limit", DEFAULT_SERIES_LIMIT)),
             claude_themes=bool(themes.get("claude", True)),
             theme_model=themes.get("model"),
+            # `summarize.model` was documented in settings.example.yaml and read
+            # by nothing: the daily run always took the summarizer's default.
+            model=(settings.get("summarize", {}) or {}).get("model"),
             own_diet=dig.get("own_diet"),
         )
         if not bf.get("enabled", True):

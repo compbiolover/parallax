@@ -157,7 +157,7 @@ compare:
 
 # --- Summarization ---------------------------------------------------------
 summarize:
-  model: claude-opus-4-8
+  model: claude-opus-5
   require_verbatim_quotes: true   # every summary auditable against source
   steelman_each_side: true
 

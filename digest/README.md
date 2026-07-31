@@ -107,6 +107,20 @@ the email describes the same payload the dashboard does.
   off the page. Whatever the cap leaves out is named on the line beneath, since
   a theme you are not shown is otherwise indistinguishable from one that was
   never found.
+- **The diets are named, not keyed.** `modeled_ce` and `self` are database
+  keys, and they were reaching the reader: in the composition heading, in the
+  log-ratio legend, and inside the generated prose. The registry's `label`
+  ("Modeled conservative-evangelical diet") is what the summarizer is given,
+  since it has to read as a noun phrase inside a sentence; its `short_label`
+  ("The modeled diet") is what headings and legends use, since a phrase that
+  reads well in prose wraps to two lines in a legend. A test asserts no id
+  survives into either part of the email.
+- **The executive summary leads, and is set as prose.** It sits directly under
+  the headline number, because it is the sentence that says what that number
+  means; reading every chart first asks you to interpret evidence before being
+  told what it was evidence of. Paragraph breaks in the generated text render
+  as paragraphs rather than as one `pre-wrap` slab, and the type is a step
+  larger than the body.
 - **Headlines are cleaned before they are shown.** GDELT stores them tokenized
   and outlet-stamped ("U . S . Senate Articles - Christianity Today");
   `cluster/titles.py` puts the punctuation back, drops the stamp, and recognizes

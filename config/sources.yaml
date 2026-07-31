@@ -20,7 +20,11 @@
 #   updated        date   ISO-8601 date of last change.
 #   diets[]
 #     id           str    Stable machine id ("self" | "modeled_ce").
-#     label        str    Human label for the dashboard.
+#     label        str    Human label, used in prose (summaries name the diet
+#                           with it, so it should read as a noun phrase).
+#     short_label  str    Optional short form for chart legends and panel
+#                           headings, where the full label would wrap.
+#                           Defaults to `label`.
 #     description  str    What this diet models and how it was constructed.
 #     strata[]            Sources grouped by medium/role for stratified weighting.
 #       id         str    Stratum id.
@@ -67,6 +71,7 @@ diets:
   # ---------------------------------------------------------------------------
   - id: self
     label: "My diet"
+    short_label: "My diet"
     description: >
       A model of the author's own media consumption: mainstream / center-left
       national news, public broadcasting, and long-form magazines. Weights are a
@@ -216,6 +221,7 @@ diets:
   # ---------------------------------------------------------------------------
   - id: modeled_ce
     label: "Modeled conservative-evangelical diet"
+    short_label: "The modeled diet"
     description: >
       A versioned model of a conservative-evangelical information environment.
       Stratified by medium and role to capture internal diversity. This models

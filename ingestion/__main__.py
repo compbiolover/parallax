@@ -2,6 +2,7 @@
 
     python -m ingestion run                # fetch, dedup, score, store
     python -m ingestion compare            # print diet profiles + JSD
+    python -m ingestion labels             # record diet labels from the registry
     python -m ingestion run --db data/parallax.sqlite --max-items 10
 """
 
@@ -93,7 +94,8 @@ def _print_compare(store: Datastore) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingestion", description="Parallax Phase 1 pipeline")
-    parser.add_argument("command", choices=["run", "backfill", "compare"], help="what to do")
+    parser.add_argument("command", choices=["run", "backfill", "compare", "labels"],
+                        help="what to do")
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
     parser.add_argument("--max-items", type=int, help="max items per feed (run)")
@@ -157,6 +159,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\nDatastore: {store.counts()}")
         elif args.command == "compare":
             _print_compare(store)
+        elif args.command == "labels":
+            # Ingestion records these, so a store that has not been ingested
+            # since the labels were added still names its diets by machine id.
+            # This writes them without re-fetching anything.
+            from .pipeline import _store_diet_labels
+
+            _store_diet_labels(store, load_registry())
+            recorded = store.diet_labels()
+            short = store.diet_short_labels()
+            if not recorded:
+                print("No diet labels in the registry to record.")
+            for diet_id, label in sorted(recorded.items()):
+                print(f"  {diet_id}: {label}"
+                      + (f"  (short: {short[diet_id]})" if diet_id in short else ""))
     finally:
         store.close()
     return 0

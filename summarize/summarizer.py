@@ -33,7 +33,7 @@ from .prompts import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-opus-4-8"
+DEFAULT_MODEL = "claude-opus-5"
 
 
 @dataclass
@@ -48,8 +48,14 @@ class SummaryResult:
 def gather(
     store: Datastore, max_headlines: int = 50
 ) -> tuple[list[DietContext], ComparisonContext | None]:
-    """Pull per-diet contexts and a pairwise comparison from the datastore."""
+    """Pull per-diet contexts and a pairwise comparison from the datastore.
+
+    The label is the registry's human one ("Modeled conservative-evangelical
+    diet"), recorded at ingestion. Passing the machine id as the label is what
+    put "modeled_ce" and "the self diet" in prose written for a person to read.
+    """
     profiles = diet_profiles(store)
+    labels = store.diet_labels()
     contexts: list[DietContext] = []
     for diet_id in store.diet_ids():
         if diet_id not in profiles:
@@ -57,7 +63,7 @@ def gather(
         contexts.append(
             DietContext(
                 diet_id=diet_id,
-                label=diet_id,
+                label=labels.get(diet_id) or diet_id,
                 doc_count=store.doc_count(diet_id),
                 profile=profiles[diet_id],
                 headlines=store.headlines_for_diet(diet_id, max_headlines),
@@ -144,10 +150,37 @@ def _build_client():
     return client
 
 
+def _normalize_heading(text: str) -> str:
+    """Lowercase, strip punctuation and articles, collapse spaces.
+
+    Headings are matched against the diet labels, and the labels are now
+    sentences ("Modeled conservative-evangelical diet") rather than tokens. A
+    model that title-cases one, drops the trailing noun, or writes an en dash
+    where the registry has a hyphen has still named the right diet, and an
+    exact-match table would drop the section on the floor.
+    """
+    lowered = re.sub(r"[^a-z0-9 ]+", " ", text.lower())
+    words = [w for w in lowered.split() if w not in {"the", "a", "an", "my", "of"}]
+    return " ".join(words)
+
+
+def _match_heading(head: str, label_to_id: dict[str, str]) -> str | None:
+    """The diet a heading names, by exact match then by containment."""
+    normalized = _normalize_heading(head)
+    if not normalized:
+        return None
+    if normalized in label_to_id:
+        return label_to_id[normalized]
+    for label, diet_id in label_to_id.items():
+        if label and (label in normalized or normalized in label):
+            return diet_id
+    return None
+
+
 def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
     """Split Claude's ``## <label>`` / ``## Executive`` sections back apart."""
-    label_to_id = {c.label.lower(): c.diet_id for c in contexts}
-    label_to_id.update({c.diet_id.lower(): c.diet_id for c in contexts})
+    label_to_id = {_normalize_heading(c.label): c.diet_id for c in contexts}
+    label_to_id.update({_normalize_heading(c.diet_id): c.diet_id for c in contexts})
     sections: dict[str, str] = {}
     current: str | None = None
     buf: list[str] = []
@@ -162,7 +195,8 @@ def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
             flush()
             buf = []
             head = m.group(1).strip().lower()
-            current = "executive" if head.startswith("exec") else label_to_id.get(head, head)
+            current = ("executive" if head.startswith("exec")
+                       else _match_heading(head, label_to_id) or head)
         else:
             buf.append(line)
     flush()
@@ -199,6 +233,12 @@ def _deterministic_executive(contexts, comparison, lexicon=None) -> str:
 
     if comparison is None:
         return f"{_FALLBACK_NOTE}\n\nOnly one diet has scored documents; no comparison yet."
+    # The fallback names the diets the same way the model is told to: this text
+    # is read by the same person on the same morning, and "modeled_ce" is a
+    # database key either way.
+    labels = {c.diet_id: c.label for c in contexts}
+    a = labels.get(comparison.diet_a, comparison.diet_a)
+    b = labels.get(comparison.diet_b, comparison.diet_b)
     over = sorted(comparison.log_ratios.items(), key=lambda kv: kv[1], reverse=True)
     a_over = over[0]
     b_over = over[-1]
@@ -211,9 +251,9 @@ def _deterministic_executive(contexts, comparison, lexicon=None) -> str:
         )
     return (
         f"{_FALLBACK_NOTE}\n\n"
-        f"Jensen-Shannon divergence between {comparison.diet_a} and "
-        f"{comparison.diet_b} is {comparison.jsd:.3f} (0 = identical emphasis, "
-        f"1 = disjoint). Relative to {comparison.diet_b}, {comparison.diet_a} "
-        f"over-indexes most on {a_over[0]} ({a_over[1]:+.2f} log-ratio) and "
-        f"under-indexes most on {b_over[0]} ({b_over[1]:+.2f}). {provenance}"
+        f"Jensen-Shannon divergence between {a} and {b} is {comparison.jsd:.3f} "
+        f"(0 = identical emphasis, 1 = disjoint).\n\n"
+        f"Relative to {b}, {a} over-indexes most on {a_over[0]} "
+        f"({a_over[1]:+.2f} log-ratio) and under-indexes most on {b_over[0]} "
+        f"({b_over[1]:+.2f}). {provenance}"
     )

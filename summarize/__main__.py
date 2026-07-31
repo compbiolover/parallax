@@ -1,7 +1,7 @@
 """CLI: ``python -m summarize`` generates and stores daily diet summaries.
 
     python -m summarize                 # summarize + persist to the datastore
-    python -m summarize --db data/parallax.sqlite --model claude-opus-4-8
+    python -m summarize --db data/parallax.sqlite --model claude-opus-5
 
 Uses Claude when ANTHROPIC_API_KEY is set, otherwise a deterministic fallback.
 """
@@ -26,12 +26,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="summarize", description="Daily diet summaries")
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Claude model id")
+    parser.add_argument("--model", help=f"Claude model id (default: {DEFAULT_MODEL})")
     args = parser.parse_args(argv)
 
-    store = Datastore(_db_path(args, load_settings(args.settings)))
+    settings = load_settings(args.settings)
+    store = Datastore(_db_path(args, settings))
     try:
-        summarizer = Summarizer(model=args.model)
+        # CLI flag, then `summarize.model` from settings, then the default.
+        model = args.model or (settings.get("summarize", {}) or {}).get("model")
+        summarizer = Summarizer(model=model or DEFAULT_MODEL)
         result = summarizer.summarize(store)
         if not result.per_diet and not result.executive:
             print("No scored documents yet — run `python -m ingestion run` first.")
