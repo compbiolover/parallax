@@ -64,6 +64,10 @@ class DietContext:
     doc_count: int
     profile: dict[str, float]        # composition, sums to 1
     headlines: list[str]
+    # The registry's short form, if it has one. Not shown to the model — it is
+    # given the full label to write with — but a heading that comes back in the
+    # short form is still this diet, and the parser needs to know that.
+    short_label: str = ""
 
 
 @dataclass(frozen=True)

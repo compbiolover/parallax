@@ -46,6 +46,11 @@
   .empty { text-align:center; padding:60px 20px; color:var(--muted); }
   text { fill: var(--muted); }
   svg { display:block; width:100%; height:auto; }
+  /* The radar is square: full width would render it a metre tall on a
+     wide screen. The diverging bars are wide and short and want the
+     whole column, so the two cannot share a row without shrinking the
+     bars' labels to nothing. */
+  svg.radar { max-width: 420px; margin: 0 auto; }
 </style>
 </head>
 <body>
@@ -82,6 +87,9 @@ function render(d) {
   const colors = {}; const c = ["--self", "--other", "--muted"];
   d.diets.forEach((di, i) => colors[di.id] = getComputedStyle(document.documentElement).getPropertyValue(c[i] || "--muted").trim());
 
+  // Row one is the number and the sentence that says what it means. The charts
+  // are the evidence for that sentence and come after it — reading them first
+  // asks you to interpret evidence before being told what it was evidence of.
   const top = document.createElement("div"); top.className = "grid"; app.appendChild(top);
 
   // JSD panel
@@ -94,8 +102,12 @@ function render(d) {
   d.diets.forEach(di => leg.innerHTML += `<span><i class="dot" style="background:${colors[di.id]}"></i>${dietName(di)} · ${di.doc_count}</span>`);
   jp.appendChild(leg);
 
-  // Radar panel
-  const rp = panel(top, "Foundation emphasis (composition)");
+  execSummary(top, d);
+
+  // Then the evidence, in the order the email carries it: the composition,
+  // where it differs, the trend.
+  const rp = panel(app, "Foundation emphasis (composition)");
+  rp.style.marginTop = "18px";
   radar(rp, d.foundations, d.diets, colors);
   if (d.has_confidence_bands) {
     const cap = document.createElement("div"); cap.className = "sub";
@@ -105,9 +117,12 @@ function render(d) {
     rp.appendChild(cap);
   }
 
-  // The sentence that says what the number above means, before the evidence
-  // for it. Same placement as the email.
-  execSummary(app, d);
+  // Diverging bars (log-ratios)
+  if (d.comparison) {
+    const bp = panel(app, `Over / under-indexing — ${named(d, d.comparison.pair[0])} vs ${named(d, d.comparison.pair[1])} (log-ratio)`);
+    bp.style.marginTop = "18px";
+    bars(bp, d.foundations, d.comparison.log_ratios, colors[d.comparison.pair[0]]);
+  }
 
   // JSD over time
   jsdSeries(app, d);
@@ -117,13 +132,6 @@ function render(d) {
 
   // Liberty / oppression (Claude tagger)
   liberty(app, d, colors);
-
-  // Diverging bars (log-ratios)
-  if (d.comparison) {
-    const bp = panel(app, `Over / under-indexing — ${named(d, d.comparison.pair[0])} vs ${named(d, d.comparison.pair[1])} (log-ratio)`);
-    bp.style.marginTop = "18px";
-    bars(bp, d.foundations, d.comparison.log_ratios, colors[d.comparison.pair[0]]);
-  }
 
   // Summary cards
   if (d.diets.some(x => x.summary)) {
@@ -456,7 +464,10 @@ function panel(parent, title) {
 // full one, then the machine id. The full label is written to read as a noun
 // phrase inside a sentence ("Modeled conservative-evangelical diet"), which is
 // right for the summaries and too long for a legend.
-function dietName(di) { return escapeHtml(di.short_label || di.label || di.id); }
+function dietName(di) {
+  const name = [di.short_label, di.label].find(x => x && x !== di.id);
+  return escapeHtml(name || di.id);
+}
 // The same name where only the id is at hand (the log-ratio heading), so one
 // page does not call the same diet two things.
 function named(d, id) {
@@ -494,7 +505,7 @@ function radar(el, foundations, diets, colors) {
   const maxVal = Math.max(0.001, d3.max(diets, di => d3.max(foundations, f => {
     const rv = radarValue(di, f); return Math.max(rv.v, rv.high || 0);
   })));
-  const svg = d3.select(el).append("svg").attr("viewBox", `0 0 ${size} ${size}`);
+  const svg = d3.select(el).append("svg").attr("class", "radar").attr("viewBox", `0 0 ${size} ${size}`);
   const angle = i => (Math.PI * 2 * i / N) - Math.PI/2;
   const pt = (i, v) => [cx + Math.cos(angle(i)) * r * (v/maxVal), cy + Math.sin(angle(i)) * r * (v/maxVal)];
 

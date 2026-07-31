@@ -56,6 +56,7 @@ def gather(
     """
     profiles = diet_profiles(store)
     labels = store.diet_labels()
+    short_labels = store.diet_short_labels()
     contexts: list[DietContext] = []
     for diet_id in store.diet_ids():
         if diet_id not in profiles:
@@ -64,6 +65,7 @@ def gather(
             DietContext(
                 diet_id=diet_id,
                 label=labels.get(diet_id) or diet_id,
+                short_label=short_labels.get(diet_id, ""),
                 doc_count=store.doc_count(diet_id),
                 profile=profiles[diet_id],
                 headlines=store.headlines_for_diet(diet_id, max_headlines),
@@ -150,37 +152,69 @@ def _build_client():
     return client
 
 
-def _normalize_heading(text: str) -> str:
-    """Lowercase, strip punctuation and articles, collapse spaces.
+# Words a heading can gain or lose without naming a different diet. Articles
+# only: "my" is the whole of what distinguishes "My diet", and dropping it left
+# that label normalized to "diet", which every other label ends with.
+_HEADING_NOISE = frozenset({"the", "a", "an"})
+
+
+def _heading_tokens(text: str) -> frozenset[str]:
+    """A heading as a bag of words, punctuation and articles removed."""
+    lowered = re.sub(r"[^a-z0-9]+", " ", text.lower())
+    return frozenset(w for w in lowered.split() if w not in _HEADING_NOISE)
+
+
+def _match_heading(head: str, table: list[tuple[frozenset[str], str]]) -> str | None:
+    """The diet a heading names, or ``None`` when that is not clear.
 
     Headings are matched against the diet labels, and the labels are now
     sentences ("Modeled conservative-evangelical diet") rather than tokens. A
     model that title-cases one, drops the trailing noun, or writes an en dash
     where the registry has a hyphen has still named the right diet, and an
     exact-match table would drop the section on the floor.
+
+    Matching is by token subset in either direction: a heading that is part of a
+    label ("Modeled conservative-evangelical") and one that is a label plus
+    trimming ("My diet today") both land. Substring containment does not work
+    here, and not subtly: under it the heading "The modeled diet" matched "My
+    diet" reduced to "diet", and a section about the modeled diet was filed
+    under the author's own — which inverts the one guarantee this tool makes.
+
+    A heading that fits two diets equally well ("Diet") returns ``None`` rather
+    than the first one scanned. Dropping a section is recoverable; attributing
+    it to the wrong diet is not.
     """
-    lowered = re.sub(r"[^a-z0-9 ]+", " ", text.lower())
-    words = [w for w in lowered.split() if w not in {"the", "a", "an", "my", "of"}]
-    return " ".join(words)
-
-
-def _match_heading(head: str, label_to_id: dict[str, str]) -> str | None:
-    """The diet a heading names, by exact match then by containment."""
-    normalized = _normalize_heading(head)
-    if not normalized:
+    tokens = _heading_tokens(head)
+    if not tokens:
         return None
-    if normalized in label_to_id:
-        return label_to_id[normalized]
-    for label, diet_id in label_to_id.items():
-        if label and (label in normalized or normalized in label):
-            return diet_id
-    return None
+    best: str | None = None
+    best_score = 0
+    tied = False
+    for label_tokens, diet_id in table:
+        if not (label_tokens <= tokens or tokens <= label_tokens):
+            continue
+        score = len(label_tokens & tokens)
+        if score > best_score:
+            best, best_score, tied = diet_id, score, False
+        elif score == best_score and diet_id != best:
+            tied = True
+    return None if tied else best
+
+
+def _heading_table(contexts) -> list[tuple[frozenset[str], str]]:
+    """Every name a diet answers to: its label, its short label, its id."""
+    table: list[tuple[frozenset[str], str]] = []
+    for ctx in contexts:
+        for name in (ctx.label, getattr(ctx, "short_label", ""), ctx.diet_id):
+            tokens = _heading_tokens(name or "")
+            if tokens:
+                table.append((tokens, ctx.diet_id))
+    return table
 
 
 def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
     """Split Claude's ``## <label>`` / ``## Executive`` sections back apart."""
-    label_to_id = {_normalize_heading(c.label): c.diet_id for c in contexts}
-    label_to_id.update({_normalize_heading(c.diet_id): c.diet_id for c in contexts})
+    table = _heading_table(contexts)
     sections: dict[str, str] = {}
     current: str | None = None
     buf: list[str] = []
@@ -196,7 +230,7 @@ def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
             buf = []
             head = m.group(1).strip().lower()
             current = ("executive" if head.startswith("exec")
-                       else _match_heading(head, label_to_id) or head)
+                       else _match_heading(head, table) or head)
         else:
             buf.append(line)
     flush()

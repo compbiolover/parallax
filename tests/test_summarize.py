@@ -126,17 +126,45 @@ def test_the_style_rules_are_in_the_system_prompt():
         assert rule in SYSTEM_PROMPT
 
 
+def _labelled_contexts():
+    return [DietContext("self", "My diet", 1, {}, [], short_label="My diet"),
+            DietContext("modeled_ce", "Modeled conservative-evangelical diet", 1, {}, [],
+                        short_label="The modeled diet")]
+
+
 def test_a_heading_that_does_not_match_the_label_exactly_still_lands():
     """Labels are sentences now. A model that title-cases one or drops the
     trailing noun has still named the right diet."""
-    contexts = [DietContext("self", "My diet", 1, {}, []),
-                DietContext("modeled_ce", "Modeled conservative-evangelical diet", 1, {}, [])]
     text = ("## My Diet\nMine.\n## Modeled Conservative-Evangelical\nTheirs.\n"
             "## Executive\nThe exec.")
-    per_diet, executive = _parse_sections(text, contexts)
+    per_diet, executive = _parse_sections(text, _labelled_contexts())
     assert per_diet["self"] == "Mine."
     assert per_diet["modeled_ce"] == "Theirs."
     assert executive == "The exec."
+
+
+def test_a_heading_in_the_short_form_lands_on_the_right_diet():
+    """The bug this replaces: substring matching reduced "My diet" to "diet",
+    which every label ends with, so "The modeled diet" matched the author's own
+    and a section about the modeled diet was filed under `self`. That inverts
+    the one guarantee the tool makes."""
+    per_diet, _ = _parse_sections(
+        "## The modeled diet\nTheirs.\n## Executive\nE.", _labelled_contexts())
+    assert per_diet["modeled_ce"] == "Theirs."
+    assert per_diet["self"] == ""
+
+
+def test_a_heading_that_fits_both_diets_is_not_guessed_at():
+    """Dropping a section is recoverable. Attributing it to the wrong diet is
+    not, and it is the failure nobody would notice."""
+    per_diet, _ = _parse_sections("## Diet\nWhose?\n", _labelled_contexts())
+    assert per_diet == {"self": "", "modeled_ce": ""}
+
+
+def test_a_heading_carrying_extra_words_still_lands():
+    per_diet, _ = _parse_sections(
+        "## My diet today\nMine.\n", _labelled_contexts())
+    assert per_diet["self"] == "Mine."
 
 
 def test_the_numbers_only_fallback_names_the_diets_too():
