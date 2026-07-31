@@ -547,6 +547,36 @@ class Datastore:
         row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else default
 
+    # A diet's human labels, recorded at ingestion from the source registry.
+    # They live here rather than being read from `sources.yaml` at render time
+    # because every surface downstream already has the store and none of them
+    # has the registry path — and because a label read from today's registry
+    # would silently rename a diet in yesterday's exported payload.
+    #
+    # Two of them: the full label reads as a noun phrase in prose ("Modeled
+    # conservative-evangelical diet"), the short one fits a chart legend.
+    DIET_LABEL_PREFIX = "diet_label:"
+    DIET_SHORT_LABEL_PREFIX = "diet_short_label:"
+
+    def set_diet_label(self, diet_id: str, label: str, short_label: str = "") -> None:
+        self.set_meta(f"{self.DIET_LABEL_PREFIX}{diet_id}", label)
+        if short_label:
+            self.set_meta(f"{self.DIET_SHORT_LABEL_PREFIX}{diet_id}", short_label)
+
+    def diet_labels(self) -> dict[str, str]:
+        """``{diet_id: label}`` for every diet whose label has been recorded."""
+        return self._labels(self.DIET_LABEL_PREFIX)
+
+    def diet_short_labels(self) -> dict[str, str]:
+        """``{diet_id: short_label}``, for diets that supplied a short one."""
+        return self._labels(self.DIET_SHORT_LABEL_PREFIX)
+
+    def _labels(self, prefix: str) -> dict[str, str]:
+        rows = self.conn.execute(
+            "SELECT key, value FROM meta WHERE key LIKE ?", (f"{prefix}%",)
+        )
+        return {r["key"][len(prefix):]: r["value"] for r in rows if r["value"]}
+
     # -- embeddings ------------------------------------------------------
     def upsert_embedding(self, *, document_id: str, vector: list[float], embedder: str) -> None:
         with self._tx() as conn:

@@ -210,6 +210,7 @@ def run(
     _check_lexicon_change(store, lexicon_name)
     store.set_meta("lexicon", lexicon_name)
     store.set_meta("embedder", getattr(embedder, "name", type(embedder).__name__))
+    _store_diet_labels(store, registry)
     _store_transformer_meta(store, transformer)
     robots = RobotsCache(cfg.user_agent, cfg.timeout) if cfg.respect_robots else None
     limiter = RateLimiter(cfg.per_host_rpm)
@@ -328,6 +329,7 @@ def backfill(
     _check_lexicon_change(store, lexicon_name)
     store.set_meta("lexicon", lexicon_name)
     store.set_meta("embedder", getattr(embedder, "name", type(embedder).__name__))
+    _store_diet_labels(store, registry)
     robots = (
         RobotsCache(cfg.user_agent, cfg.timeout)
         if (extract_bodies and cfg.respect_robots) else None
@@ -446,6 +448,23 @@ def _check_lexicon_change(store: Datastore, lexicon_name: str) -> None:
             "Start a fresh datastore for a clean comparison.",
             previous, lexicon_name,
         )
+
+
+def _store_diet_labels(store: Datastore, registry) -> None:
+    """Record each diet's human label from the registry.
+
+    Everything downstream had only the machine id to work with, so the
+    generated summaries called the diets "modeled_ce" and "self" in prose meant
+    for a person to read. The registry has written labels for exactly this; they
+    just never reached the store.
+    """
+    # `getattr` because the registry here is duck-typed: the ingest loop only
+    # ever asks it for sources, and the test doubles supply exactly that. A
+    # provenance record is not the place to start demanding a fuller object.
+    for diet in getattr(registry, "diets", ()):
+        label = (diet.label or "").strip()
+        if label and label != diet.id:
+            store.set_diet_label(diet.id, label, (diet.short_label or "").strip())
 
 
 def _store_transformer_meta(store: Datastore, transformer) -> None:

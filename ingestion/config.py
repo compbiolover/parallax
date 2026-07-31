@@ -42,7 +42,15 @@ class Source:
 class Diet:
     id: str
     label: str
+    # A short form for chart legends, panel headings, and anywhere the full
+    # label would wrap. Defaults to the full label; the registry only needs to
+    # supply it for a diet whose label is a sentence.
+    short_label: str = ""
     sources: list[Source] = field(default_factory=list)
+
+    @property
+    def display_label(self) -> str:
+        return self.short_label or self.label
 
 
 @dataclass(frozen=True)
@@ -117,7 +125,12 @@ def load_registry(path: str | Path = DEFAULT_SOURCES) -> Registry:
                         domain=explicit or derived,
                     )
                 )
-        diets.append(Diet(id=d["id"], label=d.get("label", d["id"]), sources=sources))
+        diets.append(Diet(
+            id=d["id"],
+            label=d.get("label", d["id"]),
+            short_label=d.get("short_label", ""),
+            sources=sources,
+        ))
     return Registry(version=int(data.get("version", 0)), diets=diets)
 
 

@@ -83,13 +83,20 @@ def build_payload(store: Datastore, history_limit: int | None = DEFAULT_SERIES_L
     summaries = store.all_summaries()
     bands, transformer_scorer = _band_payload(store)
 
+    # The registry's human labels, recorded at ingestion. Emitting the id as the
+    # label made every surface print "modeled_ce" at the reader. `label` reads
+    # as a noun phrase in prose; `short_label` is what a heading or legend uses.
+    labels = store.diet_labels()
+    short_labels = store.diet_short_labels()
     diets = []
     for diet_id, profile in profiles.items():
         srow = summaries.get(diet_id)
+        label = labels.get(diet_id) or diet_id
         diets.append(
             {
                 "id": diet_id,
-                "label": diet_id,
+                "label": label,
+                "short_label": short_labels.get(diet_id) or label,
                 "doc_count": store.doc_count(diet_id),
                 "profile": {f: profile.get(f, 0.0) for f in CLASSIC_FOUNDATIONS},
                 "band": bands.get(diet_id),  # None unless the transformer ran

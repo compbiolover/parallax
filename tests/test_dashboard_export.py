@@ -48,6 +48,29 @@ def test_payload_shape():
     store.close()
 
 
+def test_the_payload_carries_both_of_a_diets_names():
+    """`label` reads as a noun phrase inside a sentence, `short_label` fits a
+    legend. Emitting the id as the label put "modeled_ce" on every surface."""
+    store = _store_with_two_diets()
+    store.set_diet_label("modeled_ce", "Modeled conservative-evangelical diet",
+                         "The modeled diet")
+    by_id = {d["id"]: d for d in build_payload(store)["diets"]}
+    assert by_id["modeled_ce"]["label"] == "Modeled conservative-evangelical diet"
+    assert by_id["modeled_ce"]["short_label"] == "The modeled diet"
+    # a diet with no recorded label keeps the id, and the short form follows it
+    assert by_id["self"]["label"] == "self"
+    assert by_id["self"]["short_label"] == "self"
+    store.close()
+
+
+def test_a_label_with_no_short_form_supplies_itself():
+    store = _store_with_two_diets()
+    store.set_diet_label("self", "My diet")
+    by_id = {d["id"]: d for d in build_payload(store)["diets"]}
+    assert by_id["self"]["short_label"] == "My diet"
+    store.close()
+
+
 def test_caveat_softens_for_real_lexicon():
     store = _store_with_two_diets()
     store.set_meta("lexicon", "eMFD (emfd_scoring.csv)")
