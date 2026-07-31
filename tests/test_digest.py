@@ -53,9 +53,18 @@ def _payload(**over) -> dict:
     return {**base, **over}
 
 
-def _spot(dominant, other, label="a cluster"):
-    return {"label": label, "dominant_diet": dominant, "other_diet": other,
-            "size": 12, "dominant_share": 0.9, "representative_titles": ["A headline"]}
+def _spot(dominant, other, label="a cluster", titles=("A headline about something",),
+          cluster_id=0, size=12):
+    """One blindspot cluster as the exporter serializes it.
+
+    ``label`` is the c-TF-IDF readout the email no longer prints; it stays in
+    the fixture because the payload still carries it and because a test that it
+    is *not* printed needs it to be there.
+    """
+    return {"cluster_id": cluster_id, "label": label, "dominant_diet": dominant,
+            "other_diet": other, "size": size, "dominant_share": 0.9,
+            "counts": {dominant: size - 1, other: 1},
+            "representative_titles": list(titles)}
 
 
 # -- unscored is not zero ---------------------------------------------------
@@ -147,11 +156,75 @@ def test_the_authors_own_blindspots_come_first():
 
 
 def test_both_directions_are_rendered():
-    spots = [_spot("self", "modeled_ce", "they missed this"),
-             _spot("modeled_ce", "self", "I missed this")]
+    spots = [_spot("self", "modeled_ce", titles=["A story they missed"]),
+             _spot("modeled_ce", "self", titles=["A story I missed"])]
     html = render_html(_payload(blindspots=spots), own_diet="self")
-    assert "they missed this" in html
-    assert "I missed this" in html
+    assert "A story they missed" in html
+    assert "A story I missed" in html
+    assert "Self covered" in html and "Modeled CE covered" in html
+
+
+def test_the_cluster_label_is_not_what_the_reader_is_shown():
+    """c-TF-IDF labels are a technical readout — "kidney stone · bret ·
+    institutional" over three unrelated headlines. The card is titled by theme."""
+    payload = _payload(blindspots=[
+        _spot("modeled_ce", "self", "kidney stone · bret · institutional",
+              titles=["Bret Michaels shares a health update after a procedure"])])
+    html = render_html(payload, own_diet="self")
+    assert "kidney stone · bret" not in html
+    assert "Health &amp; medicine" in html
+
+
+def test_each_direction_keeps_its_own_room_on_the_page():
+    """Caps are per direction, not per section. A day when one diet clusters
+    noisily must not push the other diet's blindspots off the email — that is
+    the half the confirmation-bias guard exists to protect."""
+    subjects = ["church congregation", "election ballot voters", "hurricane evacuation",
+                "cancer treatment patients", "tariffs and wages"]
+    spots = [_spot("modeled_ce", "self", cluster_id=i, size=20 - i,
+                   titles=[f"A story about {words} and several more words"])
+             for i, words in enumerate(subjects)]
+    spots += [_spot("self", "modeled_ce", cluster_id=99, size=2,
+                    titles=["A story about carbon emissions and ocean warming"])]
+    html = render_html(_payload(blindspots=spots), own_diet="self")
+    # five themes on one side, the smallest theme on the other — the author's
+    # own blindspot still gets its heading and its card
+    assert "Self covered · Modeled CE barely did" in html
+    assert "Climate, energy &amp; environment" in html
+    assert "2 more themes here" in html
+
+
+def test_themes_the_email_leaves_out_are_named_not_merely_counted():
+    """A theme the reader is not shown is otherwise indistinguishable from one
+    that was never found — the failure the whole idea exists to avoid."""
+    subjects = [("church congregation", "Faith &amp; the church"),
+                ("election ballot voters", "Elections"),
+                ("hurricane evacuation", "Disasters"),
+                ("cancer treatment patients", "Health &amp; medicine")]
+    spots = [_spot("modeled_ce", "self", cluster_id=i, size=10 - i,
+                   titles=[f"A story about {words} and more words here"])
+             for i, (words, _) in enumerate(subjects)]
+    html = render_html(_payload(blindspots=spots), own_diet="self")
+    assert "1 more theme here: Health &amp; medicine" in html
+    text = render_text(_payload(blindspots=spots), own_diet="self")
+    assert "+1 more theme here: Health & medicine" in text
+
+
+def test_themes_already_in_the_payload_are_the_ones_rendered():
+    """The cluster run names themes once and persists them. The email reads that
+    naming rather than redoing it, or the two surfaces can disagree on a day the
+    model was reachable for one of them."""
+    payload = _payload(
+        blindspots=[_spot("modeled_ce", "self", titles=["A church story"])],
+        blindspot_themes=[{
+            "key": "faith", "title": "Life of the church", "dominant_diet": "modeled_ce",
+            "other_diet": "self", "cluster_count": 2, "story_count": 7,
+            "one_sided": 0.93, "stories": ["A church story"], "method": "claude",
+        }],
+    )
+    html = render_html(payload, own_diet="self")
+    assert "Life of the church" in html
+    assert "7 stories · 2 clusters · 93% one-sided" in html
 
 
 def test_ordering_is_stable_when_no_diet_is_named_as_the_authors():
@@ -231,7 +304,7 @@ def test_untrusted_text_is_escaped():
     markup."""
     payload = _payload(
         executive_summary="<script>alert(1)</script> & then",
-        blindspots=[_spot("modeled_ce", "self", '"><b>x</b>')],
+        blindspots=[_spot("modeled_ce", "self", titles=['"><b>x</b>'])],
     )
     html = render_html(payload, own_diet="self")
     assert "<script>alert" not in html
@@ -559,10 +632,10 @@ def test_a_diet_keeps_one_colour_across_every_panel():
     colours = _colours(payload)
     html = render_html(payload, own_diet="self")
 
-    # the composition heading and the blindspot dominated by that diet agree
+    # the composition heading and the theme heading for that diet agree
     for diet_id in ("self", "modeled_ce"):
         heading = html.split(_label(diet_id))[1][:200]
-        assert colours[diet_id] in html.split(f"{_label(diet_id)} covered this")[0][-400:] \
+        assert colours[diet_id] in html.split(f"{_label(diet_id)} covered ")[0][-400:] \
             or colours[diet_id] in heading
 
 

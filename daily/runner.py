@@ -76,6 +76,8 @@ class DailyConfig:
     min_cluster_size: int = 2
     dominance: float = 0.75
     min_blindspot_size: int = 2
+    claude_themes: bool = True            # name blindspot themes with Claude
+    theme_model: str | None = None        # None -> cluster.themes default
 
     # summarize
     model: str | None = None              # None -> summarizer default
@@ -103,6 +105,7 @@ class DailyConfig:
         bf = (daily.get("backfill", {}) or {})
         snap = (daily.get("snapshot", {}) or {})
         dig = (settings.get("digest", {}) or {})
+        themes = ((settings.get("cluster", {}) or {}).get("themes", {}) or {})
         cfg = cls(
             backfill_days=int(bf.get("days", 14)),
             backfill_max_per_source=int(bf.get("max_per_source", 250)),
@@ -110,6 +113,8 @@ class DailyConfig:
             backfill_transformer=bool(bf.get("transformer", False)),
             window_days=int(snap.get("window_days", DEFAULT_WINDOW_DAYS)),
             history_limit=int(snap.get("history_limit", DEFAULT_SERIES_LIMIT)),
+            claude_themes=bool(themes.get("claude", True)),
+            theme_model=themes.get("model"),
             own_diet=dig.get("own_diet"),
         )
         if not bf.get("enabled", True):
@@ -202,10 +207,13 @@ def _step_cluster(store, cfg: DailyConfig) -> str:
         min_cluster_size=cfg.min_cluster_size,
         dominance=cfg.dominance,
         min_blindspot_size=cfg.min_blindspot_size,
+        theme_model=cfg.theme_model,
+        claude_themes=cfg.claude_themes,
     )
     return (
         f"{outcome.n_docs} docs -> {outcome.n_clusters} clusters "
-        f"({outcome.n_noise} noise), {len(outcome.blindspots)} blindspots"
+        f"({outcome.n_noise} noise), {len(outcome.blindspots)} blindspots "
+        f"in {len(outcome.themes)} themes"
     )
 
 

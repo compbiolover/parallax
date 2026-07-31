@@ -131,6 +131,19 @@ cluster:
     min_cluster_size: 2           # small news samples over-assign to noise at higher values
   blindspot:
     coverage_asymmetry_threshold: 0.75  # one diet's share of a cluster to call it a blindspot
+  # A cluster is the unit blindspots are *measured* on — two to five stories,
+  # a couple of dozen a day. A theme is the unit they are *read* on: clusters
+  # grouped by subject and direction, under a name written for a person
+  # ("Faith & the church"), which is what the dashboard and the email show.
+  #
+  # Claude names and groups them in one call per cluster run — much better than
+  # keywords on subjects the taxonomy has never heard of. Without a key (or with
+  # `claude: false`) the built-in taxonomy in cluster/themes.py does it instead,
+  # which is deterministic, free, and always available; it is also the per-cluster
+  # fallback whenever Claude declines to place one.
+  themes:
+    claude: true
+    model: claude-sonnet-5
 
 # --- Comparison ------------------------------------------------------------
 compare:

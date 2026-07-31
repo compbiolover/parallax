@@ -93,9 +93,37 @@ def test_blindspots_in_payload():
     store.close()
 
 
+def test_blindspot_themes_travel_with_the_clusters():
+    """The payload carries both units: clusters are what the asymmetry is
+    measured on, themes are what it is read as."""
+    store = _store_with_two_diets()
+    for i in range(3):
+        did = f"ce-extra-{i}"
+        store.upsert_document(doc_id=did, diet_id="modeled_ce", source_id="s",
+            stratum_id=None, url=None,
+            title=f"Church congregation welcomes a new pastor number {i}",
+            published_utc=None, fetched_utc="2026-07-23T00:00:00+00:00",
+            word_count=80, minhash=None)
+        store.upsert_scores(document_id=did, scorer="dictionary",
+                            foundations={"sanctity": 0.5}, sentiment=0.0,
+                            moral_word_ratio=0.1, matched_words=5)
+    store.replace_clustering(clusters=[(5, "faith · story", 3)],
+                             assignments=[(f"ce-extra-{i}", 5) for i in range(3)])
+    store.replace_blindspot_themes([(5, "faith", "Faith & the church", "taxonomy")])
+
+    themes = build_payload(store)["blindspot_themes"]
+    assert [t["title"] for t in themes] == ["Faith & the church"]
+    assert themes[0]["dominant_diet"] == "modeled_ce"
+    assert themes[0]["story_count"] == 3
+    assert themes[0]["stories"]
+    store.close()
+
+
 def test_no_blindspots_when_unclustered():
     store = _store_with_two_diets()
-    assert build_payload(store)["blindspots"] == []
+    payload = build_payload(store)
+    assert payload["blindspots"] == []
+    assert payload["blindspot_themes"] == []
     store.close()
 
 

@@ -36,10 +36,21 @@ INK = "#1a1d24"
 MUTED = "#5c6270"
 LINE = "#e2e5ea"
 PANEL = "#ffffff"
+CARD = "#fbfcfd"          # a theme card, one step off the panel it sits on
 BG = "#f7f8fa"
 
 MAX_WIDTH = 600
 SPARK_DAYS = 21           # ~3 weeks reads clearly at phone width
+
+# How much of the blindspot section a phone gets. The section it replaces ran a
+# card per cluster and a couple of dozen clusters a day, which is a scroll
+# nobody finishes — and an unfinished section is one where the author's own
+# blindspots, whichever half they land in, go unread. Capping per *direction*
+# rather than in total is what keeps the two halves comparable when one diet
+# happens to have a noisier day; what the caps leave out is named, not dropped
+# silently.
+MAX_CARDS_PER_DIRECTION = 3
+STORIES_PER_CARD = 3
 
 # Column widths for the diverging bar chart, as percentages of a fixed-layout
 # table. Percentages rather than pixels because the narrowest phone still in use
@@ -354,41 +365,132 @@ def _sparkline_panel(payload: dict) -> str:
     )
 
 
-def _blindspot_panel(payload: dict, own: str | None) -> str:
-    """Both directions, identical markup, the author's own first."""
+def _themes(payload: dict) -> list[dict]:
+    """The blindspot themes, derived on the spot if the payload predates them.
+
+    A payload exported before theming carries clusters and no themes. Grouping
+    them here — with the same function the cluster run uses, not a second copy
+    of the rule — keeps an old payload readable rather than making the email
+    fall back to the cluster labels this redesign exists to stop showing.
+    """
+    themes = payload.get("blindspot_themes")
+    if themes:
+        return list(themes)
     spots = payload.get("blindspots") or []
     if not spots:
+        return []
+    try:
+        from cluster.themes import group_blindspots
+    except ImportError:      # renderer used standalone, without the cluster pkg
+        logger.warning("cluster.themes is unavailable — blindspots go unthemed")
+        return []
+    return [t.to_dict() for t in group_blindspots(spots)]
+
+
+def _theme_groups(themes: list[dict], own: str | None) -> list[tuple[str, list[dict]]]:
+    """Themes bucketed by who covered them, the author's own blindspots first.
+
+    One heading per direction instead of one sentence per card: with three or
+    four cards under each heading, repeating "X covered this; Y barely did"
+    every time costs a line per card and says nothing new.
+    """
+    groups: dict[str, list[dict]] = {}
+    for theme in _own_first(themes, own):
+        groups.setdefault(theme.get("dominant_diet") or "?", []).append(theme)
+    return list(groups.items())
+
+
+def _more_themes(rest: list[dict], escape: bool = True) -> str:
+    """"2 more themes here: Sports, Media & speech" — named, not just counted.
+
+    A bare "+2 more" is the one thing this section cannot say: a theme the
+    reader is not shown is indistinguishable from a theme that was never found,
+    which is the failure mode the whole blindspot idea exists to avoid.
+    """
+    titles = [t.get("title") or "" for t in rest if t.get("title")]
+    named = ", ".join(_esc(t) if escape else t for t in titles)
+    plural = "theme" if len(rest) == 1 else "themes"
+    return f"{len(rest)} more {plural} here{f': {named}' if named else ''}"
+
+
+def _theme_card(theme: dict, colour: str) -> str:
+    """One theme, as a card. Stacked full width, never side by side.
+
+    A two-across grid is the shape this wants, and it is the shape email cannot
+    have: the fixed-width tables that hold a grid together in Outlook are the
+    same tables a phone then scales down whole, so a 600px two-column layout
+    arrives as unreadably small text rather than as two columns. Compactness
+    comes from the caps above instead — fewer cards, fewer headlines each.
+    """
+    stories = [s for s in (theme.get("stories") or []) if s][:STORIES_PER_CARD]
+    story_html = "".join(
+        f'<div style="font:13px/1.4 -apple-system,sans-serif;color:{INK};'
+        f'padding:2px 0 2px 2px;">· {_esc(s)}</div>' for s in stories
+    )
+    total = theme.get("story_count") or 0
+    remainder = total - len(stories)
+    more = (
+        f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding-top:4px;">'
+        f"+{remainder} more</div>" if remainder > 0 else ""
+    )
+    clusters = theme.get("cluster_count") or 0
+    meta = (
+        f"{total} {'story' if total == 1 else 'stories'} · "
+        f"{clusters} {'cluster' if clusters == 1 else 'clusters'} · "
+        f"{100 * (theme.get('one_sided') or 0):.0f}% one-sided"
+    )
+    return (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="background:{CARD};border:1px solid {LINE};border-left:3px solid '
+        f'{colour};border-radius:10px;margin-bottom:8px;">'
+        f'<tr><td style="padding:10px 12px;">'
+        f'<div style="font:600 14px -apple-system,BlinkMacSystemFont,sans-serif;'
+        f'color:{INK};">{_esc(theme.get("title") or "Other coverage")}</div>'
+        f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};'
+        f'padding:2px 0 6px;">{meta}</div>'
+        f"{story_html}{more}</td></tr></table>"
+    )
+
+
+def _blindspot_panel(payload: dict, own: str | None) -> str:
+    """Themes as cards, both directions, the author's own first.
+
+    Blindspots are detected per cluster and read per theme. A cluster is two to
+    five stories, so a day produces a couple of dozen of them; listing each one
+    under a c-TF-IDF label made a section nobody finishes, titled in a
+    vocabulary nobody speaks.
+    """
+    themes = _themes(payload)
+    if not themes:
         return ""
     colours = _colours(payload)
-    items = []
-    for spot in _own_first(spots, own):
-        dominant = _label(spot.get("dominant_diet", "?"))
-        missing = _label(spot.get("other_diet", "?"))
-        # Coloured by who covered it, so the colour means the same thing here
-        # as in every other panel. "Whose blindspot" is carried by the ordering
-        # and by the sentence underneath, not by hue.
-        colour = colours.get(spot.get("dominant_diet"), DIET_A)
-        titles = spot.get("representative_titles") or []
-        title_html = "".join(
-            f'<div style="font:13px -apple-system,sans-serif;color:{INK};'
-            f'padding:2px 0 2px 10px;">· {_esc(t)}</div>' for t in titles[:3]
+    blocks: list[str] = []
+    for dominant, group in _theme_groups(themes, own):
+        # Coloured by who covered it, so the colour means the same thing here as
+        # in every other panel. "Whose blindspot" is carried by the heading.
+        colour = colours.get(dominant, DIET_A)
+        missing = _label(group[0].get("other_diet") or "?")
+        shown, rest = group[:MAX_CARDS_PER_DIRECTION], group[MAX_CARDS_PER_DIRECTION:]
+        # The overflow belongs to its direction, not to the end of the section:
+        # a theme the modeled diet covered, listed under both halves, reads as a
+        # blindspot of whichever half it was printed nearest.
+        overflow = (
+            f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};'
+            f'padding:0 0 2px 2px;">+{_more_themes(rest)}</div>' if rest else ""
         )
-        items.append(
-            f'<div style="padding:10px 0;border-top:1px solid {LINE};">'
-            f'<div style="font:600 13px -apple-system,sans-serif;color:{colour};">'
-            f"{_esc(spot.get('label', 'cluster'))}</div>"
-            f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding:2px 0 4px;">'
-            f"{_esc(dominant)} covered this; {_esc(missing)} barely did "
-            f"({spot.get('size', 0)} stories, "
-            f"{100 * spot.get('dominant_share', 0):.0f}% one-sided)</div>"
-            f"{title_html}</div>"
+        blocks.append(
+            f'<div style="font:600 13px -apple-system,sans-serif;color:{colour};'
+            f'padding:{"2px" if not blocks else "12px"} 0 6px;">'
+            f"{_esc(_label(dominant))} covered · {_esc(missing)} barely did</div>"
+            + "".join(_theme_card(t, colour) for t in shown) + overflow
         )
     note = (
-        f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding-top:10px;">'
+        f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};padding-top:10px;">'
         f"Both directions are listed. Coverage asymmetry is not a judgement about "
-        f"which story mattered more.</div>"
+        f"which story mattered more. Themes group clusters by subject; the clusters "
+        f"themselves are the measured unit.</div>"
     )
-    return _panel("Blindspots", "".join(items) + note)
+    return _panel("Blindspots by theme", "".join(blocks) + note)
 
 
 def _summary_panel(payload: dict) -> str:
@@ -602,8 +704,11 @@ def _preheader(payload: dict) -> str:
         return "Not enough scored documents to compare two diets yet."
     delta, reason, since = _delta(payload.get("history") or [])
     movement = f"{_signed(delta)} since {since}" if delta is not None else reason
-    spots = len(payload.get("blindspots") or [])
-    return f"Divergence {jsd:.3f}, {movement}. {spots} blindspot(s)."
+    # Themes, not clusters: the inbox line should count the same things the
+    # section counts, and "24 blindspots" for what reads as four subjects
+    # promises a section that isn't there.
+    count = len(_themes(payload))
+    return f"Divergence {jsd:.3f}, {movement}. {count} blindspot theme(s)."
 
 
 def _extra_text(payload: dict) -> list[str]:
@@ -694,19 +799,29 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
                   f"{len(history)} point(s), peak {peak:.3f}"
                   + (f", {window}-day trailing window recorded alongside" if window else "")]
 
-    spots = _own_first(payload.get("blindspots") or [], own_diet)
-    if spots:
-        lines += ["", "Blindspots (both directions; not a judgement about which "
-                      "story mattered more)"]
-        for spot in spots:
-            lines.append(
-                f"  {spot.get('label', 'cluster')} — "
-                f"{_label(spot.get('dominant_diet', '?'))} covered it, "
-                f"{_label(spot.get('other_diet', '?'))} barely did "
-                f"({spot.get('size', 0)} stories, "
-                f"{100 * spot.get('dominant_share', 0):.0f}% one-sided)"
-            )
-            lines += [f"      · {t}" for t in (spot.get("representative_titles") or [])[:3]]
+    themes = _themes(payload)
+    if themes:
+        lines += ["", "Blindspots by theme (both directions; not a judgement about "
+                      "which story mattered more)"]
+        for dominant, group in _theme_groups(themes, own_diet):
+            missing = _label(group[0].get("other_diet") or "?")
+            lines += ["", f"  {_label(dominant)} covered · {missing} barely did"]
+            for theme in group[:MAX_CARDS_PER_DIRECTION]:
+                total = theme.get("story_count") or 0
+                lines.append(
+                    f"    {theme.get('title') or 'Other coverage'} — {total} "
+                    f"{'story' if total == 1 else 'stories'} in "
+                    f"{theme.get('cluster_count') or 0} cluster(s), "
+                    f"{100 * (theme.get('one_sided') or 0):.0f}% one-sided"
+                )
+                stories = [s for s in (theme.get("stories") or []) if s]
+                lines += [f"        · {s}" for s in stories[:STORIES_PER_CARD]]
+                remainder = total - len(stories[:STORIES_PER_CARD])
+                if remainder > 0:
+                    lines.append(f"        +{remainder} more")
+            rest = group[MAX_CARDS_PER_DIRECTION:]
+            if rest:
+                lines.append(f"    +{_more_themes(rest, escape=False)}")
 
     executive = (payload.get("executive_summary") or "").strip()
     if executive:

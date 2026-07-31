@@ -363,7 +363,7 @@ dashboard. R is there for statistical exploration.
 | `config/` | The source registry (`sources.yaml`) and example settings |
 | `ingestion/` | RSS, GDELT, Media Cloud, podcast audio, YouTube |
 | `scoring/` | Moral-foundations scoring (dictionary + transformer + Claude) |
-| `cluster/` | Embeddings, UMAP + HDBSCAN, blindspot detection |
+| `cluster/` | Embeddings, UMAP + HDBSCAN, blindspot detection, theme grouping |
 | `compare/` | JSD, CLR/Aitchison distance, log-ratios, dated snapshot history |
 | `summarize/` | Map-reduce LLM summarization |
 | `dashboard/` | TypeScript + D3.js static site |
@@ -592,7 +592,9 @@ python3 -m ingestion backfill --days 14 --max-per-source 250
 # 2. Print each diet's composition, the JSD, and the per-foundation log-ratios:
 python3 -m ingestion compare
 
-# 3. Cluster stories from stored embeddings and detect blindspots in both directions:
+# 3. Cluster stories from stored embeddings and detect blindspots in both directions,
+#    then group them into named themes (Claude when ANTHROPIC_API_KEY is set, else a
+#    built-in taxonomy; --no-claude-themes forces the taxonomy):
 python3 -m cluster run
 
 # 4. Charitable daily summary per diet + a cross-diet executive summary (Claude when

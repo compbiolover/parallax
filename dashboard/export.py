@@ -112,6 +112,7 @@ def build_payload(store: Datastore, history_limit: int | None = DEFAULT_SERIES_L
     lexicon = store.get_meta("lexicon")
     has_bands = transformer_scorer is not None
     history = load_series(store, history_limit)
+    blindspots, blindspot_themes = _blindspot_payload(store)
     return {
         "generated_utc": datetime.now(UTC).isoformat(),
         "foundations": list(CLASSIC_FOUNDATIONS),
@@ -131,7 +132,11 @@ def build_payload(store: Datastore, history_limit: int | None = DEFAULT_SERIES_L
         "band_scorers": (
             {"dictionary": lexicon, "transformer": transformer_scorer} if has_bands else None
         ),
-        "blindspots": _blindspots(store),
+        "blindspots": blindspots,
+        # The reading unit: blindspot clusters grouped by subject and direction.
+        # `blindspots` stays alongside it as the measured unit, for a surface
+        # that wants to drill into one cluster.
+        "blindspot_themes": blindspot_themes,
         "caveat": _caveat(lexicon, has_bands),
     }
 
@@ -198,11 +203,18 @@ def _liberty_payload(store: Datastore) -> dict | None:
     }
 
 
-def _blindspots(store: Datastore) -> list[dict]:
-    """Serialize persisted blindspots (empty until `python -m cluster run`)."""
-    from cluster.blindspot import blindspots_from_store
+def _blindspot_payload(store: Datastore) -> tuple[list[dict], list[dict]]:
+    """Blindspots and their themes (both empty until `python -m cluster run`).
 
-    return [
+    Built together from one read so the two cannot describe different clusters:
+    the themes are a grouping *of* these blindspots, and re-deriving them from a
+    second read is how a card ends up counting stories that are not in the list
+    underneath it.
+    """
+    from cluster.blindspot import blindspots_from_store, themes_from_store
+
+    spots = blindspots_from_store(store)
+    serialized = [
         {
             "label": b.label,
             "dominant_diet": b.dominant_diet,
@@ -212,8 +224,9 @@ def _blindspots(store: Datastore) -> list[dict]:
             "dominant_share": b.dominant_share,
             "representative_titles": b.representative_titles,
         }
-        for b in blindspots_from_store(store)
+        for b in spots
     ]
+    return serialized, [t.to_dict() for t in themes_from_store(store, spots)]
 
 
 def write_payload_dict(payload: dict, out: str | Path = DEFAULT_OUT) -> Path:
