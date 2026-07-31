@@ -262,14 +262,20 @@ compares two media diets through Moral Foundations Theory.
 Rules:
 - A theme names a SUBJECT, never the people who follow it. "Faith & the church", \
 not "religious conservatives". Never characterize either diet or its audience.
-- Titles are 2-5 words, plain text, no punctuation beyond "&", suitable as a \
-card heading a person reads on a phone.
+- Titles are 2-5 words and at most 42 characters, suitable as a card heading a \
+person reads on a phone. Plain text: letters, digits, spaces, and & ' / , . - \
+are the only characters allowed, so "Israel-Hamas war" and "Faith, family & \
+work" are fine and anything with markup or quotes in it is not.
 - Prefer a key from the supplied vocabulary when the cluster fits it. Invent a \
 new key only when nothing fits, and keep it lowercase with hyphens.
 - Group aggressively: 3-6 themes total across all clusters is the target. A \
 theme holding one cluster should be rare.
 - Output JSON only."""
 
+# Kept in step with the character list in _SYSTEM above, in both directions: a
+# rule the prompt states and the validator does not enforce is a rule that is
+# not there, and one the validator enforces without stating drops good titles
+# for a reason the model was never told.
 _MAX_TITLE_CHARS = 42
 _TITLE_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 &'/,.-]*$")
 _KEY_OK = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")

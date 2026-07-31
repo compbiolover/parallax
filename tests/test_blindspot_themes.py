@@ -243,6 +243,20 @@ def test_unusable_answers_are_dropped_per_cluster():
     assert claude_assignments(ENTRIES, client=client) == {}
 
 
+def test_the_prompts_own_examples_pass_the_validator():
+    """A rule the prompt states and the validator does not enforce is not a
+    rule; a rule the validator enforces without stating drops good titles for a
+    reason the model was never told. The prompt's examples are the seam."""
+    from cluster.themes import _MAX_TITLE_CHARS, _SYSTEM, _TITLE_OK
+
+    for example in ("Israel-Hamas war", "Faith, family & work", "Faith & the church"):
+        assert example in _SYSTEM               # the prompt holds it out as good
+        assert _TITLE_OK.match(example)         # so the validator has to accept it
+        assert len(example) <= _MAX_TITLE_CHARS
+    assert not _TITLE_OK.match('"><b>x</b>')
+    assert str(_MAX_TITLE_CHARS) in _SYSTEM   # the length limit is stated, not implied
+
+
 def test_a_title_too_long_for_a_card_is_not_used():
     client = _FakeClient(
         '{"assignments": [{"cluster_id": 0, "key": "faith", "title": '
