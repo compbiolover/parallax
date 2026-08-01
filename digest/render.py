@@ -440,7 +440,9 @@ def _more_themes(rest: list[dict], escape: bool = True) -> str:
 
 
 def _outlets(story: dict, colour: str) -> str:
-    """"Christianity Today · The Christian Post · +2" — linked where there is a link.
+    """The mastheads that ran a story, linked where there is a link.
+
+    Renders as "Christianity Today · The Christian Post · +2".
 
     The outlet list is what makes a story checkable and what makes the asymmetry
     concrete: three mastheads carried this and none of yours did. Links are the

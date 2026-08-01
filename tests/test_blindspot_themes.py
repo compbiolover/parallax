@@ -211,6 +211,50 @@ def test_an_outlet_with_no_recorded_name_falls_back_to_its_host():
     assert story.outlets == [("example.org", "https://www.example.org/story")]
 
 
+def test_an_outlet_with_neither_a_name_nor_a_link_falls_back_to_its_key():
+    """A store ingested before outlet names were recorded still has the
+    registry key. De-slugged it is a recognizable masthead, and dropping it
+    would cost the reader the one thing that makes a story checkable."""
+    articles = {0: [Article("a", "Pastor resigns after a long ministry",
+                            source_id="christianity_today"),
+                    Article("b", "Congregation votes on the pastor's successor",
+                            source_id="npr")]}
+    story = group_blindspots(
+        [_spot(0, "self", "modeled_ce", [])], articles=articles)[0].stories[0]
+    # Initialisms stay upper-case, since the registry's ids use them.
+    assert story.outlets == [("Christianity Today", None), ("NPR", None)]
+
+
+def test_a_recorded_name_beats_the_key_and_the_host():
+    articles = {0: [Article("a", "Pastor resigns after a long ministry",
+                            url="https://www.example.org/s",
+                            outlet="Christianity Today",
+                            source_id="christianity_today")]}
+    story = group_blindspots(
+        [_spot(0, "self", "modeled_ce", [])], articles=articles)[0].stories[0]
+    assert story.outlets == [("Christianity Today", "https://www.example.org/s")]
+
+
+def test_a_theme_credits_claude_when_claude_named_it():
+    """`assign_themes` unifies a key's title, so one Claude assignment in a
+    bucket means the words on the card are Claude's. Reporting the first
+    story's method printed a footnote crediting the wrong author."""
+    from cluster.themes import ThemeAssignment
+
+    articles = {
+        0: [Article("a", "Pastor resigns after a long ministry")],
+        1: [Article("b", "Congregation votes on the pastor's successor")],
+    }
+    theme = group_blindspots(
+        [_spot(0, "self", "modeled_ce", []), _spot(1, "self", "modeled_ce", [])],
+        assignments={"b": ThemeAssignment("faith", "Church life", "claude")},
+        articles=articles,
+    )[0]
+    assert theme.method == "claude"
+    assert theme.title == "Church life"      # Claude's wording, not the taxonomy's
+    assert theme.story_count == 2
+
+
 def test_unnamed_coverage_sorts_last():
     themes = group_blindspots([
         _spot(0, "modeled_ce", "self", ["A cutout goes missing from a truck"], size=9),

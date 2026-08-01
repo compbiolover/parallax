@@ -250,6 +250,11 @@ def articles_from_store(
                 title=title,
                 url=member["url"],
                 outlet=outlets.get(member["source_id"], ""),
+                # Carried so a story is still attributable in a store ingested
+                # before outlet names were recorded: the key de-slugs into a
+                # recognizable masthead, and no outlet at all is the one thing
+                # that would make the story uncheckable.
+                source_id=member["source_id"] or "",
             ))
         if articles:
             out[spot.cluster_id] = articles

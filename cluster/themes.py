@@ -204,6 +204,9 @@ class Article:
     title: str
     url: str | None = None
     outlet: str = ""
+    # The registry key, kept as the last resort for naming the outlet: a store
+    # ingested before outlet names were recorded has the key and nothing else.
+    source_id: str = ""
 
 
 @dataclass
@@ -549,15 +552,23 @@ def group_blindspots(
     for (dominant, key), by_cluster in buckets.items():
         stories = [_story(cluster_id, rows) for cluster_id, rows in by_cluster.items()]
         stories.sort(key=lambda s: (s.articles, s.title), reverse=True)
-        first = next(iter(by_cluster.values()))[0]
+        members = [row for rows in by_cluster.values() for row in rows]
+        first = members[0]
+        # The name, and who wrote it. `assign_themes` already unifies the title
+        # across a key, so one Claude assignment anywhere in the bucket means
+        # the words on the card are Claude's whatever placed the other stories
+        # — and a story that fell back to the taxonomy in here has not been
+        # through that unification. Taking the first story's title and method
+        # therefore both mis-worded the card and credited the wrong author.
+        named = next((a for a, _, _ in members if a.method == "claude"), first[0])
         themes.append(
             Theme(
                 key=key,
-                title=first[0].title,
+                title=named.title,
                 dominant_diet=dominant,
                 other_diet=first[2].other_diet,
                 stories=stories[:stories_per_theme],
-                method=first[0].method,
+                method=named.method,
             )
         )
     # "Other coverage" last within its direction: it is the bucket for what
@@ -580,7 +591,8 @@ def _story(cluster_id: int, rows: list) -> Story:
     outlets: list[tuple[str, str | None]] = []
     seen: set[str] = set()
     for _, article, _ in rows:
-        label = article.outlet or _host(article.url)
+        label = (article.outlet or _host(article.url)
+                 or _from_source_id(article.source_id))
         if not label or label.casefold() in seen:
             continue
         seen.add(label.casefold())
@@ -603,6 +615,19 @@ def _articles_from_titles(spot: _Spot) -> list[Article]:
     """
     return [Article(doc_id=f"{spot.cluster_id}:{i}", title=title)
             for i, title in enumerate(spot.titles)]
+
+
+def _from_source_id(source_id: str) -> str:
+    """``christianity_today`` -> "Christianity Today". A last resort.
+
+    Outlet names are recorded at ingestion, so this only fires for a store
+    ingested before that was true — but dropping the outlet entirely there
+    costs the reader the one thing that makes a story checkable, and a
+    de-slugged key is a recognizable masthead far more often than not.
+    Initialisms stay upper-case, since the ids use them (``npr`` -> "NPR").
+    """
+    words = [w for w in re.split(r"[_\-\s]+", source_id or "") if w]
+    return " ".join(w.upper() if len(w) <= 3 else w.capitalize() for w in words)
 
 
 def _host(url: str | None) -> str:
