@@ -234,12 +234,19 @@ def _step_summarize(store, cfg: DailyConfig) -> str:
     # truthy dict of empty summaries, so this guard passed straight through an
     # empty result: the run persisted blank prose over the brief and reported
     # "2 diets" while the email showed no summary at all.
-    written = [t for t in [*result.per_diet.values(), result.executive] if t.strip()]
-    if not written:
+    diets = sum(1 for t in result.per_diet.values() if t.strip())
+    if not diets and not result.executive.strip():
         return "no summary text produced — nothing persisted"
     summarizer.persist(store, result)
-    return (f"via {result.method} (model={result.model}), "
-            f"{sum(1 for t in result.per_diet.values() if t.strip())} diets")
+    # An empty per-diet summary is persisted rather than skipped: the row is
+    # this run's answer for that diet, and leaving the previous run's text in
+    # place would put yesterday's prose under today's date. The report says
+    # which sections came back so a partial result is visible here rather than
+    # only as a panel that quietly stopped appearing.
+    detail = f"via {result.method} (model={result.model}), {diets} diets"
+    if diets < len(result.per_diet):
+        detail += f" of {len(result.per_diet)}"
+    return detail + ("" if result.executive.strip() else ", no executive")
 
 
 def _step_snapshot(store, cfg: DailyConfig) -> str:

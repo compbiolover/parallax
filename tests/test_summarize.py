@@ -293,6 +293,72 @@ def test_the_effort_level_is_configurable():
     store.close()
 
 
+class _TypedBlock:
+    """A block that declares a type other than `text` but carries `.text`.
+
+    No shipped block does this today; the point of the test is that a future
+    one cannot silently splice itself into the prose.
+    """
+
+    type = "fallback"
+
+    def __init__(self, text):
+        self.text = text
+
+
+def test_only_prose_blocks_reach_the_summary():
+    store = _seed_store()
+    client = _FakeClient(blocks=[_TypedBlock("NOT PROSE"),
+                                 _FakeBlock("## Executive\nE.")])
+    result = Summarizer(client=client).summarize(store)
+    assert result.executive == "E."
+    assert "NOT PROSE" not in result.executive
+    store.close()
+
+
+def test_a_missing_diet_section_is_reported_not_silently_blank(caplog):
+    """A per-diet section can be missing because the model skipped it — and it
+    is also what a broken heading matcher looks like, which is otherwise
+    silent: the panel just stops appearing."""
+    store = _seed_store()
+    _seed_labels(store)
+    client = _FakeClient(blocks=[_FakeBlock("## My diet\nMine.\n## Executive\nE.")])
+    with caplog.at_level("WARNING"):
+        result = Summarizer(client=client).summarize(store)
+    assert result.per_diet["self"] == "Mine."
+    assert result.per_diet["modeled_ce"] == ""
+    assert "modeled_ce" in caplog.text
+    store.close()
+
+
+def test_a_partial_result_is_persisted_and_the_report_names_the_shortfall(monkeypatch):
+    """The empty row is written, not skipped: it is this run's answer for that
+    diet, and leaving the previous run's text in place would put yesterday's
+    prose under today's date."""
+    from summarize.summarizer import Summarizer, SummaryResult
+
+    partial = SummaryResult({"self": "Mine.", "modeled_ce": ""}, "E.", "m", "claude", "t")
+    monkeypatch.setattr(Summarizer, "summarize", lambda self, store: partial)
+
+    store = _seed_store()
+    detail = _step_summarize_detail(store)
+    assert "1 diets of 2" in detail
+    assert store.all_summaries()["modeled_ce"]["text"] == ""   # written, not skipped
+    assert store.all_summaries()["executive"]["text"] == "E."
+    store.close()
+
+
+def test_an_executive_only_result_says_so(monkeypatch):
+    from summarize.summarizer import Summarizer, SummaryResult
+
+    only_diets = SummaryResult({"self": "Mine."}, "", "m", "claude", "t")
+    monkeypatch.setattr(Summarizer, "summarize", lambda self, store: only_diets)
+
+    store = _seed_store()
+    assert "no executive" in _step_summarize_detail(store)
+    store.close()
+
+
 def test_a_truncated_but_usable_summary_is_kept():
     """Partial prose beats none — the brief degrades to a summary that stops
     early rather than to silence."""

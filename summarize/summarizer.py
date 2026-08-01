@@ -138,6 +138,16 @@ class Summarizer:
                            "deterministic fallback")
             return self._deterministic(contexts, comparison, lexicon)
         per_diet, executive = _parse_sections(text, contexts)
+        missing = [c.diet_id for c in contexts if not per_diet.get(c.diet_id, "").strip()]
+        if missing:
+            # A partial parse is a real state — a section can be missing because
+            # the model skipped it. It is also what a broken heading matcher
+            # looks like, and that failure is silent: the diet's panel just
+            # stops appearing. Say it out loud rather than inferring it later
+            # from a brief that lost a panel.
+            logger.warning(
+                "No summary section parsed for %s — the model may have used "
+                "headings that do not name those diets", ", ".join(missing))
         return SummaryResult(per_diet, executive, self.model, "claude", _now_iso())
 
     def _call_claude(self, client, contexts, comparison, lexicon) -> str:
@@ -187,10 +197,15 @@ def _response_text(resp) -> str:
     if stop == "refusal":
         logger.warning("Claude declined to summarize (safety classifiers)")
         return ""
+    # Prose blocks only. A block that declares a type has to declare `text`;
+    # the `hasattr` path is for blocks that carry no type at all. Accepting any
+    # block with a `.text` attribute regardless of type — which is what the
+    # first clause used to permit — would splice a future non-prose block into
+    # the summary, and the failure would read as the model writing nonsense.
     text = "".join(
         getattr(block, "text", "") or ""
         for block in getattr(resp, "content", None) or []
-        if getattr(block, "type", None) == "text" or hasattr(block, "text")
+        if getattr(block, "type", "text") == "text" and hasattr(block, "text")
     )
     if stop == "max_tokens":
         # Truncated. Partial prose still beats no prose — the brief degrades to
