@@ -81,6 +81,7 @@ class DailyConfig:
 
     # summarize
     model: str | None = None              # None -> summarizer default
+    summary_effort: str | None = None     # None -> summarizer default
 
     # snapshot
     window_days: int = DEFAULT_WINDOW_DAYS
@@ -118,6 +119,7 @@ class DailyConfig:
             # `summarize.model` was documented in settings.example.yaml and read
             # by nothing: the daily run always took the summarizer's default.
             model=(settings.get("summarize", {}) or {}).get("model"),
+            summary_effort=(settings.get("summarize", {}) or {}).get("effort"),
             own_diet=dig.get("own_diet"),
         )
         if not bf.get("enabled", True):
@@ -221,14 +223,23 @@ def _step_cluster(store, cfg: DailyConfig) -> str:
 
 
 def _step_summarize(store, cfg: DailyConfig) -> str:
-    from summarize.summarizer import DEFAULT_MODEL, Summarizer
+    from summarize.summarizer import DEFAULT_EFFORT, DEFAULT_MODEL, Summarizer
 
-    summarizer = Summarizer(model=cfg.model or DEFAULT_MODEL)
+    summarizer = Summarizer(
+        model=cfg.model or DEFAULT_MODEL,
+        effort=cfg.summary_effort or DEFAULT_EFFORT,
+    )
     result = summarizer.summarize(store)
-    if not result.per_diet and not result.executive:
-        return "no scored documents — nothing to summarize"
+    # Test the *text*, not the dict. `{"self": "", "modeled_ce": ""}` is a
+    # truthy dict of empty summaries, so this guard passed straight through an
+    # empty result: the run persisted blank prose over the brief and reported
+    # "2 diets" while the email showed no summary at all.
+    written = [t for t in [*result.per_diet.values(), result.executive] if t.strip()]
+    if not written:
+        return "no summary text produced — nothing persisted"
     summarizer.persist(store, result)
-    return f"via {result.method} (model={result.model}), {len(result.per_diet)} diets"
+    return (f"via {result.method} (model={result.model}), "
+            f"{sum(1 for t in result.per_diet.values() if t.strip())} diets")
 
 
 def _step_snapshot(store, cfg: DailyConfig) -> str:

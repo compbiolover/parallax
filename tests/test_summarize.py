@@ -76,14 +76,36 @@ class _FakeBlock:
 
 
 class _FakeMessages:
+    def __init__(self, blocks=None, stop_reason="end_turn"):
+        self._blocks = blocks
+        self._stop_reason = stop_reason
+        self.calls: list[dict] = []
+
     def create(self, **kwargs):
-        class R:
-            content = [_FakeBlock("## self\nS.\n## modeled_ce\nO.\n## Executive\nE.")]
-        return R()
+        self.calls.append(kwargs)
+        blocks = self._blocks
+        if blocks is None:
+            blocks = [_FakeBlock("## self\nS.\n## modeled_ce\nO.\n## Executive\nE.")]
+        return type("R", (), {"content": blocks, "stop_reason": self._stop_reason})()
 
 
 class _FakeClient:
-    messages = _FakeMessages()
+    def __init__(self, blocks=None, stop_reason="end_turn"):
+        self.messages = _FakeMessages(blocks, stop_reason)
+
+
+class _ThinkingBlock:
+    """What a response carries when reasoning ate the whole token budget.
+
+    Thinking blocks have `.thinking`, not `.text`, and on this model family
+    their text is empty by default — so a response can be well-formed, HTTP
+    200, and carry nothing to print.
+    """
+
+    type = "thinking"
+
+    def __init__(self, thinking=""):
+        self.thinking = thinking
 
 
 # -- the diets are named, not keyed ----------------------------------------
@@ -219,3 +241,104 @@ def test_injected_client_path_and_persist():
     Summarizer(client=_FakeClient()).persist(store, result)
     assert store.all_summaries()["executive"]["text"] == "E."
     store.close()
+
+
+# -- a successful call that says nothing ------------------------------------
+
+
+def test_a_response_with_no_text_falls_back_instead_of_writing_nothing():
+    """The bug this replaces: Opus 5 thinks by default and `max_tokens` caps
+    thinking and prose together, so at the old 1500 the reasoning consumed the
+    budget and the text block came back empty. The run persisted empty
+    summaries over the brief and reported success; the email had no prose in
+    it and nothing said why."""
+    store = _seed_store()
+    client = _FakeClient(blocks=[_ThinkingBlock()], stop_reason="max_tokens")
+    result = Summarizer(client=client).summarize(store)
+    assert result.method == "deterministic"
+    assert result.executive.strip()
+    assert all(t.strip() for t in result.per_diet.values())
+    store.close()
+
+
+def test_a_refusal_is_read_before_the_content():
+    """Safety classifiers decline with an HTTP 200 and empty-or-partial
+    content, so `stop_reason` has to be checked first."""
+    store = _seed_store()
+    client = _FakeClient(blocks=[], stop_reason="refusal")
+    result = Summarizer(client=client).summarize(store)
+    assert result.method == "deterministic"
+    assert result.executive.strip()
+    store.close()
+
+
+def test_the_token_budget_leaves_room_for_thinking_and_prose():
+    """`max_tokens` is one budget for both on this model family."""
+    from summarize.summarizer import MAX_TOKENS
+
+    store = _seed_store()
+    client = _FakeClient()
+    Summarizer(client=client).summarize(store)
+    call = client.messages.calls[0]
+    assert call["max_tokens"] == MAX_TOKENS >= 16000
+    assert call["output_config"] == {"effort": "medium"}
+    store.close()
+
+
+def test_the_effort_level_is_configurable():
+    store = _seed_store()
+    client = _FakeClient()
+    Summarizer(client=client, effort="high").summarize(store)
+    assert client.messages.calls[0]["output_config"] == {"effort": "high"}
+    store.close()
+
+
+def test_a_truncated_but_usable_summary_is_kept():
+    """Partial prose beats none — the brief degrades to a summary that stops
+    early rather than to silence."""
+    store = _seed_store()
+    client = _FakeClient(blocks=[_FakeBlock("## Executive\nHalf a sen")],
+                         stop_reason="max_tokens")
+    result = Summarizer(client=client).summarize(store)
+    assert result.method == "claude"
+    assert result.executive == "Half a sen"
+    store.close()
+
+
+def test_the_daily_step_does_not_report_success_on_empty_summaries(monkeypatch):
+    """`{"self": ""}` is a truthy dict of empty strings — the guard tested the
+    dict, so an all-empty result was persisted over the day's brief and
+    reported as "2 diets"."""
+    from daily.runner import DailyConfig, _step_summarize
+    from summarize.summarizer import Summarizer, SummaryResult
+
+    empty = SummaryResult({"self": "", "modeled_ce": ""}, "", "m", "claude", "t")
+    monkeypatch.setattr(Summarizer, "summarize", lambda self, store: empty)
+
+    store = _seed_store()
+    detail = _step_summarize(store, DailyConfig())
+    assert "nothing persisted" in detail
+    assert "executive" not in store.all_summaries()
+    store.close()
+
+
+def test_the_daily_step_reports_the_diets_it_actually_wrote():
+    store = _seed_store()
+    detail = _step_summarize_detail(store)
+    assert "2 diets" in detail
+    assert store.all_summaries()["executive"]["text"].strip()
+    store.close()
+
+
+def _step_summarize_detail(store):
+    from daily.runner import DailyConfig, _step_summarize
+
+    return _step_summarize(store, DailyConfig())
+
+
+def test_the_daily_run_reads_the_configured_effort():
+    from daily.runner import DailyConfig
+
+    cfg = DailyConfig.from_settings({"summarize": {"effort": "low"}})
+    assert cfg.summary_effort == "low"
+    assert DailyConfig.from_settings({}).summary_effort is None

@@ -158,6 +158,12 @@ compare:
 # --- Summarization ---------------------------------------------------------
 summarize:
   model: claude-opus-5
+  # Thinking depth: low | medium | high | xhigh | max. Opus 5 thinks by default
+  # and `max_tokens` caps thinking *and* the prose together, so effort is the
+  # lever for cost and latency here. `medium` is the default — this is a
+  # bounded writing task over numbers that are already computed, and the daily
+  # run pays for it every morning. Raise it if the prose reads thin.
+  effort: medium
   require_verbatim_quotes: true   # every summary auditable against source
   steelman_each_side: true
 

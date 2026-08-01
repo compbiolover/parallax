@@ -13,7 +13,7 @@ import argparse
 from ingestion.config import load_settings
 from ingestion.datastore import Datastore
 
-from .summarizer import DEFAULT_MODEL, Summarizer
+from .summarizer import DEFAULT_EFFORT, DEFAULT_MODEL, Summarizer
 
 
 def _db_path(args: argparse.Namespace, settings: dict) -> str:
@@ -27,14 +27,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
     parser.add_argument("--model", help=f"Claude model id (default: {DEFAULT_MODEL})")
+    parser.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"],
+                        help=f"thinking depth (default: {DEFAULT_EFFORT})")
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
     store = Datastore(_db_path(args, settings))
     try:
-        # CLI flag, then `summarize.model` from settings, then the default.
-        model = args.model or (settings.get("summarize", {}) or {}).get("model")
-        summarizer = Summarizer(model=model or DEFAULT_MODEL)
+        # CLI flag, then the `summarize:` block in settings, then the defaults.
+        cfg = settings.get("summarize", {}) or {}
+        model = args.model or cfg.get("model")
+        effort = args.effort or cfg.get("effort")
+        summarizer = Summarizer(model=model or DEFAULT_MODEL,
+                                effort=effort or DEFAULT_EFFORT)
         result = summarizer.summarize(store)
         if not result.per_diet and not result.executive:
             print("No scored documents yet — run `python -m ingestion run` first.")
