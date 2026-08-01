@@ -52,6 +52,7 @@ SPARK_DAYS = 21           # ~3 weeks reads clearly at phone width
 # silently.
 MAX_CARDS_PER_DIRECTION = 3
 STORIES_PER_CARD = 3
+OUTLETS_PER_STORY = 3
 
 # Column widths for the diverging bar chart, as percentages of a fixed-layout
 # table. Percentages rather than pixels because the narrowest phone still in use
@@ -438,30 +439,68 @@ def _more_themes(rest: list[dict], escape: bool = True) -> str:
     return f"{len(rest)} more {plural} here{f': {named}' if named else ''}"
 
 
-def _theme_card(theme: dict, colour: str) -> str:
-    """One theme, as a card. Stacked full width, never side by side.
+def _outlets(story: dict, colour: str) -> str:
+    """The mastheads that ran a story, linked where there is a link.
 
-    A two-across grid is the shape this wants, and it is the shape email cannot
-    have: the fixed-width tables that hold a grid together in Outlook are the
-    same tables a phone then scales down whole, so a 600px two-column layout
-    arrives as unreadably small text rather than as two columns. Compactness
-    comes from the caps above instead — fewer cards, fewer headlines each.
+    Renders as "Christianity Today · The Christian Post · +2".
+
+    The outlet list is what makes a story checkable and what makes the asymmetry
+    concrete: three mastheads carried this and none of yours did. Links are the
+    sanctioned form for source material here (``CLAUDE.md`` §0 — summarize and
+    link, never republish), and an anchor loads nothing, so the no-network rule
+    the rest of this file follows still holds.
+    """
+    outlets = [o for o in (story.get("outlets") or []) if o.get("label")]
+    if not outlets:
+        return ""
+    shown, rest = outlets[:OUTLETS_PER_STORY], outlets[OUTLETS_PER_STORY:]
+    parts = []
+    for outlet in shown:
+        label = _esc(outlet["label"])
+        url = (outlet.get("url") or "").strip()
+        parts.append(
+            f'<a href="{_esc(url)}" style="color:{colour};text-decoration:none;'
+            f'border-bottom:1px solid {LINE};">{label}</a>'
+            if url.startswith(("http://", "https://")) else label
+        )
+    tail = f" · +{len(rest)}" if rest else ""
+    return (
+        f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};'
+        f'padding:1px 0 6px 10px;">{" · ".join(parts)}{tail}</div>'
+    )
+
+
+def _theme_card(theme: dict, colour: str) -> str:
+    """One theme, as a card, listing the stories under it.
+
+    Stacked full width, never side by side. A two-across grid is the shape this
+    wants, and it is the shape email cannot have: the fixed-width tables that
+    hold a grid together in Outlook are the same tables a phone then scales down
+    whole, so a 600px two-column layout arrives as unreadably small text rather
+    than as two columns. Compactness comes from the caps above instead.
     """
     stories = [s for s in (theme.get("stories") or []) if s][:STORIES_PER_CARD]
-    story_html = "".join(
-        f'<div style="font:13px/1.4 -apple-system,sans-serif;color:{INK};'
-        f'padding:2px 0 2px 2px;">· {_esc(s)}</div>' for s in stories
-    )
+    story_html = ""
+    for story in stories:
+        count = story.get("articles") or 0
+        tally = (f'<span style="color:{MUTED};font-weight:400;"> · {count} articles'
+                 f"</span>" if count > 1 else "")
+        story_html += (
+            f'<div style="font:600 13px/1.4 -apple-system,sans-serif;color:{INK};'
+            f'padding:4px 0 0 2px;">· {_esc(story.get("title") or "")}{tally}</div>'
+            + _outlets(story, colour)
+        )
     total = theme.get("story_count") or 0
     remainder = total - len(stories)
     more = (
-        f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding-top:4px;">'
-        f"+{remainder} more</div>" if remainder > 0 else ""
+        f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding-top:2px;">'
+        f"+{remainder} more {'story' if remainder == 1 else 'stories'}</div>"
+        if remainder > 0 else ""
     )
-    clusters = theme.get("cluster_count") or 0
+    articles = theme.get("article_count") or 0
     meta = (
         f"{total} {'story' if total == 1 else 'stories'} · "
-        f"{clusters} {'cluster' if clusters == 1 else 'clusters'} · "
+        f"{articles} {'article' if articles == 1 else 'articles'} · "
         f"{100 * (theme.get('one_sided') or 0):.0f}% one-sided"
     )
     return (
@@ -472,9 +511,71 @@ def _theme_card(theme: dict, colour: str) -> str:
         f'<div style="font:600 14px -apple-system,BlinkMacSystemFont,sans-serif;'
         f'color:{INK};">{_esc(theme.get("title") or "Other coverage")}</div>'
         f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};'
-        f'padding:2px 0 6px;">{meta}</div>'
+        f'padding:2px 0 2px;">{meta}</div>'
         f"{story_html}{more}</td></tr></table>"
     )
+
+
+def _agenda_panel(payload: dict) -> str:
+    """Attention divergence, set against the foundation number above it.
+
+    The headline divergence is small on a real corpus and that is a finding,
+    not a bug: averaged over hundreds of documents, both diets speak roughly
+    the same moral vocabulary. It is also not the thing the reader feels. What
+    they feel is the agenda — two people reading about different events — and
+    that number is large. Printing them together is the whole point of the
+    panel; either alone misleads.
+    """
+    agenda = payload.get("agenda")
+    if not agenda or not agenda.get("total_stories"):
+        return ""
+    pair = agenda.get("pair") or []
+    if len(pair) != 2:
+        return ""
+
+    rows = [
+        f'<div style="text-align:center;padding:2px 0 8px;">'
+        f'<div style="font:700 34px/1.05 -apple-system,BlinkMacSystemFont,sans-serif;'
+        f'color:{INK};letter-spacing:-.02em;">{agenda["divergence"]:.3f}</div>'
+        f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding-top:4px;">'
+        f"Attention divergence across {agenda['total_stories']} stories</div></div>"
+    ]
+    for diet_id in pair:
+        share = (agenda.get("exclusive") or {}).get(diet_id)
+        if share is None:
+            continue
+        stories = (agenda.get("exclusive_stories") or {}).get(diet_id, 0)
+        rows.append(
+            f'<div style="font:13px/1.5 -apple-system,sans-serif;color:{INK};'
+            f'padding:2px 0;">{100 * share:.0f}% of {_esc(_named(payload, diet_id))}\'s '
+            f"articles were about stories the other diet never touched"
+            f'<span style="color:{MUTED};"> · {stories} '
+            f"{'story' if stories == 1 else 'stories'}</span></div>"
+        )
+    shared = agenda.get("shared_stories") or 0
+    rows.append(
+        f'<div style="font:13px -apple-system,sans-serif;color:{INK};padding:2px 0;">'
+        f"Both covered {shared} {'story' if shared == 1 else 'stories'} "
+        f"({100 * (agenda.get('overlap') or 0):.0f}% of the day's)</div>"
+    )
+
+    jsd = _headline(payload)
+    note = (
+        "Same scale as the divergence above, over stories instead of "
+        "foundations. Read them together: a small foundation divergence says "
+        "the two diets moralize in similar language"
+        + (f" ({jsd:.3f} here)" if jsd is not None else "")
+        + ", and a large attention divergence says they apply it to different "
+        "events. The second is what a reader experiences as a different world."
+    )
+    if agenda.get("thin"):
+        note += " Thin coverage — one diet has few clustered articles, so treat " \
+                "this as provisional."
+    rows.append(
+        f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};'
+        f'padding-top:10px;">{note}</div>'
+    )
+    return _panel("Same day, different agenda", "".join(rows))
 
 
 def _blindspot_panel(payload: dict, own: str | None) -> str:
@@ -725,6 +826,9 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
         # asks the reader to interpret the evidence before being told what it
         # was evidence of.
         _executive_panel(payload),
+        # Before the foundation charts, because it is the number that explains
+        # why the headline one is small.
+        _agenda_panel(payload),
         _composition_panel(payload),
         _log_ratio_panel(payload),
         _sparkline_panel(payload),
@@ -778,6 +882,41 @@ def _preheader(payload: dict) -> str:
     # promises a section that isn't there.
     count = len(_themes(payload))
     return f"Divergence {jsd:.3f}, {movement}. {count} blindspot theme(s)."
+
+
+def _agenda_text(payload: dict) -> list[str]:
+    """The agenda panel, for the text part. Kept in step with ``_agenda_panel``.
+
+    The comparison sentence in particular has to appear in both: the two
+    divergences mislead separately and inform together, and the text part is
+    what a screen reader gets.
+    """
+    agenda = payload.get("agenda")
+    if not agenda or not agenda.get("total_stories"):
+        return []
+    lines = ["", "SAME DAY, DIFFERENT AGENDA", "",
+             f"Attention divergence: {agenda['divergence']:.3f}  "
+             f"(across {agenda['total_stories']} stories)"]
+    for diet_id in agenda.get("pair") or []:
+        share = (agenda.get("exclusive") or {}).get(diet_id)
+        if share is None:
+            continue
+        stories = (agenda.get("exclusive_stories") or {}).get(diet_id, 0)
+        lines.append(f"  {100 * share:.0f}% of {_named(payload, diet_id)}'s articles "
+                     f"were about stories the other never touched ({stories})")
+    shared = agenda.get("shared_stories") or 0
+    lines.append(f"  both covered {shared} "
+                 f"{'story' if shared == 1 else 'stories'} "
+                 f"({100 * (agenda.get('overlap') or 0):.0f}% of the day's)")
+    jsd = _headline(payload)
+    lines.append("  Same scale as the foundation divergence"
+                 + (f" ({jsd:.3f})" if jsd is not None else "")
+                 + ": a small one there means the diets moralize in similar "
+                   "language, a large one here means they apply it to "
+                   "different events.")
+    if agenda.get("thin"):
+        lines.append("  Thin coverage — treat as provisional.")
+    return lines
 
 
 def _extra_text(payload: dict) -> list[str]:
@@ -848,6 +987,8 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
     if executive:
         lines += ["", "THE SHORT VERSION", "", executive]
 
+    lines += _agenda_text(payload)
+
     foundations = payload.get("foundations") or []
     for diet in payload.get("diets") or []:
         lines += ["", f"{_diet_label(diet)} ({diet.get('doc_count', 0)} docs)"]
@@ -884,14 +1025,27 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
             lines += ["", f"  {_named(payload, dominant)} covered · {missing} barely did"]
             for theme in group[:MAX_CARDS_PER_DIRECTION]:
                 total = theme.get("story_count") or 0
+                articles = theme.get("article_count") or 0
                 lines.append(
                     f"    {theme.get('title') or 'Other coverage'} — {total} "
-                    f"{'story' if total == 1 else 'stories'} in "
-                    f"{theme.get('cluster_count') or 0} cluster(s), "
+                    f"{'story' if total == 1 else 'stories'}, {articles} "
+                    f"{'article' if articles == 1 else 'articles'}, "
                     f"{100 * (theme.get('one_sided') or 0):.0f}% one-sided"
                 )
                 stories = [s for s in (theme.get("stories") or []) if s]
-                lines += [f"        · {s}" for s in stories[:STORIES_PER_CARD]]
+                for story in stories[:STORIES_PER_CARD]:
+                    lines.append(f"        · {story.get('title') or ''}")
+                    outlets = [o for o in (story.get("outlets") or []) if o.get("label")]
+                    if outlets:
+                        named = ", ".join(o["label"] for o in outlets[:OUTLETS_PER_STORY])
+                        extra = len(outlets) - len(outlets[:OUTLETS_PER_STORY])
+                        lines.append(f"            {named}"
+                                     + (f" +{extra}" if extra else ""))
+                    # The link, on its own line: the text part is what a screen
+                    # reader gets, and a URL inside a sentence reads as noise.
+                    lead = next((o["url"] for o in outlets if o.get("url")), None)
+                    if lead:
+                        lines.append(f"            {lead}")
                 remainder = total - len(stories[:STORIES_PER_CARD])
                 if remainder > 0:
                     lines.append(f"        +{remainder} more")

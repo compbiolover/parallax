@@ -210,6 +210,62 @@ def test_themes_the_email_leaves_out_are_named_not_merely_counted():
     assert "+1 more theme here: Health & medicine" in text
 
 
+# -- attention divergence --------------------------------------------------
+
+AGENDA = {
+    "pair": ["self", "modeled_ce"],
+    "divergence": 0.842,
+    "exclusive": {"self": 0.67, "modeled_ce": 0.71},
+    "exclusive_stories": {"self": 14, "modeled_ce": 17},
+    "articles": {"self": 128, "modeled_ce": 96},
+    "shared_stories": 5,
+    "total_stories": 36,
+    "overlap": 0.139,
+    "thin": False,
+}
+
+
+def test_the_agenda_number_is_printed_next_to_the_foundation_one():
+    """Both or neither. The foundation divergence is small on a real corpus —
+    a finding, and not what the reader experiences — so printing it alone reads
+    as "these diets are nearly identical" when the agenda says otherwise."""
+    html = render_html(_payload(agenda=AGENDA))
+    assert "0.842" in html                      # the agenda number
+    assert "0.084" in html                      # and the foundation one, in the note
+    assert "36 stories" in html
+    assert "67% of" in html and "71% of" in html
+    assert "Both covered 5 stories" in html
+
+
+def test_both_diets_get_their_own_exclusivity_sentence():
+    """Symmetry is content: the author's own share of unshared reading is
+    stated as plainly as the modeled diet's (CLAUDE.md §0)."""
+    html = render_html(_payload(agenda=AGENDA), own_diet="self")
+    for share in ("67%", "71%"):
+        assert html.count(share) >= 1
+    assert "never touched" in html
+
+
+def test_no_agenda_panel_before_anything_is_clustered():
+    """An absent metric renders as silence, not as a zero."""
+    html = render_html(_payload(agenda=None))
+    assert "different agenda" not in html.lower()
+    assert render_html(_payload()) == html      # and a payload predating it is fine
+
+
+def test_thin_agenda_coverage_says_so():
+    html = render_html(_payload(agenda={**AGENDA, "thin": True}))
+    assert "provisional" in html
+
+
+def test_the_agenda_travels_into_the_text_part():
+    """The text part is what a screen reader gets, so the second divergence
+    cannot be an HTML-only flourish."""
+    text = render_text(_payload(agenda=AGENDA))
+    assert "0.842" in text
+    assert "never touched" in text
+
+
 def test_themes_already_in_the_payload_are_the_ones_rendered():
     """The cluster run names themes once and persists them. The email reads that
     naming rather than redoing it, or the two surfaces can disagree on a day the
@@ -218,13 +274,23 @@ def test_themes_already_in_the_payload_are_the_ones_rendered():
         blindspots=[_spot("modeled_ce", "self", titles=["A church story"])],
         blindspot_themes=[{
             "key": "faith", "title": "Life of the church", "dominant_diet": "modeled_ce",
-            "other_diet": "self", "cluster_count": 2, "story_count": 7,
-            "one_sided": 0.93, "stories": ["A church story"], "method": "claude",
+            "other_diet": "self", "story_count": 2, "article_count": 7,
+            "one_sided": 0.93, "method": "claude",
+            "stories": [{
+                "cluster_id": 3, "title": "A church story", "articles": 4,
+                "one_sided": 1.0,
+                "outlets": [{"label": "Christianity Today",
+                             "url": "https://christianitytoday.com/a"},
+                            {"label": "The Christian Post", "url": None}],
+            }],
         }],
     )
     html = render_html(payload, own_diet="self")
     assert "Life of the church" in html
-    assert "7 stories · 2 clusters · 93% one-sided" in html
+    assert "2 stories · 7 articles · 93% one-sided" in html
+    assert "4 articles" in html                       # the story's own tally
+    assert 'href="https://christianitytoday.com/a"' in html
+    assert "The Christian Post" in html               # named even without a link
 
 
 def test_ordering_is_stable_when_no_diet_is_named_as_the_authors():

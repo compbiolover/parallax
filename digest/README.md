@@ -101,12 +101,32 @@ the email describes the same payload the dashboard does.
   stories and a day makes a couple of dozen of them, each labelled with whatever
   terms c-TF-IDF found distinctive ("kidney stone · bret · institutional").
   `cluster/themes.py` groups them by subject *and* direction, and the email
-  renders each group as a card: a name a person would use, the counts, and three
-  headlines. Three cards per direction, capped per direction rather than per
-  section so a diet having a noisy day cannot push the other diet's blindspots
-  off the page. Whatever the cap leaves out is named on the line beneath, since
-  a theme you are not shown is otherwise indistinguishable from one that was
-  never found.
+  renders each group as a card: a name a person would use, the counts, and the
+  stories under it. Three cards per direction, capped per direction rather than
+  per section so a diet having a noisy day cannot push the other diet's
+  blindspots off the page. Whatever the cap leaves out is named on the line
+  beneath, since a theme you are not shown is otherwise indistinguishable from
+  one that was never found.
+- **A story names its outlets and links them.** "Story X, and here are the four
+  mastheads on this diet that ran it" is the concrete form of the claim; a
+  headline alone is an assertion the reader cannot check. Each story prints its
+  lead headline, how many articles are in it, and up to three linked outlet
+  names — only from the dominant diet, because the sentence above them says the
+  other diet did not carry it. Links are the sanctioned form for source material
+  (`CLAUDE.md` §0: summarize and link, never republish), and an anchor loads
+  nothing, so the no-network rule still holds.
+- **The theme is decided per article, not per cluster.** Naming a whole cluster
+  gave every headline inside it the cluster's plurality subject, so a lone
+  sports story inside a mostly-church cluster arrived filed under faith. Each
+  article carries its own assignment now and an impure cluster splits across the
+  themes it actually holds.
+- **Attention divergence is printed next to the foundation divergence.** The
+  headline number is small on a real corpus, because averages of hundreds of
+  documents converge — a real finding, and not what the reader experiences. The
+  "same day, different agenda" panel gives the divergence between the two diets'
+  attention across story clusters on the same 0–1 scale, plus the share of each
+  diet's articles that were about stories the other never touched. Either number
+  alone misleads, so the panel says both and names which is which.
 - **The diets are named, not keyed.** `modeled_ce` and `self` are database
   keys, and they were reaching the reader: in the composition heading, in the
   log-ratio legend, and inside the generated prose. The registry's `label`

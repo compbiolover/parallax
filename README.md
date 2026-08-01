@@ -364,7 +364,7 @@ dashboard. R is there for statistical exploration.
 | `ingestion/` | RSS, GDELT, Media Cloud, podcast audio, YouTube |
 | `scoring/` | Moral-foundations scoring (dictionary + transformer + Claude) |
 | `cluster/` | Embeddings, UMAP + HDBSCAN, blindspot detection, theme grouping |
-| `compare/` | JSD, CLR/Aitchison distance, log-ratios, dated snapshot history |
+| `compare/` | JSD, agenda divergence, CLR/Aitchison distance, log-ratios, dated snapshot history |
 | `summarize/` | Map-reduce LLM summarization |
 | `dashboard/` | TypeScript + D3.js static site |
 | `digest/` | The dashboard rendered into a daily email |
@@ -536,6 +536,40 @@ Liberty tagging is the one step that goes quiet on purpose. Above ten documents 
 a Batch API job and polls every twenty seconds, so the run can sit silent for minutes
 *after* ingestion has visibly finished. It says so before it starts, because otherwise that
 pause is indistinguishable from a hang at the very last step.
+
+</details>
+
+<details>
+<summary><b>Two divergences</b> — why the headline number is small and the diets still feel unrecognisable</summary>
+
+The headline Jensen-Shannon divergence compares two five-number *foundation compositions*.
+On a real corpus it comes out small — a few thousandths — because those numbers are
+averages over hundreds of documents, and averages over hundreds of documents converge.
+That is a genuine finding, not a broken metric: care and fairness lead in both diets, the
+binding foundations are present in both, and the strong form of the liberal/conservative
+asymmetry hypothesis (§5 of `CLAUDE.md` — the thing this tool is supposed to *test*) does
+not survive it.
+
+It is also not what a reader experiences. What they experience is the agenda: two people
+reading about different events. `compare/agenda.py` measures that, with the same
+Jensen-Shannon machinery applied to each diet's distribution of attention across story
+clusters:
+
+| Metric | Question it answers | Typical size |
+| --- | --- | --- |
+| Foundation divergence | What moral vocabulary does each diet speak? | Small — they largely speak the same one |
+| Attention divergence | What did each diet spend the day on? | Large — mostly different stories |
+| Exclusive share | What fraction of a diet's articles were about stories the other never touched? | The number a person feels |
+
+Both are printed together, on one scale, in the email and on the dashboard. Either alone
+misleads: the first says "nearly identical", the second says "different worlds", and the
+honest reading is that they moralize alike about different events.
+
+What is *not* built yet is the metric between them — foundation vectors computed **within**
+the clusters both diets covered, which would isolate framing from agenda and answer whether
+the same event gets a different moral treatment. Until that exists, "they moralize alike"
+and "they moralize the same events alike" are separate claims and only the first is
+supported. See `LIMITATIONS.md`.
 
 </details>
 

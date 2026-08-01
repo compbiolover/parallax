@@ -120,10 +120,14 @@ def test_blindspot_themes_travel_with_the_clusters():
     """The payload carries both units: clusters are what the asymmetry is
     measured on, themes are what it is read as."""
     store = _store_with_two_diets()
+    store.set_source_label("ct", "Christianity Today")
+    store.set_source_label("cp", "The Christian Post")
+    sources = ["ct", "cp", "ct"]
     for i in range(3):
         did = f"ce-extra-{i}"
-        store.upsert_document(doc_id=did, diet_id="modeled_ce", source_id="s",
-            stratum_id=None, url=None,
+        store.upsert_document(doc_id=did, diet_id="modeled_ce",
+            source_id=sources[i], stratum_id=None,
+            url=f"https://example.org/pastor-{i}",
             title=f"Church congregation welcomes a new pastor number {i}",
             published_utc=None, fetched_utc="2026-07-23T00:00:00+00:00",
             word_count=80, minhash=None)
@@ -132,13 +136,53 @@ def test_blindspot_themes_travel_with_the_clusters():
                             moral_word_ratio=0.1, matched_words=5)
     store.replace_clustering(clusters=[(5, "faith · story", 3)],
                              assignments=[(f"ce-extra-{i}", 5) for i in range(3)])
-    store.replace_blindspot_themes([(5, "faith", "Faith & the church", "taxonomy")])
+    store.replace_blindspot_themes(
+        [(f"ce-extra-{i}", "faith", "Faith & the church", "taxonomy")
+         for i in range(3)]
+    )
 
     themes = build_payload(store)["blindspot_themes"]
     assert [t["title"] for t in themes] == ["Faith & the church"]
     assert themes[0]["dominant_diet"] == "modeled_ce"
-    assert themes[0]["story_count"] == 3
-    assert themes[0]["stories"]
+    # One cluster, so one story — and the three articles are its coverage, not
+    # three separate stories.
+    assert themes[0]["story_count"] == 1
+    assert themes[0]["article_count"] == 3
+    story = themes[0]["stories"][0]
+    assert story["articles"] == 3
+    # The mastheads that carried it, de-duplicated, each with a link.
+    assert [o["label"] for o in story["outlets"]] == [
+        "Christianity Today", "The Christian Post"
+    ]
+    assert story["outlets"][0]["url"] == "https://example.org/pastor-0"
+    store.close()
+
+
+def test_the_agenda_divergence_travels_with_the_payload():
+    """The second number the page prints. `None` before anything is clustered,
+    because "no clustering" is not "identical agendas"."""
+    store = _store_with_two_diets()
+    assert build_payload(store)["agenda"] is None
+
+    for diet in ("self", "modeled_ce"):
+        for i in range(3):
+            did = f"{diet}-agenda-{i}"
+            store.upsert_document(doc_id=did, diet_id=diet, source_id="s",
+                stratum_id=None, url=None, title=f"{diet} story {i}",
+                published_utc=None, fetched_utc="2026-07-23T00:00:00+00:00",
+                word_count=80, minhash=None)
+            store.upsert_scores(document_id=did, scorer="dictionary",
+                                foundations={"care": 0.5}, sentiment=0.0,
+                                moral_word_ratio=0.1, matched_words=5)
+    store.replace_clustering(
+        clusters=[(7, "mine", 3), (8, "theirs", 3)],
+        assignments=[(f"self-agenda-{i}", 7) for i in range(3)]
+                    + [(f"modeled_ce-agenda-{i}", 8) for i in range(3)],
+    )
+    agenda = build_payload(store)["agenda"]
+    assert agenda["divergence"] == 1.0      # wholly different stories
+    assert agenda["shared_stories"] == 0
+    assert agenda["thin"] is True           # three articles each
     store.close()
 
 

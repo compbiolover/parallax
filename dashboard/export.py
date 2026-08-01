@@ -139,6 +139,12 @@ def build_payload(store: Datastore, history_limit: int | None = DEFAULT_SERIES_L
         "band_scorers": (
             {"dictionary": lexicon, "transformer": transformer_scorer} if has_bands else None
         ),
+        # Attention divergence over story clusters. The headline number above
+        # compares moral vocabularies and comes out small on a real corpus,
+        # because averages of hundreds of documents converge. This one compares
+        # what the two diets spent the day on, and is where the reader's
+        # experience of "different worlds" actually lives.
+        "agenda": _agenda_payload(store),
         "blindspots": blindspots,
         # The reading unit: blindspot clusters grouped by subject and direction.
         # `blindspots` stays alongside it as the measured unit, for a surface
@@ -208,6 +214,14 @@ def _liberty_payload(store: Datastore) -> dict | None:
         },
         "gap": gap(profiles),
     }
+
+
+def _agenda_payload(store: Datastore) -> dict | None:
+    """Attention divergence, or ``None`` before anything has been clustered."""
+    from compare.agenda import compare_agendas
+
+    comparison = compare_agendas(store)
+    return comparison.to_dict() if comparison else None
 
 
 def _blindspot_payload(store: Datastore) -> tuple[list[dict], list[dict]]:

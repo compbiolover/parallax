@@ -225,6 +225,37 @@ they are the same noisy estimates, dated. Read movement, not decimals.
   either diet framed anything. The source registry is versioned so this is at least
   auditable after the fact.
 
+## Attention divergence measures the agenda, not the framing
+
+`compare/agenda.py` reports a second Jensen-Shannon number: the divergence between the
+two diets' distributions of attention across story clusters. It exists because the
+headline foundation divergence is *small* on a real corpus — a few thousandths — and that
+small number, printed alone, tells a reader "these diets are nearly identical" when they
+can see that they are not. Both numbers are honest answers to different questions: the
+foundation one asks what moral vocabulary each diet speaks, the agenda one asks what each
+diet spent the day on. Its limits:
+
+- **It inherits every clustering caveat above.** Its unit is the HDBSCAN cluster, so a
+  loose clustering day inflates the story count and a coarse one merges two stories into
+  one. The number moves with `min_cluster_size` and with the embedder. Compare it across
+  days only when the clustering configuration has not changed.
+- **Noise is excluded.** Documents HDBSCAN could not place (cluster −1) are dropped
+  entirely. On the default hashing embedder that is 30–40% of the corpus, and nothing
+  guarantees the dropped share is the same for both diets.
+- **It measures the registry as much as the diets.** Two diets ingested from different
+  numbers of feeds will diverge partly because they were sampled differently. Shares
+  rather than counts remove the volume difference, not the selection difference.
+- **A large number is the expected result, not a finding.** With a thin corpus most
+  clusters are touched by one diet only, which drives the divergence toward 1 almost
+  mechanically. It becomes informative as coverage accumulates and the shared-story count
+  becomes non-trivial; below `THIN_ARTICLES` clustered articles it is flagged `thin` on
+  every surface.
+- **It cannot separate agenda from framing.** A story both diets covered contributes to
+  overlap regardless of how differently they covered it. The metric that would isolate
+  framing — foundation vectors computed *within* the clusters both diets touched — is not
+  built. Until it is, "they moralize alike" and "they moralize the same events alike" are
+  not the same claim, and only the first is supported.
+
 ## Implementation status (Phase 1)
 
 - **The bundled lexicon is a demo, not an instrument.** The Phase 1 dictionary scorer
@@ -362,14 +393,28 @@ they are the same noisy estimates, dated. Read movement, not decimals.
   doesn't" is descriptive. The tool reports both directions with equal prominence
   (including the author's own blindspots) and never editorializes about which absence is
   worse.
-- **The theme over a cluster is presentation, not measurement.** Asymmetry is computed per
-  cluster; a theme is those clusters grouped by subject so the result can be read. The
-  grouping comes from a keyword taxonomy in `cluster/themes.py`, or from Claude given the
-  headlines when a key is set — neither is validated, and neither changes a number. Two
-  consequences worth holding onto: a mis-grouped cluster is a mis-labelled card over
-  correct arithmetic, and the taxonomy's vocabulary is a choice, so a subject it has no
-  words for lands under "Other coverage" rather than under a name that fits. Which method
-  named a theme travels with it (`method` in the payload) and is printed on the dashboard.
+- **The theme over a story is presentation, not measurement.** Asymmetry is computed per
+  cluster; a theme is a grouping by subject so the result can be read. The grouping comes
+  from a keyword taxonomy in `cluster/themes.py`, or from Claude given the headlines when a
+  key is set — neither is validated, and neither changes a number. Two consequences worth
+  holding onto: a mis-grouped story is a mis-filed card over correct arithmetic, and the
+  taxonomy's vocabulary is a choice, so a subject it has no words for lands under "Other
+  coverage" rather than under a name that fits. Which method named a theme travels with it
+  (`method` in the payload) and is printed on the dashboard.
+- **The theme is assigned per article, not per cluster.** Clusters are not pure — HDBSCAN
+  groups by headline similarity, and a cluster that is mostly one subject can hold an
+  article about another. Labelling the whole cluster propagated its plurality subject onto
+  every headline inside it, which is what a reader sees as a story filed under the wrong
+  theme. Each article now carries its own assignment and a cluster splits across the themes
+  its articles actually hold. This makes a story's *theme* accurate at the cost of letting
+  one cluster appear under two cards; the cluster remains the measured unit either way, so
+  no count double-counts an article.
+- **The outlets under a story are the ones ingested, not the ones that ran it.** A story
+  lists the mastheads from the dominant diet's registry that carried an article in that
+  cluster, with a link each. Absence from the list means the source registry did not
+  surface it — not that the outlet ignored the story — and the list is capped for
+  display. Only the dominant diet's articles are shown, because the sentence above them
+  claims the other diet did not cover it.
 - **What the email shows is a sample of what was found.** The brief caps the cards per
   direction and the headlines per card; the dashboard carries the full set. The cap is
   per direction rather than per section, so a diet with a noisy clustering day cannot
