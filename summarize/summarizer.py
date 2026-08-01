@@ -88,9 +88,29 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# Room for the brief *and* for thinking, which shares this budget. Opus 5
+# thinks by default — a request that omits the `thinking` parameter runs
+# adaptive thinking, where Opus 4.8 ran without it — and `max_tokens` caps
+# thinking plus response text together. At the old 1500 the reasoning consumed
+# the budget on a real corpus and the text block came back empty: a successful
+# call, an empty summary, and a brief with no prose in it.
+MAX_TOKENS = 16000
+
+# Thinking depth. Not the default `high`: this is a bounded writing task over
+# numbers already computed, and low/medium are strong on Opus 5 — it is the
+# lever for cost and latency here, and the daily run pays it every morning.
+DEFAULT_EFFORT = "medium"
+
+
 class Summarizer:
-    def __init__(self, model: str = DEFAULT_MODEL, client: object | None = None) -> None:
+    def __init__(
+        self,
+        model: str = DEFAULT_MODEL,
+        client: object | None = None,
+        effort: str = DEFAULT_EFFORT,
+    ) -> None:
         self.model = model
+        self.effort = effort
         self._client = client  # inject for testing; else built lazily from env
 
     def summarize(self, store: Datastore) -> SummaryResult:
@@ -104,21 +124,42 @@ class Summarizer:
             return self._deterministic(contexts, comparison, lexicon)
         try:
             text = self._call_claude(client, contexts, comparison, lexicon)
-        except Exception:
+        except Exception as exc:
             # Never let an API hiccup leave the dashboard empty.
+            logger.warning("Claude summaries failed (%s: %s) — using the "
+                           "deterministic fallback", type(exc).__name__, exc)
+            return self._deterministic(contexts, comparison, lexicon)
+        if not text.strip():
+            # A response with no usable text is a failure, whatever the HTTP
+            # status said. Persisting it wrote empty summaries over the day's
+            # brief and reported success; the fallback is what "never leave the
+            # dashboard empty" meant.
+            logger.warning("Claude returned no summary text — using the "
+                           "deterministic fallback")
             return self._deterministic(contexts, comparison, lexicon)
         per_diet, executive = _parse_sections(text, contexts)
+        missing = [c.diet_id for c in contexts if not per_diet.get(c.diet_id, "").strip()]
+        if missing:
+            # A partial parse is a real state — a section can be missing because
+            # the model skipped it. It is also what a broken heading matcher
+            # looks like, and that failure is silent: the diet's panel just
+            # stops appearing. Say it out loud rather than inferring it later
+            # from a brief that lost a panel.
+            logger.warning(
+                "No summary section parsed for %s — the model may have used "
+                "headings that do not name those diets", ", ".join(missing))
         return SummaryResult(per_diet, executive, self.model, "claude", _now_iso())
 
     def _call_claude(self, client, contexts, comparison, lexicon) -> str:
         user = build_user_prompt(contexts, comparison, lexicon=lexicon)
         resp = client.messages.create(
             model=self.model,
-            max_tokens=1500,
+            max_tokens=MAX_TOKENS,
+            output_config={"effort": self.effort},
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user}],
         )
-        return "".join(block.text for block in resp.content if hasattr(block, "text"))
+        return _response_text(resp)
 
     def _deterministic(self, contexts, comparison, lexicon=None) -> SummaryResult:
         per_diet = {c.diet_id: _deterministic_diet(c) for c in contexts}
@@ -135,6 +176,45 @@ class Summarizer:
             scope="executive", generated_utc=result.generated_utc,
             model=result.model, method=result.method, text=result.executive,
         )
+
+
+def _response_text(resp) -> str:
+    """The prose out of a response, or "" with a logged reason.
+
+    Three things can leave a successful call with nothing to print, and all
+    three used to be indistinguishable from a summary that happened to be
+    blank:
+
+    * the safety classifiers declined (``stop_reason: "refusal"``), which is an
+      HTTP 200 with empty or partial content — so ``stop_reason`` has to be
+      read *before* the content, not after;
+    * thinking consumed the token budget (``max_tokens``), leaving no room for
+      the answer;
+    * the response carried only thinking blocks, whose text is empty by default
+      on this model family.
+    """
+    stop = getattr(resp, "stop_reason", None)
+    if stop == "refusal":
+        logger.warning("Claude declined to summarize (safety classifiers)")
+        return ""
+    # Prose blocks only. A block that declares a type has to declare `text`;
+    # the `hasattr` path is for blocks that carry no type at all. Accepting any
+    # block with a `.text` attribute regardless of type — which is what the
+    # first clause used to permit — would splice a future non-prose block into
+    # the summary, and the failure would read as the model writing nonsense.
+    text = "".join(
+        getattr(block, "text", "") or ""
+        for block in getattr(resp, "content", None) or []
+        if getattr(block, "type", "text") == "text" and hasattr(block, "text")
+    )
+    if stop == "max_tokens":
+        # Truncated. Partial prose still beats no prose — the brief degrades to
+        # a summary that stops early rather than to silence — but the cap is
+        # the thing to fix, so say so.
+        logger.warning("Claude hit max_tokens (%d) — the summary may stop "
+                       "mid-sentence; raise MAX_TOKENS or lower the effort",
+                       MAX_TOKENS)
+    return text
 
 
 def _build_client():

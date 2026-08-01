@@ -115,6 +115,13 @@ the email describes the same payload the dashboard does.
   ("The modeled diet") is what headings and legends use, since a phrase that
   reads well in prose wraps to two lines in a legend. A test asserts no id
   survives into either part of the email.
+- **A missing summary is a failure, not an empty string.** Both summary panels
+  degrade to nothing when their text is absent, which is the right rendering
+  and the wrong diagnosis: the day the model returned no usable text, the run
+  persisted empty prose over the brief and reported success. The summarizer now
+  treats an empty response as a failed call and falls back to the deterministic
+  summary, so "no summary panel" means the corpus had nothing to say rather
+  than that something broke upstream.
 - **The executive summary leads, and is set as prose.** It sits directly under
   the headline number, because it is the sentence that says what that number
   means; reading every chart first asks you to interpret evidence before being
