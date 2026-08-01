@@ -215,20 +215,28 @@ def test_the_daily_run_honours_the_configured_summary_model():
 
 def test_the_labels_command_records_them_without_re_ingesting():
     """Labels are written at ingestion, so a store last ingested before they
-    existed names its diets by machine id until something records them."""
+    existed names its diets by machine id until something records them. Outlet
+    names come along, because a blindspot story lists which outlets ran it and
+    `christianity_today` is a key rather than a masthead."""
     from types import SimpleNamespace
 
     from ingestion.pipeline import _store_diet_labels
 
     store = Datastore(":memory:")
-    registry = SimpleNamespace(diets=[
-        SimpleNamespace(id="self", label="My diet", short_label="My diet"),
-        SimpleNamespace(id="modeled_ce", label="Modeled conservative-evangelical diet",
-                        short_label="The modeled diet"),
-    ])
+    sources = [SimpleNamespace(id="christianity_today", name="Christianity Today"),
+               SimpleNamespace(id="unnamed", name="")]
+    registry = SimpleNamespace(
+        diets=[
+            SimpleNamespace(id="self", label="My diet", short_label="My diet"),
+            SimpleNamespace(id="modeled_ce", label="Modeled conservative-evangelical diet",
+                            short_label="The modeled diet"),
+        ],
+        all_sources=lambda: sources,
+    )
     _store_diet_labels(store, registry)
     assert store.diet_labels()["modeled_ce"] == "Modeled conservative-evangelical diet"
     assert store.diet_short_labels()["modeled_ce"] == "The modeled diet"
+    assert store.source_labels() == {"christianity_today": "Christianity Today"}
     store.close()
 
 

@@ -25,8 +25,8 @@ from dataclasses import dataclass, field
 from ingestion.datastore import Datastore
 
 from .cluster import ClusterResult, compute_clustering
-from .themes import Theme, ThemeAssignment, assign_themes, group_blindspots
-from .titles import clean_titles
+from .themes import Article, Theme, ThemeAssignment, assign_themes, group_blindspots
+from .titles import clean_title, clean_titles
 
 _WORD_RE = re.compile(r"[a-z][a-z'-]+")
 _STOP = {
@@ -226,6 +226,36 @@ def blindspots_from_store(
     return out
 
 
+def articles_from_store(
+    store: Datastore, blindspots: list[Blindspot]
+) -> dict[int, list[Article]]:
+    """The dominant diet's articles per blindspot cluster, with outlet and link.
+
+    Only the dominant diet's: the card's claim is "these outlets carried it and
+    yours did not", so listing the one or two articles from the other side
+    under that heading would contradict the sentence above them.
+    """
+    outlets = store.source_labels()
+    out: dict[int, list[Article]] = {}
+    for spot in blindspots:
+        articles: list[Article] = []
+        for member in store.cluster_members(spot.cluster_id):
+            if member["diet_id"] != spot.dominant_diet:
+                continue
+            title = clean_title(member["title"])
+            if not title:
+                continue
+            articles.append(Article(
+                doc_id=member["id"],
+                title=title,
+                url=member["url"],
+                outlet=outlets.get(member["source_id"], ""),
+            ))
+        if articles:
+            out[spot.cluster_id] = articles
+    return out
+
+
 def themes_from_store(store: Datastore, blindspots: list[Blindspot] | None = None) -> list[Theme]:
     """Themed blindspots from the datastore, for a surface that only reads.
 
@@ -236,12 +266,12 @@ def themes_from_store(store: Datastore, blindspots: list[Blindspot] | None = Non
     """
     spots = blindspots if blindspots is not None else blindspots_from_store(store)
     stored = {
-        row["cluster_id"]: ThemeAssignment(
+        row["document_id"]: ThemeAssignment(
             row["theme_key"], row["theme_title"], row["method"]
         )
         for row in store.blindspot_theme_rows()
     }
-    return group_blindspots(spots, stored)
+    return group_blindspots(spots, stored, articles_from_store(store, spots))
 
 
 def run_clustering(
@@ -300,12 +330,15 @@ def _theme_blindspots(
     if not blindspots:
         store.replace_blindspot_themes([])
         return []
-    entries = [(b.cluster_id, b.representative_titles) for b in blindspots]
+    articles = articles_from_store(store, blindspots)
+    # One entry per article, because the subject is a property of the headline
+    # and not of the cluster it landed in.
+    entries = [(a.doc_id, [a.title]) for group in articles.values() for a in group]
     kwargs = {"use_claude": claude_themes}
     if theme_model:
         kwargs["model"] = theme_model
     assignments = assign_themes(entries, client=theme_client, **kwargs)
     store.replace_blindspot_themes(
-        [(cid, a.key, a.title, a.method) for cid, a in assignments.items()]
+        [(doc_id, a.key, a.title, a.method) for doc_id, a in assignments.items()]
     )
-    return group_blindspots(blindspots, assignments)
+    return group_blindspots(blindspots, assignments, articles)

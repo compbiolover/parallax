@@ -7,9 +7,10 @@ needed for personal use.
 
 - `index.html` — the page. Renders with D3 (loaded from CDN): a radar chart
   overlaying both diets' foundation compositions, the Jensen-Shannon divergence
-  as a headline number, a diverging bar chart of per-foundation log-ratios,
-  per-diet summary cards, the cross-diet executive summary, and a standing
-  limitations banner. Theme-aware (light/dark).
+  as a headline number, the attention divergence beside it, a diverging bar
+  chart of per-foundation log-ratios, blindspot themes with their stories and
+  the outlets that ran them, per-diet summary cards, the cross-diet executive
+  summary, and a standing limitations banner. Theme-aware (light/dark).
 - `export.py` — builds the data payload from the datastore and writes
   `public/data/latest.js` (a `window.PARALLAX_DATA = {…}` assignment, so the
   page also works when opened directly from disk). Aggregates only — no raw text.

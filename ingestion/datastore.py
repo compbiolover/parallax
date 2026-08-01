@@ -95,12 +95,15 @@ CREATE TABLE IF NOT EXISTS document_clusters (
     cluster_id  INTEGER NOT NULL
 );
 
--- Which theme each blindspot cluster reads under. Written by the cluster run
+-- Which theme each blindspot *story* reads under. Keyed per document, not per
+-- cluster: a cluster is not always one subject, and labeling the whole cluster
+-- filed a sports headline under "Faith & the church" because the other four
+-- headlines beside it were about church. Written by the cluster run
 -- (which is where a model call belongs) and read by the exporter, so naming a
 -- theme costs one API call a day rather than one per surface that shows it.
 -- Rewritten whole each run, like the clustering it describes.
 CREATE TABLE IF NOT EXISTS blindspot_themes (
-    cluster_id  INTEGER PRIMARY KEY,
+    document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
     theme_key   TEXT NOT NULL,
     theme_title TEXT NOT NULL,
     method      TEXT NOT NULL            -- 'taxonomy' | 'claude'
@@ -184,6 +187,16 @@ class Datastore:
         column is missing, which makes opening an old database upgrade it in
         place instead of failing on the first write that mentions a new column.
         """
+        # `blindspot_themes` was keyed by cluster_id before themes were assigned
+        # per story. It is a per-run cache rewritten by every cluster run, so
+        # the old table is dropped rather than migrated — there is nothing in it
+        # worth carrying across, and a changed primary key is not something
+        # `CREATE TABLE IF NOT EXISTS` can fix on its own.
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(blindspot_themes)")}
+        if cols and "document_id" not in cols:
+            self.conn.execute("DROP TABLE blindspot_themes")
+            self.conn.executescript(SCHEMA)
+
         added: list[tuple[str, str, str]] = [
             ("foundation_scores", "equality", "REAL"),
             ("foundation_scores", "proportionality", "REAL"),
@@ -557,6 +570,9 @@ class Datastore:
     # conservative-evangelical diet"), the short one fits a chart legend.
     DIET_LABEL_PREFIX = "diet_label:"
     DIET_SHORT_LABEL_PREFIX = "diet_short_label:"
+    # And the outlets', for the same reason: `source_id` is `christianity_today`,
+    # which is not what a masthead is called.
+    SOURCE_LABEL_PREFIX = "source_label:"
 
     def set_diet_label(self, diet_id: str, label: str, short_label: str = "") -> None:
         self.set_meta(f"{self.DIET_LABEL_PREFIX}{diet_id}", label)
@@ -570,6 +586,13 @@ class Datastore:
     def diet_short_labels(self) -> dict[str, str]:
         """``{diet_id: short_label}``, for diets that supplied a short one."""
         return self._labels(self.DIET_SHORT_LABEL_PREFIX)
+
+    def set_source_label(self, source_id: str, name: str) -> None:
+        self.set_meta(f"{self.SOURCE_LABEL_PREFIX}{source_id}", name)
+
+    def source_labels(self) -> dict[str, str]:
+        """``{source_id: display name}`` as the registry writes them."""
+        return self._labels(self.SOURCE_LABEL_PREFIX)
 
     def _labels(self, prefix: str) -> dict[str, str]:
         rows = self.conn.execute(
@@ -642,12 +665,12 @@ class Datastore:
             )
 
     def replace_blindspot_themes(
-        self, themes: list[tuple[int, str, str, str]]   # (cluster_id, key, title, method)
+        self, themes: list[tuple[str, str, str, str]]   # (document_id, key, title, method)
     ) -> None:
         with self._tx() as conn:
             conn.execute("DELETE FROM blindspot_themes")
             conn.executemany(
-                "INSERT INTO blindspot_themes (cluster_id, theme_key, theme_title, "
+                "INSERT INTO blindspot_themes (document_id, theme_key, theme_title, "
                 "method) VALUES (?,?,?,?)",
                 themes,
             )
@@ -659,15 +682,40 @@ class Datastore:
         return list(self.conn.execute("SELECT * FROM clusters ORDER BY size DESC"))
 
     def cluster_members(self, cluster_id: int) -> list[sqlite3.Row]:
-        """Members of a cluster with diet + title, for coverage and labels."""
+        """Members of a cluster with diet, title, outlet, and link.
+
+        The link is the point: a story is only checkable if the reader can go
+        read it, and ``CLAUDE.md`` §0 permits exactly that — summarize and
+        link, never republish.
+        """
         return list(
             self.conn.execute(
                 """
-                SELECT d.id AS id, d.diet_id AS diet_id, d.title AS title
+                SELECT d.id AS id, d.diet_id AS diet_id, d.title AS title,
+                       d.url AS url, d.source_id AS source_id
                 FROM document_clusters dc JOIN documents d ON d.id = dc.document_id
                 WHERE dc.cluster_id = ?
+                ORDER BY COALESCE(d.published_utc, d.fetched_utc) DESC
                 """,
                 (cluster_id,),
+            )
+        )
+
+    def cluster_diet_counts(self) -> list[sqlite3.Row]:
+        """``(cluster_id, diet_id, n)`` for the whole clustering, in one query.
+
+        What the agenda metrics run on. Asking per cluster instead would be one
+        query per story on a corpus that has hundreds of them.
+        """
+        return list(
+            self.conn.execute(
+                """
+                SELECT dc.cluster_id AS cluster_id, d.diet_id AS diet_id,
+                       COUNT(*) AS n
+                FROM document_clusters dc JOIN documents d ON d.id = dc.document_id
+                WHERE dc.cluster_id != -1
+                GROUP BY dc.cluster_id, d.diet_id
+                """
             )
         )
 

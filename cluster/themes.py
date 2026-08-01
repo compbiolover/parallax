@@ -7,18 +7,29 @@ and the wrong unit to read: a day produces a couple of dozen of them, each
 labeled with whatever terms c-TF-IDF found distinctive, and the reader gets a
 list too long to finish titled in a vocabulary nobody speaks.
 
-A **theme** is the reading unit. It collects the blindspot clusters that point
-the same direction (one diet covered them, the other did not) and belong to the
-same subject, under a name written for a human: "Faith & the church", not
-"christianity today · christianity · today".
+Three units, and keeping them apart is what this module is for:
 
-Two ways to get there, in order of preference:
+* an **article** is one outlet's telling of something;
+* a **story** is the articles of one cluster that share a subject, with the
+  outlets that carried it — the unit a reader recognizes as "a thing that
+  happened";
+* a **theme** collects the stories of one subject in one direction, under a
+  name written for a human: "Faith & the church", not "christianity today ·
+  christianity · today".
 
-1. **Claude**, given the headlines and the vocabulary below, naming and
-   assigning each cluster. Better on subjects the taxonomy has never heard of.
+The subject is decided **per story, not per cluster**. Clusters are impure
+often enough to matter, and labeling the whole cluster propagated its plurality
+to every headline inside it: four church headlines and one about a running back
+put the running back under "Faith & the church". Per-story assignment splits
+that cluster across two themes, which is the honest description of what it was.
+
+Two ways to get the subject, in order of preference:
+
+1. **Claude**, given the headlines and the vocabulary below. Better on subjects
+   the taxonomy has never heard of.
 2. **The taxonomy** in :data:`TAXONOMY` — a keyword map, versioned in code,
    which always runs and needs no key. It is also the fallback for any single
-   cluster Claude declines to place.
+   story Claude declines to place.
 
 The taxonomy's category names are the reader-facing copy, so they follow the §0
 tone rule: they describe subjects, not the people who care about them. Neither
@@ -178,11 +189,47 @@ _TITLES = {key: title for key, title, _ in TAXONOMY} | {OTHER_KEY: OTHER_TITLE}
 
 @dataclass(frozen=True)
 class ThemeAssignment:
-    """Which theme one cluster belongs to, and who decided."""
+    """Which theme one story belongs to, and who decided."""
 
     key: str
     title: str
     method: str  # 'taxonomy' | 'claude'
+
+
+@dataclass(frozen=True)
+class Article:
+    """One outlet's telling of a story."""
+
+    doc_id: str
+    title: str
+    url: str | None = None
+    outlet: str = ""
+
+
+@dataclass
+class Story:
+    """One event, and who carried it.
+
+    The unit a reader recognizes. "Iran shutters the country's last
+    Presbyterian church, in Christianity Today and two others" is a thing that
+    happened; three separate headlines in a list are three sentences they have
+    to reassemble into it themselves.
+    """
+
+    cluster_id: int
+    title: str
+    articles: int
+    outlets: list[tuple[str, str | None]] = field(default_factory=list)
+    one_sided: float = 1.0
+
+    def to_dict(self) -> dict:
+        return {
+            "cluster_id": self.cluster_id,
+            "title": self.title,
+            "articles": self.articles,
+            "outlets": [{"label": label, "url": url} for label, url in self.outlets],
+            "one_sided": self.one_sided,
+        }
 
 
 @dataclass
@@ -193,11 +240,25 @@ class Theme:
     title: str
     dominant_diet: str
     other_diet: str
-    cluster_count: int
-    story_count: int
-    one_sided: float
-    stories: list[str] = field(default_factory=list)
+    stories: list[Story] = field(default_factory=list)
     method: str = "taxonomy"
+
+    @property
+    def story_count(self) -> int:
+        return len(self.stories)
+
+    @property
+    def article_count(self) -> int:
+        return sum(s.articles for s in self.stories)
+
+    @property
+    def one_sided(self) -> float:
+        """Weighted by articles: a ten-article story says more about how
+        one-sided this theme is than a one-article story does."""
+        total = self.article_count
+        if not total:
+            return 0.0
+        return sum(s.one_sided * s.articles for s in self.stories) / total
 
     def to_dict(self) -> dict:
         return {
@@ -205,10 +266,10 @@ class Theme:
             "title": self.title,
             "dominant_diet": self.dominant_diet,
             "other_diet": self.other_diet,
-            "cluster_count": self.cluster_count,
             "story_count": self.story_count,
+            "article_count": self.article_count,
             "one_sided": self.one_sided,
-            "stories": list(self.stories),
+            "stories": [s.to_dict() for s in self.stories],
             "method": self.method,
         }
 
@@ -217,19 +278,23 @@ class Theme:
 
 
 def taxonomy_theme(titles: list[str]) -> ThemeAssignment:
-    """Best-matching taxonomy entry for a cluster's headlines.
+    """Best-matching taxonomy entry for one story's headlines.
 
-    Ranked on *reach* first — how many of the cluster's headlines a theme
-    touches at all — then on specificity, and only then on raw keyword hits.
-    Hits alone hand almost every cluster to the broadest categories: "Senate
-    Republicans weigh an abortion bill" is one abortion word against three of
-    politics', and the story is not about the Senate. Reach asks the question
-    that distinguishes them — does this subject describe the whole cluster, or
-    one clause of one headline? — and taxonomy order settles the rest, which is
-    why the catch-alls are written last.
+    Ranked on *reach* first — how many of the headlines a theme touches at all
+    — then on specificity, and only then on raw keyword hits. Hits alone hand
+    almost everything to the broadest categories: "Senate Republicans weigh an
+    abortion bill" is one abortion word against three of politics', and the
+    story is not about the Senate. Reach asks the question that distinguishes
+    them, and taxonomy order settles the rest, which is why the catch-alls are
+    written last.
 
-    No hits at all is an honest answer, not a failure: those clusters collect
-    under "Other coverage" rather than being forced into a category.
+    No hits at all is an honest answer, not a failure: those collect under
+    "Other coverage" rather than being forced into a category.
+
+    Callers pass **one story's** headlines, not a cluster's. Scoring a whole
+    cluster at once is what filed "Cam Skattebo's backflipping at Fanatics Fest"
+    under "Faith & the church": the four church headlines beside it won the
+    cluster, and the sports headline inherited their label.
     """
     reach: Counter[str] = Counter()
     hits: Counter[str] = Counter()
@@ -282,17 +347,21 @@ _KEY_OK = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")
 
 
 def claude_assignments(
-    entries: list[tuple[int, list[str]]],
+    entries: list[tuple[str, list[str]]],
     client: object | None = None,
     model: str = DEFAULT_THEME_MODEL,
-) -> dict[int, ThemeAssignment]:
-    """Ask Claude to theme each cluster. ``{}`` when it cannot or will not.
+) -> dict[str, ThemeAssignment]:
+    """Ask Claude to theme each story. ``{}`` when it cannot or will not.
+
+    Entries are keyed by document id and referenced in the prompt by position:
+    the model reads and echoes a small integer rather than a content hash,
+    which is both cheaper and one fewer thing for it to get wrong.
 
     Every failure path returns ``{}`` rather than raising: the taxonomy is
     always there behind this, and a themed brief that is one day less clever
-    beats no brief. Anything Claude returns that does not validate — a missing
-    cluster, a key that is not a key, a title long enough to break the card — is
-    dropped for that cluster alone, which then falls back on its own.
+    beats no brief. Anything Claude returns that does not validate — an index
+    out of range, a key that is not a key, a title long enough to break the
+    card — is dropped for that story alone, which then falls back on its own.
     """
     if not entries:
         return {}
@@ -310,47 +379,51 @@ def claude_assignments(
         logger.warning("Claude theming failed, using the taxonomy: %s", exc)
         return {}
 
-    ids = {cid for cid, _ in entries}
-    out: dict[int, ThemeAssignment] = {}
+    doc_ids = [doc_id for doc_id, _ in entries]
+    out: dict[str, ThemeAssignment] = {}
     for item in raw:
         try:
-            cid = int(item["cluster_id"])
+            index = int(item["story"])
             key = str(item["key"]).strip().lower()
             title = " ".join(str(item["title"]).split())
         except (KeyError, TypeError, ValueError):
             continue
-        if cid not in ids or cid in out:
+        if not 0 <= index < len(doc_ids):
+            continue
+        doc_id = doc_ids[index]
+        if doc_id in out:
             continue
         if not _KEY_OK.match(key) or not _TITLE_OK.match(title):
             continue
         if len(title) > _MAX_TITLE_CHARS:
             continue
-        out[cid] = ThemeAssignment(key, title, "claude")
+        out[doc_id] = ThemeAssignment(key, title, "claude")
     return out
 
 
-def _call(client, model: str, entries: list[tuple[int, list[str]]]) -> str:
+def _call(client, model: str, entries: list[tuple[str, list[str]]]) -> str:
     vocabulary = ", ".join(f"{key} ({title})" for key, title, _ in TAXONOMY)
     lines = [
-        "Assign every cluster below to a theme.",
+        "Assign every story below to a theme.",
         "",
         f"Vocabulary of preferred keys: {vocabulary}, {OTHER_KEY} ({OTHER_TITLE}).",
         "",
-        'Respond with JSON only: {"assignments": [{"cluster_id": 0, "key": '
-        '"faith", "title": "Faith & the church"}]}. Every cluster id below must '
-        "appear exactly once. Clusters sharing a key must share the same title.",
+        'Respond with JSON only: {"assignments": [{"story": 0, "key": "faith", '
+        '"title": "Faith & the church"}]}. Every story number below must appear '
+        "exactly once. Stories sharing a key must share the same title. Judge "
+        "each story on its own headline — neighbouring stories are unrelated.",
         "",
     ]
-    for cid, titles in entries:
-        lines.append(f"cluster {cid}:")
-        lines.extend(f"  - {t}" for t in titles[:6])
+    for index, (_, titles) in enumerate(entries):
+        headline = titles[0] if titles else ""
+        lines.append(f"{index}: {headline}")
     resp = client.messages.create(
         model=model,
-        # One assignment object runs ~40 tokens. A fixed ceiling is fine until
-        # the day the corpus is big enough to need more of them, and that is
-        # the day it truncates mid-JSON and the whole batch silently falls back
-        # to the taxonomy — the failure that looks like nothing happening.
-        max_tokens=min(8000, 400 + 60 * len(entries)),
+        # One assignment object runs ~30 tokens now that a story is one line.
+        # A fixed ceiling would truncate mid-JSON on a big day and drop the
+        # whole batch to the taxonomy — the failure that looks like nothing
+        # happening.
+        max_tokens=min(8000, 400 + 40 * len(entries)),
         system=_SYSTEM,
         messages=[{"role": "user", "content": "\n".join(lines)}],
     )
@@ -369,21 +442,21 @@ def _parse(text: str) -> list[dict]:
 
 
 def assign_themes(
-    entries: list[tuple[int, list[str]]],
+    entries: list[tuple[str, list[str]]],
     client: object | None = None,
     model: str = DEFAULT_THEME_MODEL,
     use_claude: bool = True,
-) -> dict[int, ThemeAssignment]:
-    """Theme every cluster: Claude where it answered, the taxonomy everywhere else."""
+) -> dict[str, ThemeAssignment]:
+    """Theme every story: Claude where it answered, the taxonomy everywhere else."""
     from_claude = claude_assignments(entries, client, model) if use_claude else {}
-    # A key Claude used keeps Claude's wording everywhere, so two clusters it
+    # A key Claude used keeps Claude's wording everywhere, so two stories it
     # placed together do not arrive under two spellings of one theme.
     titles = {a.key: a.title for a in from_claude.values()}
-    out: dict[int, ThemeAssignment] = {}
-    for cid, cluster_titles in entries:
-        assignment = from_claude.get(cid) or taxonomy_theme(cluster_titles)
+    out: dict[str, ThemeAssignment] = {}
+    for doc_id, story_titles in entries:
+        assignment = from_claude.get(doc_id) or taxonomy_theme(story_titles)
         title = titles.get(assignment.key, assignment.title)
-        out[cid] = ThemeAssignment(assignment.key, title, assignment.method)
+        out[doc_id] = ThemeAssignment(assignment.key, title, assignment.method)
     return out
 
 
@@ -438,58 +511,103 @@ def _as_spot(item: object) -> _Spot:
 
 def group_blindspots(
     blindspots: list,
-    assignments: dict[int, ThemeAssignment] | None = None,
-    stories_per_theme: int = 8,
+    assignments: dict[str, ThemeAssignment] | None = None,
+    articles: dict[int, list[Article]] | None = None,
+    stories_per_theme: int = 6,
 ) -> list[Theme]:
-    """Collapse blindspot clusters into themes, one theme per direction.
+    """Group a run's blindspots into themes, by story rather than by cluster.
 
-    Direction is part of the grouping key, never averaged away. "Modeled CE
-    covered this and I didn't" and "I covered this and Modeled CE didn't" are
-    different findings about the same subject, and a card that merged them
-    would report neither.
+    Two levels, and the distinction is the point of this function:
+
+    * a **story** is one event — the articles of one cluster that share a
+      subject, with the outlets that carried it;
+    * a **theme** collects the stories of one subject in one direction.
+
+    The theme is decided per story, not per cluster. Clusters are impure often
+    enough to matter: a cluster of four church headlines and one about a
+    running back is one cluster, and labeling the cluster put the running back
+    under "Faith & the church". Assigning per story splits that cluster across
+    two themes, which is the honest description of what it was.
+
+    Direction stays part of the grouping key, never averaged away. "They
+    covered this and I didn't" and the reverse are different findings about the
+    same subject, and a card merging them would report neither.
     """
     assignments = assignments or {}
-    buckets: dict[tuple[str, str], list] = {}
+    articles = articles or {}
+    # (dominant_diet, theme_key) -> cluster_id -> [(assignment, article, spot)]
+    buckets: dict[tuple[str, str], dict[int, list]] = {}
     for raw in blindspots:
         spot = _as_spot(raw)
-        assignment = assignments.get(spot.cluster_id) or taxonomy_theme(spot.titles)
-        buckets.setdefault((spot.dominant_diet, assignment.key), []).append(
-            (assignment, spot)
-        )
+        for article in articles.get(spot.cluster_id) or _articles_from_titles(spot):
+            assignment = (assignments.get(article.doc_id)
+                          or taxonomy_theme([article.title]))
+            by_cluster = buckets.setdefault((spot.dominant_diet, assignment.key), {})
+            by_cluster.setdefault(spot.cluster_id, []).append((assignment, article, spot))
 
     themes: list[Theme] = []
-    for (dominant, key), members in buckets.items():
-        members.sort(key=lambda m: (m[1].size, m[1].dominant_share), reverse=True)
-        stories: list[str] = []
-        seen: set[str] = set()
-        for _, spot in members:
-            for title in spot.titles:
-                folded = title.casefold()
-                if folded not in seen:
-                    seen.add(folded)
-                    stories.append(title)
-        size = sum(spot.size for _, spot in members)
-        weighted = sum(spot.size * spot.dominant_share for _, spot in members)
+    for (dominant, key), by_cluster in buckets.items():
+        stories = [_story(cluster_id, rows) for cluster_id, rows in by_cluster.items()]
+        stories.sort(key=lambda s: (s.articles, s.title), reverse=True)
+        first = next(iter(by_cluster.values()))[0]
         themes.append(
             Theme(
                 key=key,
-                title=members[0][0].title,
+                title=first[0].title,
                 dominant_diet=dominant,
-                other_diet=members[0][1].other_diet,
-                cluster_count=len(members),
-                # The dominant diet's own stories, not every member of every
-                # cluster: the card's sentence is "this diet ran N stories the
-                # other barely touched", and the handful the other diet did run
-                # are precisely what makes "barely" the honest word.
-                story_count=sum(spot.dominant_size for _, spot in members),
-                one_sided=weighted / size if size else 0.0,
+                other_diet=first[2].other_diet,
                 stories=stories[:stories_per_theme],
-                method=members[0][0].method,
+                method=first[0].method,
             )
         )
-    # "Other coverage" last within its direction: it is the bucket for what the
-    # taxonomy could not name, so it is the least informative card on the page.
+    # "Other coverage" last within its direction: it is the bucket for what
+    # nothing could name, so it is the least informative card on the page.
     themes.sort(
-        key=lambda t: (t.key == OTHER_KEY, -t.story_count, -t.cluster_count, t.title)
+        key=lambda t: (t.key == OTHER_KEY, -t.article_count, -t.story_count, t.title)
     )
     return themes
+
+
+def _story(cluster_id: int, rows: list) -> Story:
+    """One cluster's articles on one subject, as a story.
+
+    The lead headline is the longest, on the same reasoning the representative
+    titles use: length carries story detail once the outlet stamp is off. The
+    outlets are de-duplicated by name, because two articles from one masthead
+    are one outlet covering a story twice, not two outlets covering it.
+    """
+    titles = sorted((a.title for _, a, _ in rows), key=len, reverse=True)
+    outlets: list[tuple[str, str | None]] = []
+    seen: set[str] = set()
+    for _, article, _ in rows:
+        label = article.outlet or _host(article.url)
+        if not label or label.casefold() in seen:
+            continue
+        seen.add(label.casefold())
+        outlets.append((label, article.url))
+    spot = rows[0][2]
+    return Story(
+        cluster_id=cluster_id,
+        title=titles[0] if titles else "(untitled story)",
+        articles=len(rows),
+        outlets=outlets,
+        one_sided=spot.dominant_share,
+    )
+
+
+def _articles_from_titles(spot: _Spot) -> list[Article]:
+    """What a payload exported before stories existed can still offer.
+
+    Headlines with no outlet and no link. The grouping is the same; the card
+    just has less to show.
+    """
+    return [Article(doc_id=f"{spot.cluster_id}:{i}", title=title)
+            for i, title in enumerate(spot.titles)]
+
+
+def _host(url: str | None) -> str:
+    """A bare hostname, for an article whose outlet has no recorded name."""
+    if not url:
+        return ""
+    host = re.sub(r"^\w+://", "", url).split("/")[0].split("@")[-1]
+    return host[4:] if host.startswith("www.") else host

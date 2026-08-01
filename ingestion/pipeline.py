@@ -465,6 +465,13 @@ def _store_diet_labels(store: Datastore, registry) -> None:
         label = (diet.label or "").strip()
         if label and label != diet.id:
             store.set_diet_label(diet.id, label, (diet.short_label or "").strip())
+    # Outlet names too. A blindspot lists which outlets carried a story, and
+    # `christianity_today` is a key rather than a masthead. Same duck-typing as
+    # above, for the same reason.
+    for source in getattr(registry, "all_sources", tuple)():
+        name = (getattr(source, "name", "") or "").strip()
+        if name and name != source.id:
+            store.set_source_label(source.id, name)
 
 
 def _store_transformer_meta(store: Datastore, transformer) -> None:

@@ -66,6 +66,9 @@
 <script>
 const D = window.PARALLAX_DATA;
 const app = document.getElementById("app");
+// How much of a theme a card shows before it says "+N more". Same caps the
+// email uses (digest/render.py), so the two surfaces truncate identically.
+const STORIES_PER_CARD = 6, OUTLETS_PER_STORY = 3;
 
 if (!D || window.__noData) {
   app.innerHTML = `<div class="empty">No data yet.<br><br>
@@ -116,6 +119,9 @@ function render(d) {
       "Dot = ensemble point.";
     rp.appendChild(cap);
   }
+
+  // The other divergence: what each diet spent the day on.
+  agenda(app, d);
 
   // Diverging bars (log-ratios)
   if (d.comparison) {
@@ -393,6 +399,45 @@ function liberty(app, d, colors) {
   p.appendChild(cap);
 }
 
+// Attention divergence, printed next to the foundation number rather than
+// instead of it. The headline number is small on a real corpus and that is a
+// finding: averaged over hundreds of documents both diets speak roughly the
+// same moral vocabulary. It is also not what the reader feels. What they feel
+// is the agenda — two people reading about different events — and that number
+// is large. Either one alone misleads, so the panel says both.
+function agenda(app, d) {
+  const a = d.agenda;
+  if (!a || !a.total_stories || (a.pair || []).length !== 2) return;
+  const p = panel(app, "Same day, different agenda");
+  p.style.marginTop = "18px";
+  p.innerHTML += `<div class="jsd"><div class="num">${a.divergence.toFixed(3)}</div>
+    <div class="scale">Attention divergence across ${a.total_stories} story clusters</div></div>`;
+  const lines = document.createElement("div");
+  lines.style.fontSize = "13px"; lines.style.lineHeight = "1.6";
+  lines.style.marginTop = "10px";
+  a.pair.forEach(id => {
+    const share = (a.exclusive || {})[id];
+    if (share === undefined) return;
+    const n = (a.exclusive_stories || {})[id] || 0;
+    lines.innerHTML += `<div>${Math.round(100 * share)}% of ${named(d, id)}'s articles were
+      about stories the other diet never touched<span class="sub"> · ${n} ${n === 1 ? "story" : "stories"}</span></div>`;
+  });
+  const shared = a.shared_stories || 0;
+  lines.innerHTML += `<div>Both covered ${shared} ${shared === 1 ? "story" : "stories"}
+    (${Math.round(100 * (a.overlap || 0))}% of the day's)</div>`;
+  p.appendChild(lines);
+
+  const note = document.createElement("p"); note.className = "sub";
+  note.style.marginTop = "10px";
+  note.textContent = "Same scale as the divergence above, over stories instead of foundations. " +
+    "Read them together: a small foundation divergence says the two diets moralize in similar " +
+    "language" + (d.comparison ? ` (${d.comparison.jsd.toFixed(3)} here)` : "") +
+    ", and a large attention divergence says they apply it to different events. The second is " +
+    "what a reader experiences as a different world." +
+    (a.thin ? " Thin coverage — one diet has few clustered articles, so treat this as provisional." : "");
+  p.appendChild(note);
+}
+
 // Blindspots, read by theme. A cluster is the unit the asymmetry is measured on
 // and a couple of dozen c-TF-IDF labels is a readout, not a finding — so the
 // page groups them. `blindspot_themes` is always populated alongside
@@ -433,16 +478,41 @@ function blindspots(app, d, colors) {
   p.appendChild(note);
 }
 
-// One theme: the name a person would use, the counts, and its headlines.
+// One theme: the name a person would use, the counts, and the stories under it.
+// A story is a headline plus the mastheads that ran it — the outlet list is what
+// makes the asymmetry checkable ("these three carried it, yours carried none")
+// and links are the sanctioned form for source material (CLAUDE.md §0:
+// summarize and link, never republish).
 function themeCard(col, t, colour) {
-  const stories = (t.stories || []).map(s => `<li>${escapeHtml(s)}</li>`).join("");
-  const rest = (t.story_count || 0) - (t.stories || []).length;
+  const shown = (t.stories || []).filter(Boolean).slice(0, STORIES_PER_CARD);
+  const stories = shown.map(s => {
+    const n = s.articles || 0;
+    const tally = n > 1 ? ` <span class="sub">· ${n} articles</span>` : "";
+    return `<li>${escapeHtml(s.title || "")}${tally}${outletLine(s, colour)}</li>`;
+  }).join("");
+  const rest = (t.story_count || 0) - shown.length;
+  const articles = t.article_count || 0;
   col.innerHTML += `<div style="margin-bottom:14px; border-left:3px solid ${colour}; padding-left:10px">
     <div style="font-weight:600">${escapeHtml(t.title)}</div>
-    <div class="sub">${t.story_count} ${t.story_count === 1 ? "story" : "stories"} · ${t.cluster_count} ${t.cluster_count === 1 ? "cluster" : "clusters"} · ${Math.round((t.one_sided||0)*100)}% one-sided</div>
-    <ul style="margin:6px 0 0; padding-left:18px; color:var(--muted); font-size:13px">${stories}</ul>
-    ${rest > 0 ? `<div class="sub" style="margin-top:4px">+${rest} more</div>` : ""}
+    <div class="sub">${t.story_count} ${t.story_count === 1 ? "story" : "stories"} · ${articles} ${articles === 1 ? "article" : "articles"} · ${Math.round((t.one_sided||0)*100)}% one-sided</div>
+    <ul style="margin:6px 0 0; padding-left:18px; font-size:13px">${stories}</ul>
+    ${rest > 0 ? `<div class="sub" style="margin-top:4px">+${rest} more ${rest === 1 ? "story" : "stories"}</div>` : ""}
   </div>`;
+}
+
+// "Christianity Today · The Christian Post · +2", linked where there is a link.
+function outletLine(story, colour) {
+  const outlets = (story.outlets || []).filter(o => o && o.label);
+  if (!outlets.length) return "";
+  const shown = outlets.slice(0, OUTLETS_PER_STORY);
+  const parts = shown.map(o => {
+    const label = escapeHtml(o.label);
+    const url = (o.url || "").trim();
+    return /^https?:\/\//.test(url)
+      ? `<a href="${escapeHtml(url)}" style="color:${colour}">${label}</a>` : label;
+  });
+  const tail = outlets.length > shown.length ? ` · +${outlets.length - shown.length}` : "";
+  return `<div class="sub" style="font-size:12px">${parts.join(" · ")}${tail}</div>`;
 }
 
 // One cluster under its c-TF-IDF label — only for a payload written before
