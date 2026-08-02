@@ -373,6 +373,52 @@ def test_an_api_failure_is_a_quieter_brief_not_a_failed_run():
     assert all(a.method == "taxonomy" for a in out.values())
 
 
+def test_theming_sends_an_effort_and_it_is_settable():
+    """The knob the summary and liberty already had. Without it this call took
+    the model's own default, which on Sonnet 5 is adaptive thinking at `high` —
+    several times the output tokens to place a headline in a fixed vocabulary,
+    billed on every cluster run."""
+    from cluster.themes import DEFAULT_THEME_EFFORT
+
+    client = _FakeClient('{"assignments": []}')
+    assign_themes(ENTRIES, client=client)
+    assert client.calls[0]["output_config"] == {"effort": DEFAULT_THEME_EFFORT}
+
+    louder = _FakeClient('{"assignments": []}')
+    assign_themes(ENTRIES, client=louder, effort="high")
+    assert louder.calls[0]["output_config"] == {"effort": "high"}
+
+
+def test_an_explicit_none_effort_sends_no_output_config():
+    """`effort: ~` in settings means "let the model decide", which is a real
+    third option — not the same call as the default one."""
+    client = _FakeClient('{"assignments": []}')
+    assign_themes(ENTRIES, client=client, effort=None)
+    assert "output_config" not in client.calls[0]
+
+
+def test_settings_effort_reaches_the_call(monkeypatch):
+    """The setting is only worth having if it survives the walk from
+    settings.yaml down to `messages.create`."""
+    import cluster.blindspot as bs
+
+    seen: dict = {}
+    monkeypatch.setattr(bs, "articles_from_store", lambda store, spots: {})
+    monkeypatch.setattr(bs, "assign_themes",
+                        lambda entries, client=None, **kw: seen.update(kw) or {})
+    monkeypatch.setattr(bs, "group_blindspots", lambda *a, **k: [])
+
+    class _Store:
+        def replace_blindspot_themes(self, rows): pass
+
+    bs._theme_blindspots(_Store(), [object()], None, None, True, "medium")
+    assert seen["effort"] == "medium"
+
+    seen.clear()
+    bs._theme_blindspots(_Store(), [object()], None, None, True, None)
+    assert "effort" not in seen  # unset leaves the module default in place
+
+
 def test_claude_is_not_called_when_it_is_switched_off():
     client = _FakeClient('{"assignments": []}')
     assign_themes(ENTRIES, client=client, use_claude=False)

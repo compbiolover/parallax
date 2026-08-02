@@ -102,7 +102,7 @@ def planned_steps(settings: dict) -> list[Step]:
     a model default that drifts in one place and not the other would make this
     check confidently wrong, which is worse than not having it.
     """
-    from cluster.themes import DEFAULT_THEME_MODEL
+    from cluster.themes import DEFAULT_THEME_EFFORT, DEFAULT_THEME_MODEL
     from scoring.liberty import DEFAULT_EFFORT as LIBERTY_EFFORT
     from scoring.liberty import DEFAULT_MODEL as LIBERTY_MODEL
     from summarize.summarizer import DEFAULT_EFFORT as SUMMARY_EFFORT
@@ -130,6 +130,7 @@ def planned_steps(settings: dict) -> list[Step]:
         Step(
             "blindspot themes",
             themes.get("model") or DEFAULT_THEME_MODEL,
+            themes.get("effort") or DEFAULT_THEME_EFFORT,
             disabled="" if themes.get("claude", True) else "claude: false",
         ),
     ]

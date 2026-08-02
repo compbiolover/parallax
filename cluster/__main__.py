@@ -36,6 +36,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="name blindspot themes from the built-in taxonomy "
                              "only, without an API call")
     parser.add_argument("--theme-model", help="model for theme naming")
+    parser.add_argument("--theme-effort",
+                        choices=["low", "medium", "high", "xhigh", "max"],
+                        help="thinking depth for theme naming (default: low)")
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
@@ -51,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
             dominance=args.dominance,
             min_blindspot_size=args.min_blindspot_size,
             theme_model=args.theme_model or themes_cfg.get("model"),
+            theme_effort=args.theme_effort or themes_cfg.get("effort"),
             claude_themes=(not args.no_claude_themes)
                           and bool(themes_cfg.get("claude", True)),
         )

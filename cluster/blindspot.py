@@ -287,6 +287,7 @@ def run_clustering(
     theme_model: str | None = None,
     theme_client: object | None = None,
     claude_themes: bool = True,
+    theme_effort: str | None = None,
 ) -> ClusteringOutcome:
     """Cluster, persist the assignment, detect blindspots, and theme them."""
     result = compute_clustering(store, min_cluster_size=min_cluster_size)
@@ -306,7 +307,8 @@ def run_clustering(
     store.replace_clustering(cluster_rows, assignments)
 
     blindspots = detect_blindspots(result, dominance, min_blindspot_size, labels=labels)
-    themes = _theme_blindspots(store, blindspots, theme_model, theme_client, claude_themes)
+    themes = _theme_blindspots(store, blindspots, theme_model, theme_client,
+                               claude_themes, theme_effort)
     n_noise = sum(1 for lbl in result.labels if lbl == -1)
     return ClusteringOutcome(
         n_docs=result.n_docs,
@@ -324,6 +326,7 @@ def _theme_blindspots(
     theme_model: str | None,
     theme_client: object | None,
     claude_themes: bool,
+    theme_effort: str | None = None,
 ) -> list[Theme]:
     """Name the themes once, here, and persist them.
 
@@ -342,6 +345,11 @@ def _theme_blindspots(
     kwargs = {"use_claude": claude_themes}
     if theme_model:
         kwargs["model"] = theme_model
+    # Only when set: an unset effort has to leave `assign_themes`' own default
+    # in place rather than overwrite it with None, which would mean "send no
+    # effort at all" — a different call from the default one.
+    if theme_effort:
+        kwargs["effort"] = theme_effort
     assignments = assign_themes(entries, client=theme_client, **kwargs)
     store.replace_blindspot_themes(
         [(doc_id, a.key, a.title, a.method) for doc_id, a in assignments.items()]

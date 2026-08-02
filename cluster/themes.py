@@ -48,6 +48,14 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_THEME_MODEL = "claude-sonnet-5"
 
+# Thinking depth, the same knob the summary and liberty tagging already expose.
+# Naming a story's subject from its headline is classification against a fixed
+# vocabulary, not reasoning — so `low`, for the reason liberty uses `low`: this
+# model runs adaptive thinking at `high` by default, which bills several times
+# the output tokens for a judgment that does not improve with them. Raise it in
+# settings if theme titles start reading thin.
+DEFAULT_THEME_EFFORT = "low"
+
 OTHER_KEY = "other"
 OTHER_TITLE = "Other coverage"
 
@@ -353,6 +361,7 @@ def claude_assignments(
     entries: list[tuple[str, list[str]]],
     client: object | None = None,
     model: str = DEFAULT_THEME_MODEL,
+    effort: str | None = DEFAULT_THEME_EFFORT,
 ) -> dict[str, ThemeAssignment]:
     """Ask Claude to theme each story. ``{}`` when it cannot or will not.
 
@@ -376,7 +385,7 @@ def claude_assignments(
             logger.info("Blindspot themes fall back to the taxonomy: %s", reason)
             return {}
     try:
-        text = _call(client, model, entries)
+        text = _call(client, model, entries, effort)
         raw = _parse(text)
     except Exception as exc:  # network, quota, malformed JSON — all the same here
         logger.warning("Claude theming failed, using the taxonomy: %s", exc)
@@ -404,7 +413,12 @@ def claude_assignments(
     return out
 
 
-def _call(client, model: str, entries: list[tuple[str, list[str]]]) -> str:
+def _call(
+    client,
+    model: str,
+    entries: list[tuple[str, list[str]]],
+    effort: str | None = DEFAULT_THEME_EFFORT,
+) -> str:
     vocabulary = ", ".join(f"{key} ({title})" for key, title, _ in TAXONOMY)
     lines = [
         "Assign every story below to a theme.",
@@ -420,16 +434,23 @@ def _call(client, model: str, entries: list[tuple[str, list[str]]]) -> str:
     for index, (_, titles) in enumerate(entries):
         headline = titles[0] if titles else ""
         lines.append(f"{index}: {headline}")
-    resp = client.messages.create(
-        model=model,
+    kwargs = {
+        "model": model,
         # One assignment object runs ~30 tokens now that a story is one line.
         # A fixed ceiling would truncate mid-JSON on a big day and drop the
         # whole batch to the taxonomy — the failure that looks like nothing
         # happening.
-        max_tokens=min(8000, 400 + 40 * len(entries)),
-        system=_SYSTEM,
-        messages=[{"role": "user", "content": "\n".join(lines)}],
-    )
+        "max_tokens": min(8000, 400 + 40 * len(entries)),
+        "system": _SYSTEM,
+        "messages": [{"role": "user", "content": "\n".join(lines)}],
+    }
+    # `max_tokens` caps thinking and the JSON together, so effort is not only a
+    # cost lever here: at a high effort on a big day the reasoning can eat the
+    # budget and truncate the response, which drops the whole batch to the
+    # taxonomy. Omitted entirely when unset, so the model's own default stands.
+    if effort:
+        kwargs["output_config"] = {"effort": effort}
+    resp = client.messages.create(**kwargs)
     return "".join(block.text for block in resp.content if hasattr(block, "text"))
 
 
@@ -449,9 +470,11 @@ def assign_themes(
     client: object | None = None,
     model: str = DEFAULT_THEME_MODEL,
     use_claude: bool = True,
+    effort: str | None = DEFAULT_THEME_EFFORT,
 ) -> dict[str, ThemeAssignment]:
     """Theme every story: Claude where it answered, the taxonomy everywhere else."""
-    from_claude = claude_assignments(entries, client, model) if use_claude else {}
+    from_claude = (claude_assignments(entries, client, model, effort)
+                   if use_claude else {})
     # A key Claude used keeps Claude's wording everywhere, so two stories it
     # placed together do not arrive under two spellings of one theme.
     titles = {a.key: a.title for a in from_claude.values()}

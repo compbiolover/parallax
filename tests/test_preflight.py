@@ -55,7 +55,11 @@ def test_each_step_is_probed_the_way_it_calls():
     assert summary["model"] == "claude-opus-5"
     assert summary["output_config"] == {"effort": "medium"}
     assert liberty["output_config"]["effort"] == "low"
-    assert themes.get("output_config") is None  # themes sends no effort
+    # Themes sets no effort in SETTINGS, so the probe carries the module default
+    # rather than nothing — that is the call the run would make.
+    from cluster.themes import DEFAULT_THEME_EFFORT
+
+    assert themes["output_config"] == {"effort": DEFAULT_THEME_EFFORT}
 
 
 def test_the_liberty_probe_carries_the_shape_liberty_sends():

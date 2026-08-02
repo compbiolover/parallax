@@ -648,7 +648,9 @@ python3 -m ingestion compare
 
 # 3. Cluster stories from stored embeddings and detect blindspots in both directions,
 #    then group them into named themes (Claude when ANTHROPIC_API_KEY is set, else a
-#    built-in taxonomy; --no-claude-themes forces the taxonomy):
+#    built-in taxonomy; --no-claude-themes forces the taxonomy).
+#    Model: --theme-model, else `cluster.themes.model`, else claude-sonnet-5.
+#    Thinking depth: --theme-effort, else `cluster.themes.effort`, else low:
 python3 -m cluster run
 
 # 4. Charitable daily summary per diet + a cross-diet executive summary (Claude when

@@ -144,6 +144,15 @@ cluster:
   themes:
     claude: true
     model: claude-sonnet-5
+    # Thinking depth: low | medium | high | xhigh | max. `low` for the same
+    # reason liberty uses it — Sonnet 5 runs adaptive thinking at `high` by
+    # default, and placing a headline in a fixed vocabulary does not get better
+    # for the extra output tokens it bills. It is also a truncation lever, not
+    # only a cost one: `max_tokens` here scales with the number of stories and
+    # caps thinking and the JSON together, so a deep think on a big day can eat
+    # the budget and drop the whole batch to the taxonomy. Raise it if theme
+    # titles read thin.
+    effort: low
 
 # --- Comparison ------------------------------------------------------------
 compare:

@@ -78,6 +78,7 @@ class DailyConfig:
     min_blindspot_size: int = 2
     claude_themes: bool = True            # name blindspot themes with Claude
     theme_model: str | None = None        # None -> cluster.themes default
+    theme_effort: str | None = None       # None -> cluster.themes default
 
     # summarize
     model: str | None = None              # None -> summarizer default
@@ -116,6 +117,7 @@ class DailyConfig:
             history_limit=int(snap.get("history_limit", DEFAULT_SERIES_LIMIT)),
             claude_themes=bool(themes.get("claude", True)),
             theme_model=themes.get("model"),
+            theme_effort=themes.get("effort"),
             # `summarize.model` was documented in settings.example.yaml and read
             # by nothing: the daily run always took the summarizer's default.
             model=(settings.get("summarize", {}) or {}).get("model"),
@@ -213,6 +215,7 @@ def _step_cluster(store, cfg: DailyConfig) -> str:
         dominance=cfg.dominance,
         min_blindspot_size=cfg.min_blindspot_size,
         theme_model=cfg.theme_model,
+        theme_effort=cfg.theme_effort,
         claude_themes=cfg.claude_themes,
     )
     return (
