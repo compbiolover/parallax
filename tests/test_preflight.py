@@ -51,19 +51,39 @@ def test_each_step_is_probed_the_way_it_calls():
     Opus fails here rather than in tomorrow's brief."""
     client = _FakeClient()
     run(SETTINGS, client=client)
-    sent = client.messages.calls
-    assert sent[0]["model"] == "claude-opus-5"
-    assert sent[0]["output_config"] == {"effort": "medium"}
-    assert sent[1]["output_config"] == {"effort": "low"}
+    summary, liberty, themes = client.messages.calls
+    assert summary["model"] == "claude-opus-5"
+    assert summary["output_config"] == {"effort": "medium"}
+    assert liberty["output_config"]["effort"] == "low"
+    assert themes.get("output_config") is None  # themes sends no effort
+
+
+def test_the_liberty_probe_carries_the_shape_liberty_sends():
+    """A block-list system and a JSON schema are per-model capabilities, not
+    just parameters. Probing liberty with a bare message could go green on a
+    model that rejects the schema the tagger actually uses."""
+    from scoring.liberty import _SCHEMA
+
+    client = _FakeClient()
+    run(SETTINGS, client=client)
+    summary, liberty, _ = client.messages.calls
+    assert isinstance(summary["system"], str)
+    assert isinstance(liberty["system"], list)
+    assert liberty["system"][0]["type"] == "text"
+    assert liberty["output_config"]["format"] == {"type": "json_schema", "schema": _SCHEMA}
+    # Room to satisfy the schema — 16 tokens would truncate mid-object and read
+    # as a model failure.
+    assert liberty["max_tokens"] > summary["max_tokens"]
 
 
 def test_two_steps_on_one_model_share_a_call():
     client = _FakeClient()
     results = run(SETTINGS, client=client)
-    # themes has no effort, so it is a distinct call from liberty's `low`;
-    # what must not happen is paying twice for the identical one.
-    assert len(client.messages.calls) == len({(c["model"], str(c.get("output_config")))
-                                              for c in client.messages.calls})
+    # Liberty and themes share a model but not a shape, so they are distinct
+    # calls; what must not happen is paying twice for the identical one.
+    shapes = {(c["model"], str(c.get("output_config")), str(type(c["system"])))
+              for c in client.messages.calls}
+    assert len(client.messages.calls) == len(shapes)
     assert all(r.ok for r in results)
 
 
@@ -114,6 +134,17 @@ def test_no_client_fails_every_step_with_the_same_reason(monkeypatch, capsys):
     results = run(SETTINGS)
     assert not any(r.ok for r in results)
     assert all("ANTHROPIC_API_KEY is not set" in r.detail for r in results)
+
+
+def test_a_disabled_step_is_skipped_even_with_no_client(monkeypatch):
+    """Without a key every step fails, which is when this is most likely to be
+    read — and calling a deliberate `enabled: false` a failure sends someone to
+    fix a setting they chose on purpose."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    settings = {**SETTINGS, "scoring": {"taggers": {"liberty": {"enabled": False}}}}
+    summary, liberty, themes = run(settings)
+    assert liberty.ok and "enabled: false" in liberty.detail
+    assert not summary.ok and not themes.ok
 
 
 def test_cli_reports_one_cause_per_line_and_exits_nonzero(monkeypatch, capsys):

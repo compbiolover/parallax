@@ -92,10 +92,11 @@ can be fine for one and not another:
 make check-claude          # or: python3 -m scoring.preflight
 ```
 
-One call per distinct model (a few tokens each), probed the same way the step calls it,
-so an unreachable model or an `anthropic` too old for a parameter fails here rather than
-in tomorrow's brief. `--model ID` probes something else instead — useful when comparing
-tiers before changing `settings.yaml`.
+One call per distinct call shape (a few hundred tokens for the lot), each in the shape
+that step sends — including liberty's block-list system prompt and its JSON schema — so
+an unreachable model, a model that won't take the schema, or an `anthropic` too old for
+a parameter fails here rather than in tomorrow's brief. `--model ID` probes something
+else instead, which is useful when comparing tiers before changing `settings.yaml`.
 
 Then verify the rubric end to end for a fraction of a cent:
 
