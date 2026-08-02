@@ -84,7 +84,20 @@ scheduled runs, since cron does not inherit your shell environment.
 | `PARALLAX_SMTP_*`, `PARALLAX_DIGEST_TO` | the email brief | no email — see [the brief in your inbox](#the-brief-in-your-inbox) |
 | `MEDIACLOUD_API_KEY` | Media Cloud queries | GDELT backfill still works; it needs no key |
 
-Verify the Claude path end to end for a fraction of a cent:
+Check every Claude model the configured pipeline will call — the summary, liberty
+tagging, and blindspot themes are three separate model settings, and a key or an SDK
+can be fine for one and not another:
+
+```bash
+make check-claude          # or: python3 -m scoring.preflight
+```
+
+One call per distinct model (a few tokens each), probed the same way the step calls it,
+so an unreachable model or an `anthropic` too old for a parameter fails here rather than
+in tomorrow's brief. `--model ID` probes something else instead — useful when comparing
+tiers before changing `settings.yaml`.
+
+Then verify the rubric end to end for a fraction of a cent:
 
 ```bash
 python3 -m scoring.liberty
@@ -112,6 +125,7 @@ no text in it. Only the first of those is fixed by exporting a key.
 | `make validate` | score the gold set, report agreement, apply the §5 trigger |
 | `make audit-lexicon` | check a lexicon for equality/proportionality asymmetry |
 | `make register-probe` | check the liberty rubric scores both registers evenhandedly (costs API calls) |
+| `make check-claude` | probe every Claude model the configured pipeline calls (a few tokens) |
 | `make test` / `make lint` | the suite; ruff |
 
 `make daily` is a batch job, not an interactive command — expect minutes, not seconds.

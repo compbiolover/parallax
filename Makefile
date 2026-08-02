@@ -3,7 +3,7 @@
 # the already-built artifact and refuses to run the recipe ("`digest' is up to
 # date"). Add new targets here as well as below; tests/test_makefile.py checks.
 .PHONY: help daily daily-fast dashboard history validate audit-lexicon \
-        digest digest-send register-probe check-secrets test lint
+        digest digest-send register-probe check-claude check-secrets test lint
 .DEFAULT_GOAL := help
 
 PY ?= python3
@@ -37,6 +37,9 @@ digest-send:  ## Render and email the daily brief (needs SMTP settings)
 
 register-probe:  ## Check the liberty rubric scores both registers evenhandedly (costs API calls)
 	$(PY) -m validation.register_probe $(if $(REPEATS),--repeats $(REPEATS))
+
+check-claude:  ## Probe every Claude model the configured pipeline calls (a few tokens)
+	$(PY) -m scoring.preflight
 
 check-secrets:  ## Resolve every scheduled-run secret and report (fetches nothing else)
 	./scripts/parallax-daily.sh --check
