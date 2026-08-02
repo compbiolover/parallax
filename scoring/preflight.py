@@ -130,7 +130,11 @@ def planned_steps(settings: dict) -> list[Step]:
         Step(
             "blindspot themes",
             themes.get("model") or DEFAULT_THEME_MODEL,
-            themes.get("effort") or DEFAULT_THEME_EFFORT,
+            # `.get` with a default, not `or`: theming is the one step that can
+            # be configured to send no effort at all (`effort: ~`), and a probe
+            # that quietly substituted the default would be checking a call the
+            # run doesn't make — the one thing this command must not do.
+            themes.get("effort", DEFAULT_THEME_EFFORT),
             disabled="" if themes.get("claude", True) else "claude: false",
         ),
     ]

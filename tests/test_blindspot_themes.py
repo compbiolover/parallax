@@ -390,8 +390,9 @@ def test_theming_sends_an_effort_and_it_is_settable():
 
 
 def test_an_explicit_none_effort_sends_no_output_config():
-    """`effort: ~` in settings means "let the model decide", which is a real
-    third option — not the same call as the default one."""
+    """A `None` effort means "let the model decide" — a real third option, not
+    the same call as the default one. `test_settings_null_effort_survives_to_the
+    _call` is what checks that YAML's `effort: ~` arrives here as this."""
     client = _FakeClient('{"assignments": []}')
     assign_themes(ENTRIES, client=client, effort=None)
     assert "output_config" not in client.calls[0]
@@ -414,9 +415,34 @@ def test_settings_effort_reaches_the_call(monkeypatch):
     bs._theme_blindspots(_Store(), [object()], None, None, True, "medium")
     assert seen["effort"] == "medium"
 
+    # Not configured at all: `assign_themes` applies its own default.
+    seen.clear()
+    bs._theme_blindspots(_Store(), [object()], None, None, True)
+    assert "effort" not in seen
+
+    # Configured as null: that is an instruction, and it has to survive. This is
+    # the distinction a `None` default cannot carry, which is why UNSET exists.
     seen.clear()
     bs._theme_blindspots(_Store(), [object()], None, None, True, None)
-    assert "effort" not in seen  # unset leaves the module default in place
+    assert seen["effort"] is None
+
+
+def test_settings_null_effort_survives_to_the_call():
+    """`effort: ~` end to end, which is where this broke: every layer read the
+    key with `.get`, so a configured null came back as "unconfigured" and the
+    default was reapplied. The knob documented as restoring the model's own
+    behaviour did nothing at all."""
+    from cluster.themes import UNSET
+    from daily.runner import DailyConfig
+
+    absent = DailyConfig.from_settings({"cluster": {"themes": {}}})
+    assert absent.theme_effort is UNSET
+
+    null = DailyConfig.from_settings({"cluster": {"themes": {"effort": None}}})
+    assert null.theme_effort is None
+
+    named = DailyConfig.from_settings({"cluster": {"themes": {"effort": "high"}}})
+    assert named.theme_effort == "high"
 
 
 def test_claude_is_not_called_when_it_is_switched_off():

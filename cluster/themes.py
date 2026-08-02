@@ -48,6 +48,22 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_THEME_MODEL = "claude-sonnet-5"
 
+class _Unset:
+    """Distinguishes "not configured" from a configured ``None``.
+
+    ``cluster.themes.effort`` has three states, and ``None`` cannot carry two of
+    them: absent means "use the default below", ``effort: ~`` means "send no
+    effort at all and let the model decide", and a string means that string. A
+    plain ``None`` default collapsed the first two, so the documented way to
+    restore the model's own behaviour silently did nothing.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "UNSET"
+
+
+UNSET = _Unset()
+
 # Thinking depth, the same knob the summary and liberty tagging already expose.
 # Naming a story's subject from its headline is classification against a fixed
 # vocabulary, not reasoning — so `low`, for the reason liberty uses `low`: this

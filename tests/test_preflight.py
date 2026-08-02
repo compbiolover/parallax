@@ -36,6 +36,15 @@ def test_every_configured_step_is_planned():
     assert steps[0].effort == "medium"
 
 
+def test_a_configured_null_effort_is_probed_as_configured():
+    """Themes can be set to send no effort at all. Substituting the default
+    would probe a call the run does not make."""
+    settings = {**SETTINGS, "cluster": {"themes": {"effort": None}}}
+    client = _FakeClient()
+    run(settings, client=client)
+    assert "output_config" not in client.messages.calls[-1]
+
+
 def test_defaults_come_from_the_modules_not_from_here():
     """An empty settings file has to plan the same calls the pipeline makes."""
     from cluster.themes import DEFAULT_THEME_MODEL
