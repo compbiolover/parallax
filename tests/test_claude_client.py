@@ -87,6 +87,8 @@ def test_summarizer_warns_before_falling_back(monkeypatch, caplog):
 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with caplog.at_level(logging.WARNING):
-        assert _build_client() is None
+        client, reason = _build_client()
+    assert client is None
+    assert reason == NO_KEY
     assert "deterministic fallback" in caplog.text
     assert NO_KEY in caplog.text

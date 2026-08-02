@@ -20,17 +20,65 @@ from __future__ import annotations
 
 import os
 
-NO_KEY = (
+
+class Reason(str):
+    """Why Claude can't run: a sentence for the log, a phrase for the page.
+
+    The long form is what someone reading a log needs — which piece of setup is
+    missing and the command that fixes it. It is far too long for a card on the
+    dashboard, which is where a fallback is actually noticed, so each reason
+    also carries a `short` phrase that fits inline in one.
+
+    A ``str`` subclass so the long form stays the default in every existing
+    use — ``%s`` in a log call, an ``in`` check, equality against ``NO_KEY``.
+    """
+
+    short: str
+
+    def __new__(cls, short: str, detail: str) -> Reason:
+        obj = super().__new__(cls, detail)
+        obj.short = short
+        return obj
+
+
+NO_KEY = Reason(
+    "no ANTHROPIC_API_KEY set",
     "ANTHROPIC_API_KEY is not set in this environment. Export it in your shell "
     "(and note that .env is NOT read automatically). For scheduled runs, set it "
-    "inside the crontab — cron does not inherit your shell environment."
+    "inside the crontab — cron does not inherit your shell environment.",
 )
 
-NO_PACKAGE = (
+NO_PACKAGE = Reason(
+    "the `anthropic` package is not installed",
     "the `anthropic` package is not installed. It lives in the `llm` extra, "
     'which `pip install -e ".[dev]"` does not include — install it with '
-    '`pip install -e ".[dev,llm]"`.'
+    '`pip install -e ".[dev,llm]"`.',
 )
+
+
+def call_failed(exc: BaseException) -> Reason:
+    """The reason for a key that *is* set and a call that failed anyway.
+
+    Naming the exception type is the whole value: an ``AuthenticationError``
+    means the key is wrong or revoked, a ``NotFoundError`` means the model name
+    is, and a timeout means neither — three different mornings that otherwise
+    produce the same numbers-only page.
+    """
+    return Reason(
+        f"the Claude call failed ({type(exc).__name__})",
+        f"the Claude call failed ({type(exc).__name__}: {exc})",
+    )
+
+
+NO_TEXT = Reason(
+    "Claude returned no summary text",
+    "Claude returned no usable text — the response was empty, refused, or "
+    "spent its whole token budget on thinking.",
+)
+
+# What to say when a caller has no reason to hand — a client that was injected
+# and turned out to be None, say. Better than an empty parenthetical.
+UNKNOWN = Reason("the LLM step did not run", "the LLM step did not run")
 
 
 def build_client() -> tuple[object | None, str]:

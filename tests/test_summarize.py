@@ -62,12 +62,77 @@ def test_unparseable_response_falls_back_to_whole_text():
     assert executive == "just a blob with no headers"
 
 
-def test_deterministic_fallback_without_key():
+def test_deterministic_fallback_without_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     store = _seed_store()
-    result = Summarizer().summarize(store)  # no ANTHROPIC_API_KEY in tests
+    result = Summarizer().summarize(store)
     assert result.method == "deterministic"
     assert set(result.per_diet) == {"self", "modeled_ce"}
     assert "Jensen-Shannon" in result.executive
+    assert "no ANTHROPIC_API_KEY set" in result.executive
+    store.close()
+
+
+def test_fallback_note_names_the_actual_cause(monkeypatch):
+    """The regression this exists to prevent: every fallback, whatever caused
+    it, told the reader to go set a key. Four of the five causes are something
+    else, and for two of them the key is already set and already working."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    store = _seed_store()
+
+    class _Boom:
+        class messages:
+            @staticmethod
+            def create(**kwargs):
+                raise TimeoutError("upstream took too long")
+
+    result = Summarizer(client=_Boom()).summarize(store)
+    assert result.method == "deterministic"
+    for text in [result.executive, *result.per_diet.values()]:
+        assert "the Claude call failed (TimeoutError)" in text
+        assert "ANTHROPIC_API_KEY" not in text
+    store.close()
+
+
+def test_fallback_note_names_an_empty_response(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    store = _seed_store()
+    result = Summarizer(client=_FakeClient(blocks=[])).summarize(store)
+    assert result.method == "deterministic"
+    assert "Claude returned no summary text" in result.executive
+    store.close()
+
+
+def test_a_falsy_injected_client_is_still_the_client(monkeypatch):
+    """The injected client is a sentinel, not a truth value: a double that
+    defines __bool__ (or __len__, which a Mock-alike may) would otherwise be
+    discarded in favour of one built from the environment — the opposite of
+    what injecting it asked for."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    client = _FakeClient()
+    client.__class__.__bool__ = lambda self: False
+    try:
+        store = _seed_store()
+        result = Summarizer(client=client).summarize(store)
+        assert result.method == "claude"
+        assert client.messages.calls, "the injected client was never called"
+        store.close()
+    finally:
+        del client.__class__.__bool__
+
+
+def test_missing_package_is_not_reported_as_a_missing_key(monkeypatch):
+    """A key that is set and an `llm` extra that is not — the one people hit
+    right after a fresh checkout and a `pip install -e ".[dev]"`."""
+    import summarize.summarizer as mod
+    from scoring.claude_client import NO_PACKAGE
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr(mod, "build_client", lambda: (None, NO_PACKAGE))
+    store = _seed_store()
+    result = Summarizer().summarize(store)
+    assert "the `anthropic` package is not installed" in result.executive
+    assert "no ANTHROPIC_API_KEY set" not in result.executive
     store.close()
 
 
