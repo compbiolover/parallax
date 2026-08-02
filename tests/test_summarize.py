@@ -103,6 +103,24 @@ def test_fallback_note_names_an_empty_response(monkeypatch):
     store.close()
 
 
+def test_a_falsy_injected_client_is_still_the_client(monkeypatch):
+    """The injected client is a sentinel, not a truth value: a double that
+    defines __bool__ (or __len__, which a Mock-alike may) would otherwise be
+    discarded in favour of one built from the environment — the opposite of
+    what injecting it asked for."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    client = _FakeClient()
+    client.__class__.__bool__ = lambda self: False
+    try:
+        store = _seed_store()
+        result = Summarizer(client=client).summarize(store)
+        assert result.method == "claude"
+        assert client.messages.calls, "the injected client was never called"
+        store.close()
+    finally:
+        del client.__class__.__bool__
+
+
 def test_missing_package_is_not_reported_as_a_missing_key(monkeypatch):
     """A key that is set and an `llm` extra that is not — the one people hit
     right after a fresh checkout and a `pip install -e ".[dev]"`."""

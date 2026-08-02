@@ -119,7 +119,11 @@ class Summarizer:
         if not contexts:
             return SummaryResult({}, "", self.model, "deterministic", _now_iso())
 
-        client, reason = (self._client, UNKNOWN) if self._client else _build_client()
+        # `is not None`, not truthiness: an injected client is a sentinel, and a
+        # test double that defines __bool__ or __len__ would otherwise be
+        # silently discarded in favour of a client built from the environment.
+        injected = self._client is not None
+        client, reason = (self._client, UNKNOWN) if injected else _build_client()
         if client is None:
             return self._deterministic(contexts, comparison, lexicon, reason)
         try:
