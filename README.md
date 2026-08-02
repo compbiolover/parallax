@@ -92,6 +92,11 @@ python3 -m scoring.liberty
 
 It prints a scored probe if everything is wired up, and names the missing piece if not.
 
+When the brief comes back numbers-only, its first line says which piece was missing —
+an unset key, an `anthropic` package that isn't installed, a call that failed (with the
+exception named, so a rejected key reads differently from a timeout), or a response with
+no text in it. Only the first of those is fixed by exporting a key.
+
 ---
 
 ## Commands

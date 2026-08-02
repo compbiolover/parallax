@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from compare.divergence import jensen_shannon_divergence, log_ratios
 from ingestion.datastore import Datastore
 from ingestion.pipeline import diet_profiles
-from scoring.claude_client import build_client
+from scoring.claude_client import NO_TEXT, UNKNOWN, build_client, call_failed
 
 from .prompts import (
     SYSTEM_PROMPT,
@@ -119,16 +119,16 @@ class Summarizer:
         if not contexts:
             return SummaryResult({}, "", self.model, "deterministic", _now_iso())
 
-        client = self._client or _build_client()
+        client, reason = (self._client, UNKNOWN) if self._client else _build_client()
         if client is None:
-            return self._deterministic(contexts, comparison, lexicon)
+            return self._deterministic(contexts, comparison, lexicon, reason)
         try:
             text = self._call_claude(client, contexts, comparison, lexicon)
         except Exception as exc:
             # Never let an API hiccup leave the dashboard empty.
             logger.warning("Claude summaries failed (%s: %s) — using the "
                            "deterministic fallback", type(exc).__name__, exc)
-            return self._deterministic(contexts, comparison, lexicon)
+            return self._deterministic(contexts, comparison, lexicon, call_failed(exc))
         if not text.strip():
             # A response with no usable text is a failure, whatever the HTTP
             # status said. Persisting it wrote empty summaries over the day's
@@ -136,7 +136,7 @@ class Summarizer:
             # dashboard empty" meant.
             logger.warning("Claude returned no summary text — using the "
                            "deterministic fallback")
-            return self._deterministic(contexts, comparison, lexicon)
+            return self._deterministic(contexts, comparison, lexicon, NO_TEXT)
         per_diet, executive = _parse_sections(text, contexts)
         missing = [c.diet_id for c in contexts if not per_diet.get(c.diet_id, "").strip()]
         if missing:
@@ -161,9 +161,12 @@ class Summarizer:
         )
         return _response_text(resp)
 
-    def _deterministic(self, contexts, comparison, lexicon=None) -> SummaryResult:
-        per_diet = {c.diet_id: _deterministic_diet(c) for c in contexts}
-        executive = _deterministic_executive(contexts, comparison, lexicon)
+    def _deterministic(
+        self, contexts, comparison, lexicon=None, reason: str = UNKNOWN
+    ) -> SummaryResult:
+        note = _fallback_note(reason)
+        per_diet = {c.diet_id: _deterministic_diet(c, note) for c in contexts}
+        executive = _deterministic_executive(contexts, comparison, lexicon, note)
         return SummaryResult(per_diet, executive, self.model, "deterministic", _now_iso())
 
     def persist(self, store: Datastore, result: SummaryResult) -> None:
@@ -218,18 +221,20 @@ def _response_text(resp) -> str:
 
 
 def _build_client():
-    """The Claude client, or ``None`` with a warning explaining which piece of
-    setup is missing.
+    """``(client, reason)`` — the reason empty on success, and warned about
+    otherwise so the log names which piece of setup is missing.
 
     Falling back to the deterministic summary is a legitimate mode, but it is
     labelled on the dashboard as "numbers-only" — so an unintended fallback is
-    visible in the output while its *cause* was not. The warning closes that gap.
+    visible in the output while its *cause* was not. The warning closes that
+    gap for anyone reading the log; the reason travels on so the page can close
+    it for anyone reading only the page.
     """
     client, reason = build_client()
     if client is None:
         logger.warning("Claude summaries disabled, using the deterministic "
                        "fallback: %s", reason)
-    return client
+    return client, reason
 
 
 # Words a heading can gain or lose without naming a different diet. Articles
@@ -324,29 +329,41 @@ def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
 
 # -- deterministic fallback -------------------------------------------------
 
-_FALLBACK_NOTE = "(Generated without the LLM — no ANTHROPIC_API_KEY set. Neutral, numbers-only.)"
+def _fallback_note(reason: str) -> str:
+    """The line on the dashboard that says why there is no LLM prose today.
+
+    It used to name a missing key unconditionally, which is true for one of the
+    ways the fallback is reached and a false lead for the rest: a missing
+    `anthropic` package, a key that is set but rejected, a call that timed out,
+    a response with no text in it. Reading "no ANTHROPIC_API_KEY set" sends you
+    to re-export a key that was never the problem, so the cause is passed in
+    rather than assumed.
+    """
+    short = getattr(reason, "short", None) or str(reason) or UNKNOWN.short
+    return f"(Generated without the LLM — {short}. Neutral, numbers-only.)"
 
 
 def _top_two(profile: dict[str, float]) -> list[tuple[str, float]]:
     return sorted(profile.items(), key=lambda kv: kv[1], reverse=True)[:2]
 
 
-def _deterministic_diet(ctx: DietContext) -> str:
+def _deterministic_diet(ctx: DietContext, note: str) -> str:
     top = _top_two(ctx.profile)
     emphasis = " and ".join(f"{f} ({v:.2f})" for f, v in top)
     return (
-        f"{_FALLBACK_NOTE}\n\n"
+        f"{note}\n\n"
         f"Across {ctx.doc_count} stories, this diet's strongest moral-foundation "
         f"emphasis was {emphasis}. These are estimates from a dictionary method "
         f"and should be read as tendencies, not measurements."
     )
 
 
-def _deterministic_executive(contexts, comparison, lexicon=None) -> str:
+def _deterministic_executive(contexts, comparison, lexicon=None, note: str = "") -> str:
     from scoring.lexicon import is_demo_lexicon
 
+    note = note or _fallback_note(UNKNOWN)
     if comparison is None:
-        return f"{_FALLBACK_NOTE}\n\nOnly one diet has scored documents; no comparison yet."
+        return f"{note}\n\nOnly one diet has scored documents; no comparison yet."
     # The fallback names the diets the same way the model is told to: this text
     # is read by the same person on the same morning, and "modeled_ce" is a
     # database key either way.
@@ -364,7 +381,7 @@ def _deterministic_executive(contexts, comparison, lexicon=None) -> str:
             "treat differences as estimates."
         )
     return (
-        f"{_FALLBACK_NOTE}\n\n"
+        f"{note}\n\n"
         f"Jensen-Shannon divergence between {a} and {b} is {comparison.jsd:.3f} "
         f"(0 = identical emphasis, 1 = disjoint).\n\n"
         f"Relative to {b}, {a} over-indexes most on {a_over[0]} "
