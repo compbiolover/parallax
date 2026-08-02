@@ -36,6 +36,15 @@ def test_every_configured_step_is_planned():
     assert steps[0].effort == "medium"
 
 
+def test_a_configured_null_effort_is_probed_as_configured():
+    """Themes can be set to send no effort at all. Substituting the default
+    would probe a call the run does not make."""
+    settings = {**SETTINGS, "cluster": {"themes": {"effort": None}}}
+    client = _FakeClient()
+    run(settings, client=client)
+    assert "output_config" not in client.messages.calls[-1]
+
+
 def test_defaults_come_from_the_modules_not_from_here():
     """An empty settings file has to plan the same calls the pipeline makes."""
     from cluster.themes import DEFAULT_THEME_MODEL
@@ -55,7 +64,11 @@ def test_each_step_is_probed_the_way_it_calls():
     assert summary["model"] == "claude-opus-5"
     assert summary["output_config"] == {"effort": "medium"}
     assert liberty["output_config"]["effort"] == "low"
-    assert themes.get("output_config") is None  # themes sends no effort
+    # Themes sets no effort in SETTINGS, so the probe carries the module default
+    # rather than nothing — that is the call the run would make.
+    from cluster.themes import DEFAULT_THEME_EFFORT
+
+    assert themes["output_config"] == {"effort": DEFAULT_THEME_EFFORT}
 
 
 def test_the_liberty_probe_carries_the_shape_liberty_sends():

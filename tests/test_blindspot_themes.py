@@ -373,6 +373,78 @@ def test_an_api_failure_is_a_quieter_brief_not_a_failed_run():
     assert all(a.method == "taxonomy" for a in out.values())
 
 
+def test_theming_sends_an_effort_and_it_is_settable():
+    """The knob the summary and liberty already had. Without it this call took
+    the model's own default, which on Sonnet 5 is adaptive thinking at `high` —
+    several times the output tokens to place a headline in a fixed vocabulary,
+    billed on every cluster run."""
+    from cluster.themes import DEFAULT_THEME_EFFORT
+
+    client = _FakeClient('{"assignments": []}')
+    assign_themes(ENTRIES, client=client)
+    assert client.calls[0]["output_config"] == {"effort": DEFAULT_THEME_EFFORT}
+
+    louder = _FakeClient('{"assignments": []}')
+    assign_themes(ENTRIES, client=louder, effort="high")
+    assert louder.calls[0]["output_config"] == {"effort": "high"}
+
+
+def test_an_explicit_none_effort_sends_no_output_config():
+    """A `None` effort means "let the model decide" — a real third option, not
+    the same call as the default one. `test_settings_null_effort_survives_to_the
+    _call` is what checks that YAML's `effort: ~` arrives here as this."""
+    client = _FakeClient('{"assignments": []}')
+    assign_themes(ENTRIES, client=client, effort=None)
+    assert "output_config" not in client.calls[0]
+
+
+def test_settings_effort_reaches_the_call(monkeypatch):
+    """The setting is only worth having if it survives the walk from
+    settings.yaml down to `messages.create`."""
+    import cluster.blindspot as bs
+
+    seen: dict = {}
+    monkeypatch.setattr(bs, "articles_from_store", lambda store, spots: {})
+    monkeypatch.setattr(bs, "assign_themes",
+                        lambda entries, client=None, **kw: seen.update(kw) or {})
+    monkeypatch.setattr(bs, "group_blindspots", lambda *a, **k: [])
+
+    class _Store:
+        def replace_blindspot_themes(self, rows): pass
+
+    bs._theme_blindspots(_Store(), [object()], None, None, True, "medium")
+    assert seen["effort"] == "medium"
+
+    # Not configured at all: `assign_themes` applies its own default.
+    seen.clear()
+    bs._theme_blindspots(_Store(), [object()], None, None, True)
+    assert "effort" not in seen
+
+    # Configured as null: that is an instruction, and it has to survive. This is
+    # the distinction a `None` default cannot carry, which is why UNSET exists.
+    seen.clear()
+    bs._theme_blindspots(_Store(), [object()], None, None, True, None)
+    assert seen["effort"] is None
+
+
+def test_settings_null_effort_survives_to_the_call():
+    """`effort: ~` end to end, which is where this broke: every layer read the
+    key with `.get`, so a configured null came back as "unconfigured" and the
+    default was reapplied. The knob documented as restoring the model's own
+    behaviour did nothing at all."""
+    from cluster.themes import UNSET
+    from daily.runner import DailyConfig
+
+    absent = DailyConfig.from_settings({"cluster": {"themes": {}}})
+    assert absent.theme_effort is UNSET
+
+    null = DailyConfig.from_settings({"cluster": {"themes": {"effort": None}}})
+    assert null.theme_effort is None
+
+    named = DailyConfig.from_settings({"cluster": {"themes": {"effort": "high"}}})
+    assert named.theme_effort == "high"
+
+
 def test_claude_is_not_called_when_it_is_switched_off():
     client = _FakeClient('{"assignments": []}')
     assign_themes(ENTRIES, client=client, use_claude=False)

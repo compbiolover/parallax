@@ -17,6 +17,19 @@ from ingestion.datastore import Datastore
 from .blindspot import run_clustering
 
 
+def _configured_effort(themes_cfg: dict):
+    """The configured theme effort, keeping "absent" and "null" apart.
+
+    ``effort: ~`` is a deliberate instruction — send no effort and let the model
+    decide — and reading it with ``.get`` turns it back into the default.
+    """
+    from cluster.themes import UNSET
+
+    # `.get` *with a default* keeps a stored None; it is `.get("effort")` and
+    # `or` that collapse it, which is how this broke in the first place.
+    return themes_cfg.get("effort", UNSET)
+
+
 def _db_path(args: argparse.Namespace, settings: dict) -> str:
     if args.db:
         return args.db
@@ -36,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="name blindspot themes from the built-in taxonomy "
                              "only, without an API call")
     parser.add_argument("--theme-model", help="model for theme naming")
+    parser.add_argument("--theme-effort",
+                        choices=["low", "medium", "high", "xhigh", "max"],
+                        help="thinking depth for theme naming (default: low)")
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
@@ -51,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
             dominance=args.dominance,
             min_blindspot_size=args.min_blindspot_size,
             theme_model=args.theme_model or themes_cfg.get("model"),
+            theme_effort=args.theme_effort or _configured_effort(themes_cfg),
             claude_themes=(not args.no_claude_themes)
                           and bool(themes_cfg.get("claude", True)),
         )

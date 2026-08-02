@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from cluster.themes import UNSET as THEME_EFFORT_UNSET
 from compare.history import DEFAULT_SERIES_LIMIT, DEFAULT_WINDOW_DAYS
 from ingestion.datastore import Datastore
 
@@ -78,6 +79,8 @@ class DailyConfig:
     min_blindspot_size: int = 2
     claude_themes: bool = True            # name blindspot themes with Claude
     theme_model: str | None = None        # None -> cluster.themes default
+    # UNSET -> cluster.themes default; None -> send no effort at all
+    theme_effort: object = THEME_EFFORT_UNSET
 
     # summarize
     model: str | None = None              # None -> summarizer default
@@ -116,6 +119,10 @@ class DailyConfig:
             history_limit=int(snap.get("history_limit", DEFAULT_SERIES_LIMIT)),
             claude_themes=bool(themes.get("claude", True)),
             theme_model=themes.get("model"),
+            # `.get` with a default keeps a stored None: `effort: ~` means
+            # "send no effort", which is not the same instruction as leaving
+            # the key out. Plain `.get("effort")` collapses the two.
+            theme_effort=themes.get("effort", THEME_EFFORT_UNSET),
             # `summarize.model` was documented in settings.example.yaml and read
             # by nothing: the daily run always took the summarizer's default.
             model=(settings.get("summarize", {}) or {}).get("model"),
@@ -213,6 +220,7 @@ def _step_cluster(store, cfg: DailyConfig) -> str:
         dominance=cfg.dominance,
         min_blindspot_size=cfg.min_blindspot_size,
         theme_model=cfg.theme_model,
+        theme_effort=cfg.theme_effort,
         claude_themes=cfg.claude_themes,
     )
     return (

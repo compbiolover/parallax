@@ -25,7 +25,15 @@ from dataclasses import dataclass, field
 from ingestion.datastore import Datastore
 
 from .cluster import ClusterResult, compute_clustering
-from .themes import Article, Theme, ThemeAssignment, assign_themes, group_blindspots
+from .themes import (
+    UNSET,
+    Article,
+    Theme,
+    ThemeAssignment,
+    _Unset,
+    assign_themes,
+    group_blindspots,
+)
 from .titles import clean_title, clean_titles
 
 _WORD_RE = re.compile(r"[a-z][a-z'-]+")
@@ -287,6 +295,7 @@ def run_clustering(
     theme_model: str | None = None,
     theme_client: object | None = None,
     claude_themes: bool = True,
+    theme_effort: str | None | _Unset = UNSET,
 ) -> ClusteringOutcome:
     """Cluster, persist the assignment, detect blindspots, and theme them."""
     result = compute_clustering(store, min_cluster_size=min_cluster_size)
@@ -306,7 +315,8 @@ def run_clustering(
     store.replace_clustering(cluster_rows, assignments)
 
     blindspots = detect_blindspots(result, dominance, min_blindspot_size, labels=labels)
-    themes = _theme_blindspots(store, blindspots, theme_model, theme_client, claude_themes)
+    themes = _theme_blindspots(store, blindspots, theme_model, theme_client,
+                               claude_themes, theme_effort)
     n_noise = sum(1 for lbl in result.labels if lbl == -1)
     return ClusteringOutcome(
         n_docs=result.n_docs,
@@ -324,6 +334,7 @@ def _theme_blindspots(
     theme_model: str | None,
     theme_client: object | None,
     claude_themes: bool,
+    theme_effort: str | None | _Unset = UNSET,
 ) -> list[Theme]:
     """Name the themes once, here, and persist them.
 
@@ -342,6 +353,12 @@ def _theme_blindspots(
     kwargs = {"use_claude": claude_themes}
     if theme_model:
         kwargs["model"] = theme_model
+    # `is not UNSET`, not truthiness: an unconfigured effort has to leave
+    # `assign_themes`' own default in place, while a configured `None` has to
+    # reach it, because that is what sends no effort at all. Truthiness maps
+    # both to "leave it alone" and loses the second.
+    if theme_effort is not UNSET:
+        kwargs["effort"] = theme_effort
     assignments = assign_themes(entries, client=theme_client, **kwargs)
     store.replace_blindspot_themes(
         [(doc_id, a.key, a.title, a.method) for doc_id, a in assignments.items()]
