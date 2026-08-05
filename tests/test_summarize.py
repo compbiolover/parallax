@@ -7,7 +7,13 @@ import re
 
 from ingestion.datastore import Datastore
 from summarize.prompts import SYSTEM_PROMPT, ComparisonContext, DietContext, build_user_prompt
-from summarize.summarizer import DEFAULT_MODEL, Summarizer, _parse_sections, gather
+from summarize.summarizer import (
+    DEFAULT_EFFORT,
+    DEFAULT_MODEL,
+    Summarizer,
+    _parse_sections,
+    gather,
+)
 
 
 def _seed_store():
@@ -141,22 +147,25 @@ class _FakeBlock:
 
 
 class _FakeMessages:
-    def __init__(self, blocks=None, stop_reason="end_turn"):
+    def __init__(self, blocks=None, stop_reason="end_turn", queue=None):
         self._blocks = blocks
         self._stop_reason = stop_reason
+        # One entry per call, for the tests that need two calls to differ.
+        # `None` in the queue means "the usual good reply".
+        self._queue = list(queue) if queue is not None else None
         self.calls: list[dict] = []
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        blocks = self._blocks
+        blocks = self._queue.pop(0) if self._queue else self._blocks
         if blocks is None:
             blocks = [_FakeBlock("## self\nS.\n## modeled_ce\nO.\n## Executive\nE.")]
         return type("R", (), {"content": blocks, "stop_reason": self._stop_reason})()
 
 
 class _FakeClient:
-    def __init__(self, blocks=None, stop_reason="end_turn"):
-        self.messages = _FakeMessages(blocks, stop_reason)
+    def __init__(self, blocks=None, stop_reason="end_turn", queue=None):
+        self.messages = _FakeMessages(blocks, stop_reason, queue)
 
 
 class _ThinkingBlock:
@@ -354,7 +363,33 @@ def test_the_token_budget_leaves_room_for_thinking_and_prose():
     Summarizer(client=client).summarize(store)
     call = client.messages.calls[0]
     assert call["max_tokens"] == MAX_TOKENS >= 16000
-    assert call["output_config"] == {"effort": "medium"}
+    assert call["output_config"] == {"effort": DEFAULT_EFFORT}
+    store.close()
+
+
+def test_a_reply_with_no_prose_is_asked_again_before_giving_up():
+    """Opus 5 sometimes ends the turn on a thinking block alone: a 200,
+    `end_turn`, well inside `max_tokens`, and no prose. It is a coin flip on
+    identical input, so the retry is the fix and the fallback is the floor
+    under it — without the retry one such reply cost the whole day's brief."""
+    store = _seed_store()
+    client = _FakeClient(queue=[[_ThinkingBlock()], None])   # then the usual reply
+
+    result = Summarizer(client=client).summarize(store)
+
+    assert len(client.messages.calls) == 2
+    assert result.method == "claude"
+    store.close()
+
+
+def test_a_second_empty_reply_falls_back_rather_than_asking_forever():
+    store = _seed_store()
+    client = _FakeClient(queue=[[_ThinkingBlock()], [_ThinkingBlock()]])
+
+    result = Summarizer(client=client).summarize(store)
+
+    assert len(client.messages.calls) == 2
+    assert result.method == "deterministic"
     store.close()
 
 

@@ -441,44 +441,97 @@ def _call(
         "",
         f"Vocabulary of preferred keys: {vocabulary}, {OTHER_KEY} ({OTHER_TITLE}).",
         "",
-        'Respond with JSON only: {"assignments": [{"story": 0, "key": "faith", '
-        '"title": "Faith & the church"}]}. Every story number below must appear '
-        "exactly once. Stories sharing a key must share the same title. Judge "
-        "each story on its own headline — neighbouring stories are unrelated.",
+        'Respond with JSON only: {"themes": [{"key": "faith", "title": '
+        '"Faith & the church", "stories": [0, 3, 7]}]}. One object per theme, '
+        "listing every story number that belongs to it. Every story number "
+        "below must appear exactly once across all themes. Judge each story on "
+        "its own headline — neighbouring stories are unrelated.",
         "",
     ]
     for index, (_, titles) in enumerate(entries):
         headline = titles[0] if titles else ""
         lines.append(f"{index}: {headline}")
+    # The API validates the reply against this before returning it, so "Claude
+    # wrote JSON that does not parse" stops being a thing the taxonomy has to
+    # catch. It was not hypothetical: one of two otherwise-healthy replies broke
+    # its array partway through and dropped all 717 stories to the fallback.
+    schema = {
+        "type": "object",
+        "properties": {
+            "themes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "key": {"type": "string"},
+                        "title": {"type": "string"},
+                        "stories": {"type": "array", "items": {"type": "integer"}},
+                    },
+                    "required": ["key", "title", "stories"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["themes"],
+        "additionalProperties": False,
+    }
     kwargs = {
         "model": model,
-        # One assignment object runs ~30 tokens now that a story is one line.
-        # A fixed ceiling would truncate mid-JSON on a big day and drop the
-        # whole batch to the taxonomy — the failure that looks like nothing
-        # happening.
-        "max_tokens": min(8000, 400 + 40 * len(entries)),
+        # A story costs a bare integer inside its theme's `stories` list, so
+        # the JSON runs a few tokens per story rather than the ~30 an object
+        # apiece cost. That is what makes a fixed ceiling survivable: the old
+        # `min(8000, 400 + 40 * n)` wanted 29k tokens for a 717-story day, got
+        # clamped to 8k, and could not have fitted the answer at any effort —
+        # every run since themes landed dropped the whole batch to the taxonomy.
+        # The ceiling stays because thinking shares this budget and a runaway
+        # think should cost one taxonomy day, not a ten-minute request.
+        "max_tokens": min(16000, 2000 + 6 * len(entries)),
         "system": _SYSTEM,
         "messages": [{"role": "user", "content": "\n".join(lines)}],
     }
-    # `max_tokens` caps thinking and the JSON together, so effort is not only a
-    # cost lever here: at a high effort on a big day the reasoning can eat the
-    # budget and truncate the response, which drops the whole batch to the
-    # taxonomy. Omitted entirely when unset, so the model's own default stands.
+    # `max_tokens` caps thinking and the JSON together, and raising the budget
+    # does not buy its way out: at `medium` on a 717-story day the reasoning
+    # spent the entire allowance and returned `max_tokens` with no JSON at all,
+    # twice. Thinking expands to whatever it is given, so `low` is the setting
+    # that works rather than the one that is merely cheaper. The effort key is
+    # omitted when unset, so the model's own default stands; the schema is not,
+    # because it is what makes the reply parseable at all.
+    output_config = {"format": {"type": "json_schema", "schema": schema}}
     if effort:
-        kwargs["output_config"] = {"effort": effort}
+        output_config["effort"] = effort
+    kwargs["output_config"] = output_config
     resp = client.messages.create(**kwargs)
     return "".join(block.text for block in resp.content if hasattr(block, "text"))
 
 
 def _parse(text: str) -> list[dict]:
+    """Flatten the grouped reply into one record per story.
+
+    Claude answers by theme and the caller works story by story, so the fan-out
+    happens here. Grouping is also what keeps one theme to one title: two
+    stories can no longer arrive under two spellings of the same key, because
+    the title is written once for the group rather than repeated per story.
+    """
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
         raise ValueError("no JSON object in the response")
     data = json.loads(text[start:end + 1])
-    assignments = data.get("assignments")
-    if not isinstance(assignments, list):
-        raise ValueError("no 'assignments' list in the response")
-    return [a for a in assignments if isinstance(a, dict)]
+    themes = data.get("themes")
+    if not isinstance(themes, list):
+        raise ValueError("no 'themes' list in the response")
+    out: list[dict] = []
+    for theme in themes:
+        # A theme missing its key, its title, or its stories is dropped whole
+        # rather than expanded into records that fail validation one by one.
+        # Its stories then fall back on the taxonomy individually, which is the
+        # same place a story Claude never mentioned ends up.
+        if not isinstance(theme, dict):
+            continue
+        key, title, stories = theme.get("key"), theme.get("title"), theme.get("stories")
+        if key is None or title is None or not isinstance(stories, list):
+            continue
+        out.extend({"story": story, "key": key, "title": title} for story in stories)
+    return out
 
 
 def assign_themes(

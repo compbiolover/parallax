@@ -97,9 +97,15 @@ def _now_iso() -> str:
 MAX_TOKENS = 16000
 
 # Thinking depth. Not the default `high`: this is a bounded writing task over
-# numbers already computed, and low/medium are strong on Opus 5 — it is the
-# lever for cost and latency here, and the daily run pays it every morning.
-DEFAULT_EFFORT = "medium"
+# numbers already computed, and low is strong on Opus 5 — it is the lever for
+# cost and latency here, and the daily run pays it every morning.
+#
+# `low` is also the reliable setting, not just the cheap one. Measured on the
+# live corpus, `medium` spent ~1000 tokens thinking and then ended the turn
+# with no prose in 3 of 4 calls; `low` thought for under 25 tokens and wrote
+# the brief 5 times out of 5. Raise this only with that in mind, and only
+# together with a check that the prose still arrives.
+DEFAULT_EFFORT = "low"
 
 
 class Summarizer:
@@ -128,6 +134,16 @@ class Summarizer:
             return self._deterministic(contexts, comparison, lexicon, reason)
         try:
             text = self._call_claude(client, contexts, comparison, lexicon)
+            if not text.strip():
+                # Opus 5 sometimes ends the turn on a thinking block alone: a
+                # 200, `end_turn`, no `max_tokens`, and no prose. It is a coin
+                # flip on the same input rather than a property of the prompt,
+                # so one more ask is the whole fix. Observed on the live corpus:
+                # 1/4 calls at `effort: medium` returned prose, 5/5 at `low` —
+                # hence `DEFAULT_EFFORT` above, with this as the guard for the
+                # days the model thinks itself out of answering anyway.
+                logger.warning("Claude returned no summary text — asking once more")
+                text = self._call_claude(client, contexts, comparison, lexicon)
         except Exception as exc:
             # Never let an API hiccup leave the dashboard empty.
             logger.warning("Claude summaries failed (%s: %s) — using the "
