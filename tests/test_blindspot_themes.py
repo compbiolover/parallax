@@ -305,8 +305,8 @@ ENTRIES = [("doc-a", ["Pastor resigns after a long ministry"]),
 
 def test_claude_names_the_themes_when_it_answers():
     client = _FakeClient(
-        '{"assignments": [{"story": 0, "key": "faith", "title": "Life of the church"},'
-        ' {"story": 1, "key": "politics", "title": "Congress this week"}]}'
+        '{"themes": [{"key": "faith", "title": "Life of the church", "stories": [0]},'
+        ' {"key": "politics", "title": "Congress this week", "stories": [1]}]}'
     )
     out = assign_themes(ENTRIES, client=client)
     assert out["doc-a"].title == "Life of the church"
@@ -316,7 +316,7 @@ def test_claude_names_the_themes_when_it_answers():
 
 def test_a_cluster_claude_skips_falls_back_on_its_own():
     client = _FakeClient(
-        '{"assignments": [{"story": 0, "key": "faith", "title": "Life of the church"}]}'
+        '{"themes": [{"key": "faith", "title": "Life of the church", "stories": [0]}]}'
     )
     out = assign_themes(ENTRIES, client=client)
     assert out["doc-a"].method == "claude"
@@ -327,7 +327,7 @@ def test_a_cluster_claude_skips_falls_back_on_its_own():
 def test_a_key_claude_used_keeps_claudes_wording_everywhere():
     """Otherwise one subject arrives as two cards under two spellings."""
     client = _FakeClient(
-        '{"assignments": [{"story": 0, "key": "faith", "title": "Life of the church"}]}'
+        '{"themes": [{"key": "faith", "title": "Life of the church", "stories": [0]}]}'
     )
     out = assign_themes([("doc-a", ["Pastor resigns after a long ministry"]),
                          ("doc-b", ["Church plants a congregation downtown"])],
@@ -335,12 +335,48 @@ def test_a_key_claude_used_keeps_claudes_wording_everywhere():
     assert out["doc-b"].title == "Life of the church"   # not the taxonomy's wording
 
 
+def test_a_theme_missing_its_stories_is_dropped_whole():
+    """The grouped reply fans out here, so a malformed group would otherwise
+    expand into records that each fail validation for a different reason. Its
+    stories fall back on the taxonomy, which is where a story Claude never
+    mentioned ends up anyway."""
+    client = _FakeClient(
+        '{"themes": [{"key": "faith", "title": "Life of the church"},'
+        ' {"key": "politics", "title": "Congress this week", "stories": [1]}]}'
+    )
+    out = assign_themes(ENTRIES, client=client)
+    assert out["doc-a"].method == "taxonomy"
+    assert out["doc-b"].method == "claude"
+
+
+def test_a_big_days_answer_fits_the_budget():
+    """The bug that ran silently from the day themes landed: the reply cost
+    ~30 tokens a story, `max_tokens` was clamped to 8000, and a 717-story day
+    therefore asked for an answer several times larger than the budget could
+    hold. It could not have succeeded at any effort, and every cluster run
+    dropped the whole batch to the taxonomy. Both halves of the fix are pinned
+    here: the reply is grouped, so a story costs an integer rather than an
+    object, and the budget scales past what that costs."""
+    entries = [(f"doc-{i}", [f"Headline {i}"]) for i in range(717)]
+    client = _FakeClient('{"themes": []}')
+    assign_themes(entries, client=client)
+    call = client.calls[0]
+
+    prompt = call["messages"][0]["content"]
+    assert '"stories": [0, 3, 7]' in prompt      # grouped, not one object per story
+    assert '"story": 0' not in prompt            # the shape that could not fit
+
+    # A story number and its separator run ~2 tokens; leave the same again for
+    # the theme objects around them, and thinking shares this budget too.
+    assert call["max_tokens"] > 4 * len(entries)
+
+
 def test_unusable_answers_are_dropped_per_cluster():
     client = _FakeClient(
-        '{"assignments": ['
-        '{"story": 0, "key": "faith", "title": "<b>Church</b>"},'          # markup
-        '{"story": 1, "key": "Politics!", "title": "Congress this week"},'  # bad key
-        '{"story": 9, "key": "faith", "title": "Not in the batch"}]}'       # index out of range
+        '{"themes": ['
+        '{"key": "faith", "title": "<b>Church</b>", "stories": [0]},'          # markup
+        '{"key": "Politics!", "title": "Congress this week", "stories": [1]},'  # bad key
+        '{"key": "faith", "title": "Not in the batch", "stories": [9]}]}'       # index out of range
     )
     assert claude_assignments(ENTRIES, client=client) == {}
 
@@ -361,7 +397,7 @@ def test_the_prompts_own_examples_pass_the_validator():
 
 def test_a_title_too_long_for_a_card_is_not_used():
     client = _FakeClient(
-        '{"assignments": [{"story": 0, "key": "faith", "title": '
+        '{"themes": [{"key": "faith", "stories": [0], "title": '
         f'"{"Very long theme name " * 4}"}}]}}'
     )
     assert claude_assignments(ENTRIES, client=client) == {}
@@ -380,22 +416,36 @@ def test_theming_sends_an_effort_and_it_is_settable():
     billed on every cluster run."""
     from cluster.themes import DEFAULT_THEME_EFFORT
 
-    client = _FakeClient('{"assignments": []}')
+    client = _FakeClient('{"themes": []}')
     assign_themes(ENTRIES, client=client)
-    assert client.calls[0]["output_config"] == {"effort": DEFAULT_THEME_EFFORT}
+    assert client.calls[0]["output_config"]["effort"] == DEFAULT_THEME_EFFORT
 
-    louder = _FakeClient('{"assignments": []}')
+    louder = _FakeClient('{"themes": []}')
     assign_themes(ENTRIES, client=louder, effort="high")
-    assert louder.calls[0]["output_config"] == {"effort": "high"}
+    assert louder.calls[0]["output_config"]["effort"] == "high"
 
 
-def test_an_explicit_none_effort_sends_no_output_config():
+def test_an_explicit_none_effort_sends_no_effort():
     """A `None` effort means "let the model decide" — a real third option, not
     the same call as the default one. `test_settings_null_effort_survives_to_the
     _call` is what checks that YAML's `effort: ~` arrives here as this."""
-    client = _FakeClient('{"assignments": []}')
+    client = _FakeClient('{"themes": []}')
     assign_themes(ENTRIES, client=client, effort=None)
-    assert "output_config" not in client.calls[0]
+    assert "effort" not in client.calls[0]["output_config"]
+
+
+def test_the_reply_is_constrained_to_a_schema():
+    """Structured outputs, so a malformed reply is not a failure mode the
+    taxonomy has to absorb. The schema travels in the same `output_config` as
+    the effort, and unlike the effort it is sent unconditionally."""
+    client = _FakeClient('{"themes": []}')
+    assign_themes(ENTRIES, client=client, effort=None)
+    fmt = client.calls[0]["output_config"]["format"]
+    assert fmt["type"] == "json_schema"
+    item = fmt["schema"]["properties"]["themes"]["items"]
+    assert item["properties"]["stories"] == {"type": "array",
+                                             "items": {"type": "integer"}}
+    assert sorted(item["required"]) == ["key", "stories", "title"]
 
 
 def test_settings_effort_reaches_the_call(monkeypatch):
@@ -446,7 +496,7 @@ def test_settings_null_effort_survives_to_the_call():
 
 
 def test_claude_is_not_called_when_it_is_switched_off():
-    client = _FakeClient('{"assignments": []}')
+    client = _FakeClient('{"themes": []}')
     assign_themes(ENTRIES, client=client, use_claude=False)
     assert client.calls == []
 

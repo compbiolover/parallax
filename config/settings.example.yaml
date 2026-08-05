@@ -145,13 +145,17 @@ cluster:
     claude: true
     model: claude-sonnet-5
     # Thinking depth: low | medium | high | xhigh | max. `low` for the same
-    # reason liberty uses it — Sonnet 5 runs adaptive thinking at `high` by
-    # default, and placing a headline in a fixed vocabulary does not get better
-    # for the extra output tokens it bills. It is also a truncation lever, not
-    # only a cost one: `max_tokens` here scales with the number of stories and
-    # caps thinking and the JSON together, so a deep think on a big day can eat
-    # the budget and drop the whole batch to the taxonomy. Raise it if theme
-    # titles read thin.
+    # reason liberty uses it — placing a headline in a fixed vocabulary does not
+    # get better for the extra output tokens a deeper think bills.
+    #
+    # It is also the difference between this step working and not. `max_tokens`
+    # here scales with the number of stories and caps thinking and the JSON
+    # together, and thinking expands to fill whatever it is given: measured on a
+    # 717-story day, `medium` spent the entire allowance reasoning and returned
+    # no JSON at all, twice in two tries, while `low` returned the full batch.
+    # Raising the budget does not buy a way out of that. Raise the effort only
+    # if theme titles read thin, and check `data/daily.log` for "Claude theming
+    # failed" afterwards.
     effort: low
 
 # --- Comparison ------------------------------------------------------------
@@ -169,10 +173,17 @@ summarize:
   model: claude-opus-5
   # Thinking depth: low | medium | high | xhigh | max. Opus 5 thinks by default
   # and `max_tokens` caps thinking *and* the prose together, so effort is the
-  # lever for cost and latency here. `medium` is the default — this is a
-  # bounded writing task over numbers that are already computed, and the daily
-  # run pays for it every morning. Raise it if the prose reads thin.
-  effort: medium
+  # lever for cost and latency here. `low` is the default — this is a bounded
+  # writing task over numbers that are already computed, and the daily run pays
+  # for it every morning.
+  #
+  # Raising this is not free in reliability. Measured on the live corpus, this
+  # step at `medium` thought for ~1000 tokens and then ended its turn with no
+  # prose at all in 3 of 4 calls, which silently drops the brief to the
+  # numbers-only fallback; `low` wrote it 5 times out of 5. The summarizer
+  # retries once, so a raise degrades gradually rather than all at once — but
+  # check `data/daily.log` for "no summary text" if you raise it.
+  effort: low
   require_verbatim_quotes: true   # every summary auditable against source
   steelman_each_side: true
 
