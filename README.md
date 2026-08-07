@@ -63,6 +63,7 @@ failing, so an omission is quiet — which is exactly why the cost is spelled ou
 | *(none)* | dictionary scoring, dedup, clustering, JSD | the pipeline runs and the dashboard renders |
 | `scoring` | `torch`, `transformers` (Mformer) | `transformer tagger unavailable (No module named 'torch')` — dictionary-only scoring, and **no confidence bands anywhere**, which are the §5 payoff |
 | `llm` | the `anthropic` SDK | summaries fall back to a numbers-only template; liberty is never scored |
+| `media` | `faster-whisper`, `yt-dlp`, `youtube-transcript-api` | podcasts and talk radio are registered but never transcribed — for the modeled diet that is most of what it actually is |
 | `embeddings` | `sentence-transformers` | clustering uses the built-in hashing embedder — workable, but blindspots are sharper with neural embeddings |
 | `dev` | pytest, ruff, pre-commit | no test suite, no hooks |
 
@@ -144,6 +145,7 @@ no text in it. Only the first of those is fixed by exporting a key.
 | `make audit-lexicon` | check a lexicon for equality/proportionality asymmetry |
 | `make register-probe` | check the liberty rubric scores both registers evenhandedly (costs API calls) |
 | `make check-claude` | probe every Claude model the configured pipeline calls (a few tokens) |
+| `make podcasts` | transcribe new podcast episodes into the store (needs `parallax[media]`; hours) |
 | `make test` / `make lint` | the suite; ruff |
 
 `make daily` is a batch job, not an interactive command — expect minutes, not seconds.
@@ -755,9 +757,43 @@ detection, GDELT historical backfill, dated snapshot history, the Claude liberty
 the equality/proportionality split, and the email brief.
 
 With the transformer running at ingestion, each foundation carries a
-dictionary-vs-transformer band — wider means more disagreement and lower confidence. See
-[`CLAUDE.md`](CLAUDE.md) for the full build spec and roadmap; Phase 4 (podcast and video
-transcription) is the next substantial piece.
+dictionary-vs-transformer band — wider means more disagreement and lower confidence.
+
+Phase 4 has started: **podcast and talk-radio transcription** is in (see below). YouTube
+is registered but not yet ingested. See [`CLAUDE.md`](CLAUDE.md) for the full build spec.
+
+### Podcasts and talk radio
+
+```bash
+pip install -e ".[media]"       # faster-whisper
+make podcasts                   # or: python3 -m ingestion podcasts
+python3 -m ingestion podcasts --episode-status   # what the ledger already holds
+```
+
+Enclosure → faster-whisper → transcript, scored and deduped exactly like an article, so
+a show and a wire story land in the same clusters and the same foundation profile. This
+is the step that makes the modeled diet honest: talk radio and podcasts are most of what
+that diet actually is, and until now a text-only pipeline scored none of it.
+
+Three things are worth knowing before you run it.
+
+**It is measured in hours.** An hour of audio takes roughly an hour of CPU at
+`medium`/int8. That is why it is outside the default `make daily` chain — opt in with
+`podcasts: true` under `daily:` in settings once you know what it costs on your machine,
+or run it on demand. Budgets live in `ingestion.audio`: episodes per source per run, a
+publication window, a wall-clock ceiling checked between episodes, and a size cap. When
+the ceiling is hit the run says which sources it did not reach, rather than reporting a
+short run as a complete one.
+
+**Episodes are remembered, successes and failures alike.** Re-fetching an article is
+cheap; paying for an hour of audio twice is not. Every episode gets a row in
+`podcast_episodes` keyed on its guid *and* its enclosure URL — both, because feedparser
+resolves a relative guid against the feed's own URL, so a feed that changes hosts would
+otherwise look like an entire archive of new episodes.
+
+**Audio never outlives the episode.** It is streamed to a temp file, transcribed, and
+deleted in a `finally` — including when transcription fails. Transcripts are held in
+memory only, exactly as article bodies are.
 
 ## Reading the numbers honestly
 

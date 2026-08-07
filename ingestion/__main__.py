@@ -1,6 +1,7 @@
 """CLI: ``python -m ingestion`` runs the Phase 1 pipeline.
 
     python -m ingestion run                # fetch, dedup, score, store
+    python -m ingestion podcasts           # transcribe new episodes (slow, hours)
     python -m ingestion compare            # print diet profiles + JSD
     python -m ingestion labels             # record diet labels from the registry
     python -m ingestion run --db data/parallax.sqlite --max-items 10
@@ -92,9 +93,65 @@ def _print_compare(store: Datastore) -> None:
             print(f"    {f:9}: {lr:+.3f}")
 
 
+def _podcasts(store: Datastore, settings: dict, args, progress) -> None:
+    """The `podcasts` command: the ledger, or a transcription run.
+
+    Kept out of `main` because it is the one command whose *cost* needs stating
+    before it starts. Everything else here is minutes; this is hours, and the
+    person running it should see the budget it will honour rather than discover
+    it from a log the next morning.
+    """
+    from .podcast import PodcastConfig
+    from .podcast import run as run_podcasts
+
+    if args.episode_status:
+        counts = store.episode_counts()
+        if not counts:
+            print("No episodes recorded yet.")
+            return
+        print("Episode ledger:")
+        for status, n in sorted(counts.items()):
+            print(f"  {status:12} {n}")
+        return
+
+    pcfg = PodcastConfig.from_settings(settings)
+    if args.max_episodes is not None:
+        pcfg.max_episodes_per_source = args.max_episodes
+    if args.since_days is not None:
+        pcfg.since_days = args.since_days
+    if args.time_budget_minutes is not None:
+        pcfg.time_budget_seconds = args.time_budget_minutes * 60
+    if args.whisper_model:
+        pcfg.whisper_model = args.whisper_model
+
+    cfg = PipelineConfig.from_settings(settings)
+    if args.lexicon is not None:
+        cfg.lexicon_path = args.lexicon
+    if args.transformer is not None:
+        cfg.transformer_enabled = args.transformer
+
+    registry = load_registry()
+    sources = [s for s in registry.all_sources()
+               if s.ingest_type == "podcast_rss" and s.url]
+    if progress is not None:
+        print(f"Transcribing up to {pcfg.max_episodes_per_source} episode(s) each from "
+              f"{len(sources)} podcast source(s), published within {pcfg.since_days}d, "
+              f"on faster-whisper {pcfg.whisper_model} ({pcfg.compute_type}).\n"
+              f"Budget: {pcfg.time_budget_seconds // 60} min — an hour of audio takes "
+              f"roughly that long on CPU, so expect this to use it.\n", flush=True)
+
+    embedder, _ = build_embedder(settings)
+    stats = run_podcasts(store, registry, cfg, pcfg, embedder=embedder,
+                         progress=progress)
+    print(f"\n{stats.line()}")
+    for source_id, n in sorted(stats.per_source.items()):
+        print(f"  {source_id:32} {n}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingestion", description="Parallax Phase 1 pipeline")
-    parser.add_argument("command", choices=["run", "backfill", "compare", "labels"],
+    parser.add_argument("command",
+                        choices=["run", "backfill", "podcasts", "compare", "labels"],
                         help="what to do")
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
@@ -110,6 +167,16 @@ def main(argv: list[str] | None = None) -> int:
                         help="run: also transformer-score every article (confidence bands)")
     parser.add_argument("--no-transformer", dest="transformer", action="store_false",
                         help="run: skip the transformer tagger (dictionary-only, no bands)")
+    parser.add_argument("--max-episodes", type=int,
+                        help="podcasts: episodes per source per run")
+    parser.add_argument("--since-days", type=int,
+                        help="podcasts: only episodes published this recently")
+    parser.add_argument("--time-budget-minutes", type=int,
+                        help="podcasts: stop starting new episodes after this long")
+    parser.add_argument("--whisper-model",
+                        help="podcasts: faster-whisper size, e.g. medium, large-v3")
+    parser.add_argument("--episode-status", action="store_true",
+                        help="podcasts: print the ledger and transcribe nothing")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="log why individual fetches failed, not just the count")
     parser.add_argument("-q", "--quiet", action="store_true",
@@ -157,6 +224,8 @@ def main(argv: list[str] | None = None) -> int:
                                  extract_bodies=args.extract)
             _print_stats(stats)
             print(f"\nDatastore: {store.counts()}")
+        elif args.command == "podcasts":
+            _podcasts(store, settings, args, progress)
         elif args.command == "compare":
             _print_compare(store)
         elif args.command == "labels":
