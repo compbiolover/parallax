@@ -42,3 +42,10 @@ ANTHROPIC_API_KEY=bws:00000000-0000-0000-0000-000000000000
 # Optional. Only affects Hugging Face download rate limits; not sensitive
 # enough to be worth a vault round-trip unless you want it there.
 # HF_TOKEN=bws:00000000-0000-0000-0000-000000000000
+
+# Subscriber feed URLs, named by `url_env:` in config/sources.yaml. The whole
+# URL is the credential — anyone holding it has your subscription's audio — so
+# it belongs in the vault rather than in the registry or a shell profile.
+# Revoking one is a matter of regenerating the feed in your account, which is a
+# good deal better than what a stored password would cost you.
+# PARALLAX_FEED_MAKINGSENSE=bws:00000000-0000-0000-0000-000000000000

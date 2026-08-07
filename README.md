@@ -83,6 +83,23 @@ scheduled runs, since cron does not inherit your shell environment.
 | `HF_TOKEN` | Mformer downloads | works fine, just unauthenticated: lower Hub rate limits, slower first download, and a warning on every run |
 | `PARALLAX_SMTP_*`, `PARALLAX_DIGEST_TO` | the email brief | no email — see [the brief in your inbox](#the-brief-in-your-inbox) |
 | `MEDIACLOUD_API_KEY` | Media Cloud queries | GDELT backfill still works; it needs no key |
+| `PARALLAX_FEED_*` | subscriber feeds whose URL is the credential | the source falls back to its public feed, which for a partial feed means a truncated episode |
+
+A subscriber podcast feed is a per-account URL with a token in it — holding the URL *is*
+holding the subscription, and publishers say not to share it. So `config/sources.yaml`
+names the variable rather than storing the value:
+
+```yaml
+            ingest:
+              type: podcast_rss
+              url_env: PARALLAX_FEED_MAKINGSENSE     # read from the environment
+              url: "https://rss.libsyn.com/..."      # public fallback
+```
+
+The registry stays public and the token lives in the environment — for scheduled runs,
+in Bitwarden Secrets Manager via `scripts/bitwarden.conf.example`, which is exactly the
+blast-radius argument that script already makes: a revocable feed URL is a far smaller
+thing to leak than an account password. The resolved URL is never logged.
 
 Check every Claude model the configured pipeline will call — the summary, liberty
 tagging, and blindspot themes are three separate model settings, and a key or an SDK

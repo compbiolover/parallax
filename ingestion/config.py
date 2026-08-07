@@ -8,12 +8,16 @@ live in ``.env`` (see ``.env.example``).
 
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCES = REPO_ROOT / "config" / "sources.yaml"
@@ -95,6 +99,36 @@ def _derive_domain(url: str | None) -> str | None:
     return ".".join(labels[-2:]) if len(labels) >= 2 else host
 
 
+def _resolve_url(source_id: str, ingest: dict) -> str | None:
+    """The feed URL, taking a secret one from the environment when there is one.
+
+    A subscriber feed is itself the credential: Sam Harris hands out a per-account
+    URL with a token in it, and publishers that do this say plainly not to share
+    it. That makes it a secret in a file whose whole point is being public, so it
+    is named rather than written — ``url_env: PARALLAX_FEED_X`` reads
+    ``$PARALLAX_FEED_X``, which is already how the scheduled run gets everything
+    else (``scripts/parallax-daily.sh`` exports from Bitwarden Secrets Manager
+    before handing off to the job).
+
+    ``url`` stays as the fallback, so an entry can carry the public feed for
+    anyone without the subscription and quietly upgrade for anyone with it. That
+    ordering is the point: the private feed is a superset, and the public one is
+    the degraded mode.
+
+    Never log the resolved value — that would put the token in the log file the
+    secret was kept out of git to avoid.
+    """
+    env_name = ingest.get("url_env")
+    if env_name:
+        secret = os.environ.get(env_name, "").strip()
+        if secret:
+            return secret
+        logger.info(
+            "%s: %s is not set, falling back to the public feed", source_id, env_name
+        )
+    return ingest.get("url")
+
+
 def load_registry(path: str | Path = DEFAULT_SOURCES) -> Registry:
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     diets: list[Diet] = []
@@ -105,7 +139,7 @@ def load_registry(path: str | Path = DEFAULT_SOURCES) -> Registry:
             for s in stratum["sources"]:
                 ingest = s["ingest"]
                 weight = float(s.get("weight", 1.0))
-                url = ingest.get("url")
+                url = _resolve_url(s["id"], ingest)
                 # Only text/rss outlets get a GDELT domain; podcast/youtube feeds
                 # point at hosting infra (megaphone, youtube), not the outlet.
                 explicit = s.get("domain")
