@@ -104,10 +104,20 @@ sources=()
 token=""
 
 while IFS= read -r line || [[ -n "$line" ]]; do
-  line="${line%%#*}"                       # strip comments
+  # A `#` opens a comment only at the start of a line or after whitespace.
+  # Stripping from the first `#` anywhere took `PASSWORD=hunter#2` down to
+  # `hunter`, exported it, and reported `ok (6 chars)` — a wrong value that
+  # looks resolved, which is the worst thing this script can do. Generated
+  # passwords and subscriber feed URLs both carry `#` routinely.
+  #
+  # A value containing whitespace-then-`#` is still cut, and cannot be written
+  # here; keep it in the vault, where the value is fetched rather than parsed.
+  [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+  line="${line%%[[:space:]]#*}"            # strip a trailing comment
   line="${line#"${line%%[![:space:]]*}"}"  # ltrim
   line="${line%"${line##*[![:space:]]}"}"  # rtrim
-  [[ -z "$line" ]] && continue
+  # No blank-line check here: the skip above already covers empty and
+  # whitespace-only lines, and the strip cannot empty a line it did not skip.
   [[ "$line" == *=* ]] || die "cannot parse line in $CONFIG: $line"
   key="${line%%=*}"
   val="${line#*=}"

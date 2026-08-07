@@ -155,6 +155,43 @@ def test_comments_and_blank_lines_are_ignored(env):
     assert "5 variable(s) resolved" in r.stdout
 
 
+def test_a_hash_inside_a_value_is_kept(env):
+    """The regression: stripping from the first `#` anywhere cut
+    `hunter#2` to `hunter`, exported the wrong password, and reported it as
+    resolved. Generated passwords and subscriber feed URLs both carry `#`."""
+    conf = ("BWS_ACCESS_TOKEN=0.t\n"
+            "PARALLAX_SMTP_PASSWORD=hunter#2\n"
+            "PARALLAX_FEED_MAKINGSENSE=https://example.com/rss?id=a#b\n")
+    r = env(conf, "--check")
+    assert r.returncode == 0, r.stderr
+    # Lengths, not values — the whole value survived, so the counts are the
+    # full ones rather than the truncated `hunter` (6) and `...?id=a` (28).
+    assert "8 chars" in r.stdout           # len("hunter#2")
+    assert "30 chars" in r.stdout          # len("https://example.com/rss?id=a#b")
+
+
+def test_a_comment_after_a_value_is_still_stripped(env):
+    """Whitespace then `#` is an ordinary trailing comment and has to go, or it
+    ends up inside the exported value."""
+    r = env("BWS_ACCESS_TOKEN=0.t\nPARALLAX_SMTP_HOST=smtp.example.com  # prod\n",
+            "--check")
+    assert r.returncode == 0, r.stderr
+    assert "16 chars" in r.stdout          # len("smtp.example.com")
+
+
+def test_a_value_that_is_only_a_hash_survives(env):
+    """No whitespace before it, so it is a value, not a comment."""
+    r = env("BWS_ACCESS_TOKEN=0.t\nPARALLAX_SMTP_PASSWORD=#\n", "--check")
+    assert r.returncode == 0, r.stderr
+    assert "1 chars" in r.stdout
+
+
+def test_a_whitespace_only_line_is_skipped(env):
+    r = env("BWS_ACCESS_TOKEN=0.t\n   \t \nPARALLAX_SMTP_HOST=h\n", "--check")
+    assert r.returncode == 0, r.stderr
+    assert "1 variable(s) resolved" in r.stdout
+
+
 def test_an_unusable_variable_name_is_named(env):
     r = env("BWS_ACCESS_TOKEN=0.t\nnot a var=x\n", "--check")
     assert r.returncode == 1

@@ -10,6 +10,12 @@
 # time. Prefix a value with `bws:` followed by the secret's UUID to fetch it.
 # Only put things in Bitwarden that are actually secret — routing an email
 # address through a vault is indirection without benefit.
+#
+# A `#` starts a comment only at the start of a line or after whitespace, so a
+# value may contain one: `PASSWORD=hunter#2` is eight characters, not six. The
+# one thing you cannot write here is a literal value containing a space
+# followed by `#` — that is read as a trailing comment. Put such a value in the
+# vault instead, where it is fetched rather than parsed.
 
 # --- the one irreducible secret --------------------------------------------
 # A Secrets Manager machine-account token, scoped read-only to the project
