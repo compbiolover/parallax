@@ -3,7 +3,8 @@
 # the already-built artifact and refuses to run the recipe ("`digest' is up to
 # date"). Add new targets here as well as below; tests/test_makefile.py checks.
 .PHONY: help daily daily-fast dashboard history validate audit-lexicon \
-        digest digest-send register-probe check-claude check-secrets test lint
+        digest digest-send podcasts register-probe check-claude check-secrets \
+        test lint
 .DEFAULT_GOAL := help
 
 PY ?= python3
@@ -16,6 +17,9 @@ daily:  ## Full snapshot: ingest -> backfill -> cluster -> summarize -> snapshot
 
 daily-fast:  ## Today's feeds only — skips the slow GDELT backfill
 	$(PY) -m daily --skip backfill
+
+podcasts:  ## Transcribe new podcast episodes (needs parallax[media]; hours, not minutes)
+	$(PY) -m ingestion podcasts $(if $(MAX_EPISODES),--max-episodes $(MAX_EPISODES))
 
 dashboard:  ## Serve the dashboard at http://localhost:8000
 	cd dashboard && $(PY) -m http.server

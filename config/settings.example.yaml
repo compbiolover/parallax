@@ -29,10 +29,23 @@ ingestion:
   extraction:
     primary: trafilatura
     fallback: goose3
+  # Podcasts and talk radio: RSS enclosure -> faster-whisper -> transcript,
+  # scored exactly like an article. Needs parallax[media]; without it the step
+  # logs the reason once and does nothing, the same way the transformer tagger
+  # behaves. Run it by hand first (`make podcasts`) — an hour of audio takes
+  # roughly an hour of CPU at `medium`/int8, and you want to know what that
+  # costs on your machine before a 6am job depends on the answer.
   audio:
     whisper_model: medium         # large-v3 for accuracy, medium for speed
     compute_type: int8            # int8 on CPU for overnight batch
+    device: auto                  # auto | cpu | cuda
     filter_silence: true          # Whisper hallucinates on long silences
+    # Budgets. Each of these exists because this is the one step that can run
+    # for hours, and the daily job has a brief to deliver in the morning.
+    max_episodes_per_source: 3    # per run; most shows publish daily
+    since_days: 7                 # ignore the back catalogue on a first run
+    time_budget_seconds: 10800    # 3h; checked between episodes, never inside one
+    max_megabytes: 500            # an enclosure bigger than this is a mistake
   youtube:
     prefer_captions: true         # youtube-transcript-api first, yt-dlp fallback
 

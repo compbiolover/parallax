@@ -1,19 +1,22 @@
 """The daily snapshot: one call that refreshes everything the dashboard reads.
 
-Seven steps, in dependency order:
+Eight steps, in dependency order:
 
 1. **ingest**    — fetch every RSS source, extract, dedup, score (dictionary +
                    transformer), embed.
 2. **backfill**  — pull weeks of per-outlet history from GDELT so clusters rest
                    on real volume. Slow and rate-limited; on by default because
                    blindspots are only trustworthy with it.
-3. **cluster**   — embeddings -> clusters -> coverage-asymmetry blindspots.
-4. **summarize** — per-diet + cross-diet summaries (Claude, or the deterministic
+3. **podcasts**  — podcast/talk-radio enclosures -> faster-whisper -> transcripts,
+                   scored like articles. Outside the defaults: it needs
+                   parallax[media] and runs in hours rather than minutes.
+4. **cluster**   — embeddings -> clusters -> coverage-asymmetry blindspots.
+5. **summarize** — per-diet + cross-diet summaries (Claude, or the deterministic
                    fallback when no API key is set).
-5. **snapshot**  — record today's compositions and divergence so the run leaves
+6. **snapshot**  — record today's compositions and divergence so the run leaves
                    a dated point behind instead of only overwriting yesterday.
-6. **export**    — write the dashboard payload.
-7. **digest**    — render that payload into an email and send it. The only step
+7. **export**    — write the dashboard payload.
+8. **digest**    — render that payload into an email and send it. The only step
                    outside the defaults: it needs SMTP credentials, so it is
                    opted into rather than failing every morning until set up.
 
@@ -43,14 +46,20 @@ from ingestion.datastore import Datastore
 
 # Step names, in execution order. ``snapshot`` runs before ``export`` so the
 # payload carries today's point rather than lagging a day behind.
-STEPS = ("ingest", "backfill", "cluster", "summarize", "snapshot", "export", "digest")
+STEPS = ("ingest", "backfill", "podcasts", "cluster", "summarize", "snapshot",
+         "export", "digest")
 
 # What a run does unless told otherwise. ``digest`` is the one step that is not
 # in here: it needs SMTP credentials nobody has on a first run, and a step that
 # fails every morning until configured trains you to ignore the report that is
 # supposed to tell you when something actually broke. Settings opt it in;
 # ``--only digest`` still runs it on demand.
-DEFAULT_STEPS = tuple(s for s in STEPS if s != "digest")
+# ``podcasts`` is out for the same reason as ``digest``, from the other
+# direction: it needs parallax[media] and hours of CPU, so a default run would
+# either no-op with a warning every morning or quietly turn a five-minute job
+# into an overnight one. Opt in with `podcasts: true` under `daily:` in
+# settings, or run it on demand with `--only podcasts`.
+DEFAULT_STEPS = tuple(s for s in STEPS if s not in ("digest", "podcasts"))
 
 
 @dataclass
@@ -89,6 +98,9 @@ class DailyConfig:
     # snapshot
     window_days: int = DEFAULT_WINDOW_DAYS
     history_limit: int = DEFAULT_SERIES_LIMIT
+
+    # podcasts (parallax[media]); None -> defaults from ingestion.podcast
+    podcast_config: object = None
 
     # digest
     own_diet: str | None = None           # whose blindspots lead the email
@@ -129,6 +141,11 @@ class DailyConfig:
             summary_effort=(settings.get("summarize", {}) or {}).get("effort"),
             own_diet=dig.get("own_diet"),
         )
+        from ingestion.podcast import PodcastConfig
+
+        cfg.podcast_config = PodcastConfig.from_settings(settings)
+        if daily.get("podcasts", False):
+            cfg.steps = tuple(s for s in STEPS if s in {*cfg.steps, "podcasts"})
         if not bf.get("enabled", True):
             cfg.steps = tuple(s for s in cfg.steps if s != "backfill")
         if dig.get("enabled", False):
@@ -207,6 +224,24 @@ def _step_backfill(store, cfg: DailyConfig, pcfg, registry, embedder, transforme
         f"{stats.stored} stored from {cfg.backfill_days}d window, "
         f"{stats.exact_duplicates} already known, {stats.errors} source errors"
     )
+
+
+def _step_podcasts(store, cfg: DailyConfig, pcfg, registry, embedder, transformer,
+                   progress=None) -> str:
+    """Transcribe new episodes. The one step measured in hours, not minutes.
+
+    It carries its own budgets rather than borrowing the run's, because the
+    thing being bounded is different: every other step is bounded by how much
+    there is to fetch, and this one by how long you are willing to let the
+    machine think.
+    """
+    from ingestion.podcast import run as run_podcasts
+
+    stats = run_podcasts(
+        store, registry, pcfg, cfg.podcast_config,
+        embedder=embedder, transformer=transformer, progress=progress,
+    )
+    return stats.line()
 
 
 def _step_cluster(store, cfg: DailyConfig) -> str:
@@ -353,6 +388,8 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
             "ingest": lambda: _step_ingest(store, cfg, pcfg, registry, embedder,
                                            transformer, progress),
             "backfill": lambda: _step_backfill(store, cfg, pcfg, registry, embedder, transformer),
+            "podcasts": lambda: _step_podcasts(store, cfg, pcfg, registry, embedder,
+                                               transformer, progress),
             "cluster": lambda: _step_cluster(store, cfg),
             "summarize": lambda: _step_summarize(store, cfg),
             "snapshot": lambda: _step_snapshot(store, cfg),
@@ -371,7 +408,8 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
 
 def _needs_transformer(cfg: DailyConfig) -> bool:
     """Only pay the model-load cost if a step that uses it will actually run."""
-    return cfg.enabled("ingest") or (cfg.enabled("backfill") and cfg.backfill_transformer)
+    return (cfg.enabled("ingest") or cfg.enabled("podcasts")
+            or (cfg.enabled("backfill") and cfg.backfill_transformer))
 
 
 def _build_embedder(settings: dict):

@@ -22,9 +22,63 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA = """
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+PODCAST_EPISODES_DDL = """
+-- Episodes seen, whether or not they produced a document.
+--
+-- The ledger is what makes podcast ingestion re-runnable. Every other source
+-- type is cheap to re-fetch, so the pipeline dedups after the fact on document
+-- id; an episode costs a download and minutes of transcription, so it has to be
+-- recognised *before* any of that, from the feed alone. The guid is the only
+-- identifier available at that point.
+--
+-- Failures are recorded too, with their reason. An episode that 404s or blows
+-- the size cap would otherwise be retried every morning forever, and the
+-- ledger's whole purpose is to stop the run repeating expensive work.
+--
+-- Keyed by (source_id, guid), not guid alone. A guid is unique within a feed
+-- and nowhere else: `<guid isPermaLink="false">12</guid>` is legal and two
+-- shows can both use it. Keyed globally, the second show's episode would
+-- overwrite the first show's row — leaving one show skipping an episode it
+-- never transcribed and the other re-transcribing one it did, which is both
+-- failure modes this table was built to prevent, at once.
+CREATE TABLE IF NOT EXISTS podcast_episodes (
+    guid          TEXT NOT NULL,         -- feed guid, or the enclosure url
+    source_id     TEXT NOT NULL,
+    title         TEXT,
+    published_utc TEXT,
+    processed_utc TEXT NOT NULL,
+    status        TEXT NOT NULL,         -- 'transcribed' | 'skipped' | 'failed'
+    detail        TEXT,                  -- why, for anything but 'transcribed'
+    -- Set only on success, and NULL rather than a dangling id if that document
+    -- is later removed: the episode was still processed, and re-transcribing it
+    -- because the document went away is exactly the cost this table prevents.
+    document_id   TEXT REFERENCES documents(id) ON DELETE SET NULL,
+    duration_seconds INTEGER,
+    -- The second identity, and not redundant. feedparser resolves a relative
+    -- permalink guid against the feed's own URL, so `<guid>ep-1</guid>` becomes
+    -- `https://host/ep-1` — and every guid in the feed changes if that host
+    -- does. A migration, or swapping a public feed for a subscriber one, would
+    -- otherwise make the whole back catalogue look new and re-transcribe it.
+    -- The enclosure URL survives most of those moves.
+    audio_url     TEXT,
+    PRIMARY KEY (source_id, guid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_podcast_episodes_source
+    ON podcast_episodes(source_id, published_utc);
+-- The index on `audio_url` is created in `_migrate`, not here: this script runs
+-- first, and on a store predating that column the CREATE INDEX would fail
+-- before the ALTER that adds it.
+"""
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS documents (
     id            TEXT PRIMARY KEY,      -- content hash (sha256 hex)
     diet_id       TEXT NOT NULL,
@@ -108,6 +162,8 @@ CREATE TABLE IF NOT EXISTS blindspot_themes (
     theme_title TEXT NOT NULL,
     method      TEXT NOT NULL            -- 'taxonomy' | 'claude'
 );
+
+{PODCAST_EPISODES_DDL}
 
 -- One aggregate snapshot per UTC date. Re-running the daily job on the same
 -- day overwrites that day's row rather than appending, so the series has one
@@ -197,14 +253,40 @@ class Datastore:
             self.conn.execute("DROP TABLE blindspot_themes")
             self.conn.executescript(SCHEMA)
 
+        # `podcast_episodes` was keyed on `guid` alone before it was keyed on
+        # (source_id, guid). A primary key is not something ALTER TABLE can
+        # change, so the table is rebuilt and its rows copied — they are worth
+        # carrying, unlike the blindspot cache above: each one stands for an
+        # episode already paid for in CPU time, and dropping them would re-run
+        # every transcription.
+        info = list(self.conn.execute("PRAGMA table_info(podcast_episodes)"))
+        if info and sum(1 for r in info if r["pk"]) == 1:
+            columns = [r["name"] for r in info]
+            shared = ", ".join(c for c in columns if c != "audio_url")
+            self.conn.executescript(f"""
+                ALTER TABLE podcast_episodes RENAME TO podcast_episodes_old;
+                {PODCAST_EPISODES_DDL}
+                INSERT OR IGNORE INTO podcast_episodes ({shared})
+                    SELECT {shared} FROM podcast_episodes_old;
+                DROP TABLE podcast_episodes_old;
+            """)
+
         added: list[tuple[str, str, str]] = [
             ("foundation_scores", "equality", "REAL"),
             ("foundation_scores", "proportionality", "REAL"),
+            ("podcast_episodes", "audio_url", "TEXT"),
         ]
         for table, column, decl in added:
             cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
             if cols and column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+        # After the ALTERs above, so it works on an upgraded store as well as a
+        # fresh one. Idempotent, so running it on both is free.
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_podcast_episodes_audio "
+            "ON podcast_episodes(source_id, audio_url)"
+        )
 
     # -- lifecycle -------------------------------------------------------
     def close(self) -> None:
@@ -546,6 +628,71 @@ class Datastore:
 
     def snapshot_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) AS n FROM snapshots").fetchone()["n"]
+
+    # -- podcast episodes ------------------------------------------------
+    def seen_episode_keys(self, source_id: str) -> set[str]:
+        """Every guid *and* enclosure URL already processed for a source.
+
+        Both, because either can identify an episode and neither is reliable
+        alone: a relative guid is rewritten when the feed moves, and an
+        enclosure URL is rewritten when the host changes its CDN. Matching on
+        the union costs one extra column and saves re-transcribing a back
+        catalogue over a URL change.
+
+        Read once per source and checked in memory — the alternative is a query
+        per episode, and the caller is deciding what to skip before it does
+        anything expensive."""
+        rows = self.conn.execute(
+            "SELECT guid, audio_url FROM podcast_episodes WHERE source_id = ?",
+            (source_id,),
+        )
+        keys: set[str] = set()
+        for row in rows:
+            keys.add(row["guid"])
+            if row["audio_url"]:
+                keys.add(row["audio_url"])
+        return keys
+
+    def record_episode(
+        self,
+        *,
+        guid: str,
+        source_id: str,
+        status: str,
+        title: str | None = None,
+        published_utc: str | None = None,
+        detail: str | None = None,
+        document_id: str | None = None,
+        duration_seconds: int | None = None,
+        audio_url: str | None = None,
+    ) -> None:
+        """Record an episode as handled. Idempotent on guid."""
+        self.conn.execute(
+            """
+            INSERT INTO podcast_episodes
+                (guid, source_id, title, published_utc, processed_utc, status,
+                 detail, document_id, duration_seconds, audio_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_id, guid) DO UPDATE SET
+                status = excluded.status,
+                detail = excluded.detail,
+                document_id = COALESCE(excluded.document_id, podcast_episodes.document_id),
+                processed_utc = excluded.processed_utc
+            """,
+            (guid, source_id, title, published_utc, _now_iso(), status, detail,
+             document_id, duration_seconds, audio_url),
+        )
+        self.conn.commit()
+
+    def episode_counts(self, source_id: str | None = None) -> dict[str, int]:
+        """Episodes by status, for the run summary and for `--status`."""
+        sql = "SELECT status, COUNT(*) AS n FROM podcast_episodes"
+        params: tuple = ()
+        if source_id:
+            sql += " WHERE source_id = ?"
+            params = (source_id,)
+        sql += " GROUP BY status"
+        return {r["status"]: r["n"] for r in self.conn.execute(sql, params)}
 
     # -- provenance metadata --------------------------------------------
     def set_meta(self, key: str, value: str) -> None:
