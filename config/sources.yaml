@@ -39,6 +39,16 @@
 #         ingest            How to pull it.
 #           type      enum  rss | gdelt | mediacloud | podcast_rss | youtube
 #           url       str   Feed / channel URL. null = TODO, verify before use.
+#           url_env   str   Name of an environment variable holding the feed URL,
+#                             for subscriber feeds whose URL is itself the
+#                             credential (a per-account token in the path or
+#                             query). Used when that variable is set and
+#                             non-empty; `url` is the fallback otherwise, so an
+#                             entry can carry the public feed and upgrade for
+#                             whoever holds the subscription. The name goes here;
+#                             the value goes in the environment (see .env.example
+#                             and scripts/bitwarden.conf.example) and never in
+#                             this file, which is public.
 #         weight      float Relative weight of this source within its stratum.
 #         rationale   str   Why this specific source, in one line.
 #         terms       str   Notes on robots.txt / ToS / rate limits if non-obvious.
@@ -212,6 +222,30 @@ diets:
               url: "https://www.vox.com/rss/index.xml"
             weight: 0.8
             rationale: "Explainer framing; foregrounds care/fairness reasoning."
+          - id: self_goodgood
+            name: "Good Good News"
+            medium: news
+            role: "solutions / constructive journalism"
+            ingest:
+              type: rss
+              # Read in print and on the web, and ingestable as neither. As of
+              # 2026-08-07 goodgood.org serves a client-rendered app with no
+              # feed at /feed, /rss, /feed.xml or /sitemap.xml (all 404, as does
+              # /robots.txt), so there is nothing to subscribe to and no crawl
+              # policy to honour. The print edition is out of reach by
+              # definition. Left null so ingestion skips it; if they publish a
+              # feed, this entry is ready for the URL.
+              url: null
+            domain: goodgood.org
+            weight: 0.5
+            # Recorded even though it cannot be fetched. A source that shapes
+            # the diet but never reaches the corpus is a hole in the model, and
+            # a hole nobody wrote down reads later as an absence of that kind of
+            # coverage rather than an absence of measurement. This one is
+            # load-bearing: constructive journalism is the diet's main
+            # counterweight to conflict framing, and its absence pushes the
+            # measured profile toward harm.
+            rationale: "Solutions-first framing; the diet's counterweight to conflict-driven coverage."
 
       - id: podcasts_youtube
         stratum_weight: 0.10
@@ -307,14 +341,25 @@ diets:
             role: "long-form interview / secular commentary"
             ingest:
               type: podcast_rss
-              # 502 items; verified 2026-08-07.
+              # A Making Sense subscription comes with a per-account feed
+              # (samharris.org/subscriber-rss/?id=...). The token in that URL is
+              # the credential, and Sam Harris's own help pages say not to share
+              # it, so it is named here and stored in the environment — never
+              # written into this file. Put the value in Bitwarden Secrets
+              # Manager and let scripts/parallax-daily.sh export it.
+              url_env: PARALLAX_FEED_MAKINGSENSE
+              # Fallback for anyone without the subscription: the public feed,
+              # 502 items, verified 2026-08-07.
               url: "https://rss.libsyn.com/shows/94577/destinations/480596.xml"
             weight: 0.4
             rationale: "Past rather than current listening; weighted to match."
             terms: >
               The public feed carries partial episodes — full audio is behind a
               subscription. Transcripts will be truncated, which biases any
-              score toward the opening framing of an episode.
+              score toward the opening framing of an episode. Setting
+              PARALLAX_FEED_MAKINGSENSE to the subscriber feed removes that
+              bias; the subscriber URL is personal and must not be committed or
+              shared.
 
           # -- youtube --------------------------------------------------------
           # Channel ids were read from the live channel pages on 2026-08-07 and
