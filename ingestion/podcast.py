@@ -425,9 +425,15 @@ def _ingest_source(
 
     seen = store.seen_episode_keys(source.id)
     # Either key is enough to recognise an episode; see `seen_episode_keys`.
-    fresh = [ep for ep in recent(episodes, pcfg.since_days)
+    in_window = recent(episodes, pcfg.since_days)
+    fresh = [ep for ep in in_window
              if ep.guid not in seen and ep.audio_url not in seen]
-    stats.already_seen += len(episodes) - len(fresh)
+    # Counted against the window, not the whole feed. A show with 3000
+    # back-episodes would otherwise report 2997 "already seen" on every run,
+    # which reads as the ledger working when it is only the window filtering —
+    # and makes the one number that says whether the ledger is doing its job
+    # useless for exactly the feeds where that matters most.
+    stats.already_seen += len(in_window) - len(fresh)
     todo = fresh[: pcfg.max_episodes_per_source]
 
     for episode in todo:

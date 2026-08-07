@@ -384,3 +384,74 @@ def test_an_old_store_gains_the_audio_column(tmp_path):
                          audio_url="http://x/1.mp3")
     assert store.seen_episode_keys("s") == {"g", "http://x/1.mp3"}
     store.close()
+
+
+def test_two_shows_may_share_a_guid(feed_server):
+    """A guid is unique within a feed and nowhere else — `isPermaLink="false"`
+    guids like `12` are legal and common. Keyed globally, the second show's
+    episode would overwrite the first show's row, leaving one show skipping an
+    episode it never transcribed and the other re-transcribing one it did."""
+    store = Datastore(":memory:")
+    store.record_episode(guid="12", source_id="show-a", status="transcribed",
+                         document_id=None, audio_url="http://a/12.mp3")
+    store.record_episode(guid="12", source_id="show-b", status="failed",
+                         detail="boom", audio_url="http://b/12.mp3")
+
+    assert store.seen_episode_keys("show-a") == {"12", "http://a/12.mp3"}
+    assert store.seen_episode_keys("show-b") == {"12", "http://b/12.mp3"}
+    assert store.episode_counts("show-a") == {"transcribed": 1}
+    assert store.episode_counts("show-b") == {"failed": 1}
+    store.close()
+
+
+def test_a_guid_keyed_store_is_rebuilt_on_the_composite_key(tmp_path):
+    """Rows are carried across, not dropped: each one stands for an episode
+    already paid for in CPU time."""
+    import sqlite3
+
+    path = tmp_path / "old.sqlite"
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE podcast_episodes (
+            guid TEXT PRIMARY KEY, source_id TEXT NOT NULL, title TEXT,
+            published_utc TEXT, processed_utc TEXT NOT NULL, status TEXT NOT NULL,
+            detail TEXT, document_id TEXT, duration_seconds INTEGER);
+        INSERT INTO podcast_episodes (guid, source_id, processed_utc, status)
+            VALUES ('ep-1', 'show', '2026-08-01T00:00:00+00:00', 'transcribed');
+    """)
+    conn.commit()
+    conn.close()
+
+    store = Datastore(str(path))
+    keys = {r["pk"] for r in store.conn.execute("PRAGMA table_info(podcast_episodes)")}
+    assert keys == {0, 1, 2}                      # composite, not single
+    assert store.seen_episode_keys("show") == {"ep-1"}   # the row survived
+    # And the rebuilt table takes a colliding guid from another show.
+    store.record_episode(guid="ep-1", source_id="other", status="failed")
+    assert store.episode_counts("show") == {"transcribed": 1}
+    store.close()
+
+
+def test_already_seen_counts_the_window_not_the_archive(feed_server):
+    """The number that says whether the ledger is working has to mean that.
+    Counted against the whole feed, a show with a long back catalogue reports
+    thousands "already seen" every run — which is the window filtering, not the
+    ledger skipping."""
+    feed_server["feed"] = _feed_xml(
+        _item(guid="urn:new", date="Mon, 03 Aug 2026 10:00:00 +0000")
+        + _item(guid="urn:old-1", date="Mon, 03 Aug 2020 10:00:00 +0000")
+        + _item(guid="urn:old-2", date="Mon, 03 Aug 2019 10:00:00 +0000"))
+    store = Datastore(":memory:")
+    fake = _FakeTranscriber()
+
+    first = _run(store, feed_server, fake, podcast_config=PodcastConfig(since_days=3650))
+    assert first.already_seen == 0
+    assert len(fake.calls) == 3
+
+    # A normal window now: only the recent episode is in it, so it is the only
+    # one the ledger can be credited with skipping. Counted against the whole
+    # feed this said 3, two of which the ledger had nothing to do with.
+    second = _run(store, feed_server, fake, podcast_config=PodcastConfig(since_days=7))
+    assert second.already_seen == 1
+    assert len(fake.calls) == 3          # nothing new transcribed
+    store.close()
