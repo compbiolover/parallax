@@ -258,6 +258,28 @@ storing them in the plist, so the plist holds nothing sensitive.
 > fact needs the venv rebuilt (its paths are absolute) and the plist's paths
 > updated to match — both covered below.
 
+**Where `BWS_ACCESS_TOKEN` comes from.** It is issued to a *machine account* in
+Bitwarden Secrets Manager, which is a different product from the password manager and
+lives behind the app switcher in the web vault. Secrets Manager is organization-scoped,
+so you need an organization even as a single user — a free one is enough to start.
+
+1. Web vault → app switcher → **Secrets Manager**.
+2. **Projects** → **New project**, e.g. `parallax`. Secrets live in projects, and a
+   token's reach is defined by which projects it can see.
+3. **Secrets** → **New secret** for each value (`ANTHROPIC_API_KEY`, the SMTP password,
+   any `PARALLAX_FEED_*`), each assigned to that project. Their UUIDs are what goes
+   after `bws:` in the config below — `bws secret list` prints them once the token works.
+4. **Machine accounts** → **New machine account**, e.g. `parallax-daily`. Open it →
+   **Projects** tab → add the project with **Can read**, not *Can read, write*. The
+   6am job only ever reads.
+5. Same machine account → **Access tokens** tab → **New access token**. **Copy it
+   immediately** — Bitwarden never stores it and cannot show it again. It starts `0.`
+   and is the whole `BWS_ACCESS_TOKEN=` value.
+
+Losing it costs nothing: issue a new one, paste it in, revoke the old. That is the
+argument for the whole arrangement — the token on disk is scoped to one project,
+read-only, and revocable on its own, where a mail password on disk is not.
+
 ```bash
 mkdir -p ~/.config/parallax                      # cp will not create it for you
 cp scripts/bitwarden.conf.example ~/.config/parallax/bitwarden.conf
