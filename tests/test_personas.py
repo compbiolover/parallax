@@ -427,3 +427,36 @@ def test_the_ingest_scope_setting_defaults_to_the_whole_catalog():
     assert PipelineConfig.from_settings(
         {"ingestion": {"personas": ["self", "ce_devout"]}}
     ).ingest_personas == ["self", "ce_devout"]
+
+
+def test_the_configured_registry_path_is_actually_read(tmp_path):
+    """`sources.registry` was documented in settings.example.yaml and read by
+    nothing. Passing `settings=` everywhere for the overlay made it *look* wired,
+    which is worse than plainly dead: you can believe you are running against a
+    custom registry while running against the committed one."""
+    data = _registry_yaml()
+    data["personas"][0]["id"] = "only_in_the_custom_file"
+    custom = _write(tmp_path, data)
+
+    registry = load_registry(settings={"sources": {"registry": str(custom)}})
+    assert registry.persona_ids() == ["only_in_the_custom_file"]
+
+
+def test_an_explicit_path_still_beats_the_configured_one(tmp_path):
+    explicit = _write(tmp_path, _registry_yaml())
+    other = _registry_yaml()
+    other["personas"][0]["id"] = "from_settings"
+    configured = tmp_path / "configured.yaml"
+    configured.write_text(yaml.safe_dump(other), encoding="utf-8")
+
+    registry = load_registry(
+        explicit, settings={"sources": {"registry": str(configured)}}
+    )
+    assert registry.persona_ids() == ["reader"]
+
+
+def test_a_configured_registry_that_is_missing_is_an_error(tmp_path):
+    """Falling back to the committed registry would answer a question nobody
+    asked, and the personas would just be the shipped ones."""
+    with pytest.raises(FileNotFoundError, match="sources.registry"):
+        load_registry(settings={"sources": {"registry": str(tmp_path / "nope.yaml")}})
