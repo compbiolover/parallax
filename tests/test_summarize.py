@@ -209,16 +209,22 @@ def test_the_summarizer_is_given_the_diets_human_labels():
     store.close()
 
 
-def test_the_prompt_carries_labels_and_forbids_the_ids():
+def test_the_prompt_carries_labels_and_forbids_the_ids_in_the_prose():
+    """The id now appears in the prompt on purpose, bracketed, because heading
+    matching by token overlap mis-assigns between similar persona labels. That
+    raises the chance of an id leaking into the prose, so the rule against it is
+    explicit rather than implied by absence — and the comparison line, the
+    sentence most likely to be paraphrased directly, still carries labels only."""
     ctx = [DietContext("self", "My diet", 3, {"care": 1.0}, ["a headline"]),
            DietContext("modeled_ce", "Modeled conservative-evangelical diet", 2,
                        {"loyalty": 1.0}, ["b headline"])]
     cmp = ComparisonContext("self", "modeled_ce", 0.12, {"care": 0.4})
     prompt = build_user_prompt(ctx, cmp)
     assert "Modeled conservative-evangelical diet" in prompt
-    # the ids are database keys; nothing in the data block should invite them
-    assert "modeled_ce" not in prompt
-    assert "machine ids" in SYSTEM_PROMPT
+    # Only ever bracketed, as the matching token — never loose in a sentence.
+    assert "[modeled_ce]" in prompt
+    assert prompt.count("modeled_ce") == prompt.count("[modeled_ce]")
+    assert "must never appear in the prose" in SYSTEM_PROMPT
 
 
 def test_the_style_rules_are_in_the_system_prompt():
@@ -534,3 +540,51 @@ def test_the_daily_run_reads_the_configured_effort():
     cfg = DailyConfig.from_settings({"summarize": {"effort": "low"}})
     assert cfg.summary_effort == "low"
     assert DailyConfig.from_settings({}).summary_effort is None
+
+
+# -- persona-aware parsing and tone -----------------------------------------
+
+
+def test_a_section_is_matched_by_its_bracketed_id_first():
+    """Token overlap was a lucky parser: it works for two labels sharing no
+    vocabulary and mis-assigns as soon as a library has "Movement-media reader"
+    and "Party-mainstream reader" in it. The failure is a panel that quietly stops
+    appearing."""
+    contexts = [
+        DietContext("left_activist", "Movement-media reader", 3, {"care": 1.0}, []),
+        DietContext("left_moderate_dem", "Party-mainstream reader", 3, {"care": 1.0}, []),
+    ]
+    text = (
+        "## Movement-media reader [left_activist]\nActivist prose.\n"
+        "## Party-mainstream reader [left_moderate_dem]\nModerate prose.\n"
+        "## Executive\nE.\n"
+    )
+    per_diet, executive = _parse_sections(text, contexts)
+    assert per_diet["left_activist"] == "Activist prose."
+    assert per_diet["left_moderate_dem"] == "Moderate prose."
+    assert executive == "E."
+
+
+def test_an_invented_bracketed_id_falls_back_rather_than_inventing_a_section():
+    contexts = [DietContext("self", "My diet", 3, {"care": 1.0}, [])]
+    per_diet, _ = _parse_sections("## My diet [not_a_persona]\nMine.\n", contexts)
+    assert per_diet["self"] == "Mine."
+
+
+def test_the_prompt_asks_for_the_id_and_supplies_it_in_the_data():
+    ctx = [DietContext("ce_devout", "Devotionally-heavy reader", 3, {"care": 1.0}, ["h"])]
+    prompt = build_user_prompt(ctx, None)
+    assert "## <label> [<id>]" in prompt
+    assert "[ce_devout]" in prompt
+
+
+def test_the_system_prompt_forbids_describing_a_persona_as_a_person():
+    """An outlet list invites description of coverage. A persona named
+    "Devotionally-heavy reader" invites description of a believer's inner life,
+    and nothing in this pipeline measures anyone's faith."""
+    lowered = SYSTEM_PROMPT.lower()
+    assert "a diet is not a person" in lowered
+    assert "never psychologize" in lowered
+    assert "do not rank" in lowered
+    for forbidden in ("beliefs", "motives", "intelligence", "sincerity"):
+        assert forbidden in lowered, forbidden

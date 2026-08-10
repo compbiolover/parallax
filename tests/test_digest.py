@@ -16,7 +16,15 @@ import pytest
 
 from daily import runner
 from daily.runner import DailyConfig
-from digest.render import _delta, _label, _own_first, build_digest, render_html, render_text
+from digest.render import (
+    _colours,
+    _delta,
+    _label,
+    _own_first,
+    build_digest,
+    render_html,
+    render_text,
+)
 from digest.send import NO_CONFIG, MailConfig, build_message, send
 
 from .registries import pair, registry
@@ -975,3 +983,64 @@ def test_the_password_stays_out_of_the_repr():
         assert "s3cret-app-pw" not in rendered
     assert config.password == "s3cret-app-pw"      # still usable for login
     assert "smtp.example.com" in repr(config)      # the rest still debuggable
+
+
+# -- N personas: the email stays about two of them ---------------------------
+
+
+def _many_personas_payload():
+    """The shipped shape: a reference pair plus other personas in the payload."""
+    payload = _payload()
+    payload["reference"] = {"mine": "self", "theirs": "modeled_ce"}
+    for d in payload["diets"]:
+        d["role"] = "mine" if d["id"] == "self" else "theirs"
+        d["family"] = "left" if d["id"] == "self" else "conservative_evangelical"
+    for extra in ("left_wonk", "ce_devout", "ce_talk_radio"):
+        payload["diets"].append({
+            "id": extra, "doc_count": 40, "role": "", "family": "left",
+            "profile": {"care": .2, "fairness": .2, "loyalty": .2,
+                        "authority": .2, "sanctity": .2},
+            "summary": f"{extra} prose that must not reach the email.",
+        })
+    return payload
+
+
+def test_the_email_renders_only_the_reference_pair():
+    """The per-direction blindspot cap in render.py exists because an unfinished
+    section is one where the author's own blindspots go unread. Five personas of
+    fairness rows and summary panels guarantees that failure; the dashboard is
+    where the rest live."""
+    html = render_html(_many_personas_payload(), own_diet="self")
+    text = render_text(_many_personas_payload(), own_diet="self")
+    for absent in ("left_wonk", "ce_devout", "ce_talk_radio"):
+        assert absent not in html
+        assert absent not in text
+
+
+def test_the_email_says_how_many_personas_it_left_out():
+    """Every number in the brief is about the pair, and a reader who does not know
+    a library exists cannot know that picking a different pair would move them."""
+    html = render_html(_many_personas_payload(), own_diet="self")
+    assert "+3 more personas in the dashboard" in html
+    text = render_text(_many_personas_payload(), own_diet="self")
+    assert "+3 more personas in the dashboard" in text
+
+
+def test_a_two_persona_payload_says_nothing_about_others():
+    html = render_html(_payload(), own_diet="self")
+    assert "more persona" not in html
+
+
+def test_colour_follows_the_role_in_the_pair_not_the_list_position():
+    """An earlier version assigned colour by list index in one panel and by the
+    `own_diet` setting in another, so under the shipped ids — `modeled_ce` sorts
+    before `self` — the same diet came out blue in one panel and orange in
+    another. The role is a fact now rather than a guess."""
+    payload = _many_personas_payload()
+    colours = _colours(payload)
+    assert colours["self"] != colours["modeled_ce"]
+
+    # Reversing the list order must not swap the colours.
+    payload["diets"] = list(reversed(payload["diets"]))
+    assert _colours(payload)["self"] == colours["self"]
+    assert _colours(payload)["modeled_ce"] == colours["modeled_ce"]

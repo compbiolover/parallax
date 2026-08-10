@@ -137,7 +137,7 @@ def _podcasts(store: Datastore, settings: dict, args, progress) -> None:
     if args.transformer is not None:
         cfg.transformer_enabled = args.transformer
 
-    registry = load_registry()
+    registry = load_registry(settings=settings)
     sources = [s for s in registry.all_sources()
                if s.ingest_type == "podcast_rss" and s.url]
     if progress is not None:
@@ -214,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
                 cfg.transformer_enabled = args.transformer
             embedder, _ = build_embedder(settings)
             if args.command == "run":
-                registry = load_registry()
+                registry = load_registry(settings=settings)
                 if progress is not None:
                     n = len(list(registry.ingestable(("rss",))))
                     print(f"Ingesting {n} RSS source(s), up to "
@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Backfilling {args.days}d of history from GDELT "
                       f"(≤{args.max_per_source}/source, "
                       f"{'bodies' if args.extract else 'titles only'})…")
-                stats = backfill(store, load_registry(), cfg, embedder=embedder,
+                stats = backfill(store, load_registry(settings=settings), cfg, embedder=embedder,
                                  days=args.days, max_per_source=args.max_per_source,
                                  extract_bodies=args.extract)
             _print_stats(stats)
@@ -234,21 +234,23 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "podcasts":
             _podcasts(store, settings, args, progress)
         elif args.command == "compare":
-            _print_compare(store)
+            _print_compare(store, load_registry(settings=settings))
         elif args.command == "labels":
             # Ingestion records these, so a store that has not been ingested
-            # since the labels were added still names its diets by machine id.
+            # since the labels were added still names its personas by machine id.
             # This writes them without re-fetching anything.
-            from .pipeline import _store_diet_labels
+            from .pipeline import _store_persona_labels
 
-            _store_diet_labels(store, load_registry())
+            _store_persona_labels(store, load_registry(settings=settings))
             recorded = store.diet_labels()
             short = store.diet_short_labels()
+            families = store.persona_families()
             if not recorded:
-                print("No diet labels in the registry to record.")
-            for diet_id, label in sorted(recorded.items()):
-                print(f"  {diet_id}: {label}"
-                      + (f"  (short: {short[diet_id]})" if diet_id in short else ""))
+                print("No persona labels in the registry to record.")
+            for persona_id, label in sorted(recorded.items()):
+                print(f"  {persona_id}: {label}"
+                      + (f"  (short: {short[persona_id]})" if persona_id in short else "")
+                      + (f"  [{families[persona_id]}]" if persona_id in families else ""))
     finally:
         store.close()
     return 0

@@ -326,6 +326,22 @@ def _match_heading(head: str, table: list[tuple[frozenset[str], str]]) -> str | 
     return None if tied else best
 
 
+_BRACKETED = re.compile(r"\[([a-z0-9_]+)\]\s*$")
+
+
+def _bracketed_id(head: str, known: set[str]) -> str | None:
+    """The ``[persona_id]`` the prompt asks for, when it is there and is real.
+
+    An id the model invented is ignored rather than trusted, so a hallucinated
+    bracket degrades to the token matcher instead of creating a phantom section.
+    """
+    m = _BRACKETED.search(head)
+    if m is None:
+        return None
+    candidate = m.group(1)
+    return candidate if candidate in known else None
+
+
 def _heading_table(contexts) -> list[tuple[frozenset[str], str]]:
     """Every name a diet answers to: its label, its short label, its id."""
     table: list[tuple[frozenset[str], str]] = []
@@ -338,8 +354,17 @@ def _heading_table(contexts) -> list[tuple[frozenset[str], str]]:
 
 
 def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
-    """Split Claude's ``## <label>`` / ``## Executive`` sections back apart."""
+    """Split Claude's ``## <label> [<id>]`` / ``## Executive`` sections back apart.
+
+    The bracketed id is tried first and the token matcher is the fallback. Token
+    overlap alone was a lucky parser rather than a robust one: it works for two
+    diets whose labels share no vocabulary, and mis-assigns as soon as a library
+    of personas has labels like "Movement-media reader" and "Party-mainstream
+    reader" in it. The failure is silent — a persona's panel simply stops
+    appearing — which is why the prompt now asks for the id and this reads it.
+    """
     table = _heading_table(contexts)
+    known = {ctx.diet_id for ctx in contexts}
     sections: dict[str, str] = {}
     current: str | None = None
     buf: list[str] = []
@@ -354,8 +379,10 @@ def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
             flush()
             buf = []
             head = m.group(1).strip().lower()
-            current = ("executive" if head.startswith("exec")
-                       else _match_heading(head, table) or head)
+            current = (
+                "executive" if head.startswith("exec")
+                else _bracketed_id(head, known) or _match_heading(head, table) or head
+            )
         else:
             buf.append(line)
     flush()
