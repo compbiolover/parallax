@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from compare.liberty import LOW_COVERAGE, all_diet_liberty, diet_liberty_profile, gap
+from compare.liberty import (
+    LOW_COVERAGE,
+    all_persona_liberty,
+    gap,
+    persona_liberty_profile,
+)
 from ingestion.datastore import Datastore
 from scoring.liberty import (
     BATCH_MIN_ITEMS,
@@ -15,6 +20,8 @@ from scoring.liberty import (
     _parse,
     build_tagger,
 )
+
+from .registries import pair, registry
 
 VERDICT = {
     "presence": 0.8,
@@ -248,13 +255,18 @@ def test_build_tagger_respects_the_disable_switch(monkeypatch):
 SCORER = "claude-liberty/claude-sonnet-5"
 
 
+def _reg():
+    """Both personas, each reading its own source."""
+    return registry(self={"src_self": 1.0}, modeled_ce={"src_modeled_ce": 1.0})
+
+
 def _store_with_liberty(values: dict[str, list[float]], untagged: int = 0):
     store = Datastore(":memory:")
     for diet, scores in values.items():
         for i, value in enumerate(scores):
             did = f"{diet}-{i}"
             store.upsert_document(
-                doc_id=did, diet_id=diet, source_id="s", stratum_id=None, url=None,
+                doc_id=did, source_id=f"src_{diet}", stratum_id=None, url=None,
                 title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
                 word_count=300, minhash=None,
             )
@@ -265,7 +277,7 @@ def _store_with_liberty(values: dict[str, list[float]], untagged: int = 0):
         for j in range(untagged):
             did = f"{diet}-untagged-{j}"
             store.upsert_document(
-                doc_id=did, diet_id=diet, source_id="s", stratum_id=None, url=None,
+                doc_id=did, source_id=f"src_{diet}", stratum_id=None, url=None,
                 title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
                 word_count=300, minhash=None,
             )
@@ -274,9 +286,9 @@ def _store_with_liberty(values: dict[str, list[float]], untagged: int = 0):
 
 def test_untagged_documents_are_excluded_not_zeroed():
     store = _store_with_liberty({"self": [0.8, 0.6]}, untagged=8)
-    rows, total = store.liberty_for_diet("self", SCORER)
+    rows, total = store.liberty_for_sources(["src_self"], SCORER)
     assert len(rows) == 2 and total == 10
-    profile = diet_liberty_profile(store, "self", SCORER)
+    profile = persona_liberty_profile(store, {"src_self": 1.0}, SCORER)
     assert abs(profile.mean - 0.7) < 1e-9      # not 0.14, which zero-filling would give
     assert profile.coverage == 0.2
     store.close()
@@ -284,14 +296,14 @@ def test_untagged_documents_are_excluded_not_zeroed():
 
 def test_salient_share_counts_only_live_framing():
     store = _store_with_liberty({"self": [0.9, 0.6, 0.2, 0.0]})
-    profile = diet_liberty_profile(store, "self", SCORER)
+    profile = persona_liberty_profile(store, {"src_self": 1.0}, SCORER)
     assert profile.salient_share == 0.5        # 0.9 and 0.6 clear the 0.5 line
     store.close()
 
 
 def test_thin_coverage_is_flagged():
     store = _store_with_liberty({"self": [0.8]}, untagged=40)
-    profile = diet_liberty_profile(store, "self", SCORER)
+    profile = persona_liberty_profile(store, {"src_self": 1.0}, SCORER)
     assert profile.coverage < LOW_COVERAGE
     assert profile.thin
     store.close()
@@ -299,29 +311,32 @@ def test_thin_coverage_is_flagged():
 
 def test_a_diet_with_nothing_tagged_reports_zero_not_a_crash():
     store = _store_with_liberty({"self": [0.8], "modeled_ce": []}, untagged=1)
-    profiles = all_diet_liberty(store, SCORER)
+    profiles = all_persona_liberty(store, _reg(), SCORER)
     assert profiles["modeled_ce"].docs_scored == 0
     assert profiles["modeled_ce"].thin
     store.close()
 
 
-def test_gap_points_the_right_way():
+def test_gap_is_oriented_mine_first_not_alphabetically():
+    """The gap took the first two ids in sorted order, so its sign depended on how
+    the personas were spelled rather than on which one is the reader's own."""
     store = _store_with_liberty({"self": [0.2, 0.2], "modeled_ce": [0.8, 0.8]})
-    g = gap(all_diet_liberty(store, SCORER))
-    assert g["pair"] == ["modeled_ce", "self"]
-    assert abs(g["mean_gap"] - 0.6) < 1e-9     # modeled_ce engages liberty more here
+    g = gap(all_persona_liberty(store, _reg(), SCORER), pair())
+    assert g["pair"] == ["self", "modeled_ce"]
+    # `self` engages liberty less here, so mine-first makes the gap negative.
+    assert abs(g["mean_gap"] + 0.6) < 1e-9
     store.close()
 
 
-def test_gap_is_none_with_one_diet():
-    assert gap({}) is None
+def test_gap_is_none_when_the_pair_is_not_both_profiled():
+    assert gap({}, pair()) is None
 
 
 def test_liberty_rows_do_not_pollute_the_five_way_profile():
     """The headline composition must keep running on the dictionary scorer only —
     otherwise partial liberty coverage would move the recorded JSD."""
-    from ingestion.pipeline import diet_profiles
+    from ingestion.pipeline import persona_profiles
 
     store = _store_with_liberty({"self": [0.9]})
-    assert diet_profiles(store) == {}          # no dictionary rows exist
+    assert persona_profiles(store, _reg()) == {}   # no dictionary rows exist
     store.close()

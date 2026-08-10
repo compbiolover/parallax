@@ -121,7 +121,7 @@ def test_a_store_with_no_recorded_lexicon_does_not_warn(caplog):
 
 
 class _Registry:
-    def ingestable(self, _kinds):
+    def ingestable(self, _kinds, _source_ids=None):
         return []
 
 

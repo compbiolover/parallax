@@ -23,11 +23,13 @@ def test_document_and_score_roundtrip():
         sentiment=0.05, moral_word_ratio=0.3, matched_words=36, liberty=None,
     )
     assert store.has_document("abc")
-    rows = store.scores_for_diet("self")
+    rows = store.scores_for_sources(["src"])
     assert len(rows) == 1
     assert rows[0]["care"] == 0.1
     assert rows[0]["liberty"] is None
-    assert rows[0]["weight"] == 0.4
+    # The row carries its source, not a weight: weight is a property of the
+    # persona doing the reading, so a shared source has no single one.
+    assert rows[0]["source_id"] == "src"
 
 
 def test_duplicates_excluded_from_reads():
@@ -41,7 +43,7 @@ def test_duplicates_excluded_from_reads():
         document_id="dup", scorer="dictionary",
         foundations={"care": 0.5}, sentiment=0.0, moral_word_ratio=0.1, matched_words=8,
     )
-    assert store.scores_for_diet("self") == []  # duplicates excluded
+    assert store.scores_for_sources(["src"]) == []  # duplicates excluded
     assert list(store.iter_minhash_signatures()) == []  # and not seeded into the index
     assert store.counts() == {"documents": 1, "duplicates": 1, "unique": 0}
 

@@ -31,8 +31,31 @@
   .legend { display:flex; gap:16px; justify-content:center; margin-top:6px; font-size:13px; }
   .legend span { display:inline-flex; align-items:center; gap:6px; }
   .dot { width:11px; height:11px; border-radius:50%; display:inline-block; }
-  .cards { margin-top: 18px; display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  .cards { margin-top: 18px; display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:18px; }
   @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
+  /* Pair picker. Two selects, because the pair is a choice and the page should
+     say so rather than presenting one comparison as the only one. */
+  .picker { display:flex; flex-wrap:wrap; align-items:center; gap:10px;
+    margin: 14px 0 2px; font-size:13px; color:var(--muted); }
+  .picker select { font:13px inherit; color:var(--ink); background:var(--panel);
+    border:1px solid var(--line); border-radius:6px; padding:5px 8px; max-width:100%; }
+  .picker .swatch { width:9px; height:9px; border-radius:50%; display:inline-block; }
+  .pinned { color:var(--muted); font-size:12px; margin-top:6px; }
+  /* Divergence matrix: a small table, not a chart. N is ~10, and a table is
+     readable at that size where a heatmap needs a legend to decode. */
+  table.matrix { border-collapse:collapse; font-size:12px; margin-top:4px; }
+  table.matrix th { font-weight:500; color:var(--muted); text-align:right;
+    padding:3px 6px; white-space:nowrap; }
+  table.matrix th.col { text-align:center; }
+  table.matrix td { padding:3px 6px; text-align:center; font-variant-numeric:tabular-nums;
+    border-radius:3px; }
+  .mwrap { overflow-x:auto; }
+  .plist { list-style:none; margin:6px 0 0; padding:0; }
+  .plist li { padding:7px 0; border-top:1px solid var(--line); }
+  .plist li:first-child { border-top:0; }
+  .plist .pname { font-weight:500; }
+  .plist .pdesc { color:var(--muted); font-size:12.5px; margin-top:2px; max-width:72ch; }
   .card .meta { color: var(--muted); font-size:12px; margin-bottom:8px; }
   .card p { margin: 0 0 10px; }
   .exec { margin-top:18px; }
@@ -56,7 +79,7 @@
 <body>
 <div class="wrap">
   <h1>Parallax <span id="method-badge"></span></h1>
-  <p class="sub" id="subtitle">A moral-foundations mirror for two media diets.</p>
+  <p class="sub" id="subtitle">A moral-foundations mirror for two modeled media diets.</p>
   <div id="app"></div>
 </div>
 
@@ -69,6 +92,11 @@ const app = document.getElementById("app");
 // How much of a theme a card shows before it says "+N more". Same caps the
 // email uses (digest/render.py), so the two surfaces truncate identically.
 const STORIES_PER_CARD = 6, OUTLETS_PER_STORY = 3;
+// Which two personas the page is comparing. Starts at the pair the export was
+// computed on, and the picker moves it. Declared here rather than beside
+// `render`, because `let` stays uninitialized until execution reaches it and
+// `render(D)` below runs first.
+let SEL = null;
 
 if (!D || window.__noData) {
   app.innerHTML = `<div class="empty">No data yet.<br><br>
@@ -80,15 +108,75 @@ if (!D || window.__noData) {
   render(D);
 }
 
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// Colour means role in the comparison, never position in a list. Position was an
+// alphabetical accident of `ORDER BY diet_id`, and keying one panel off index
+// while colouring another off a setting is what once made the same diet blue in
+// one panel and orange in another (see digest/render.py).
+function colourMap(d, sel) {
+  const self = cssVar("--self"), other = cssVar("--other"), muted = cssVar("--muted");
+  const famOfMine = (d.diets.find(x => x.id === sel.mine) || {}).family;
+  const colors = {};
+  d.diets.forEach(di => {
+    if (di.id === sel.mine) colors[di.id] = self;
+    else if (di.id === sel.theirs) colors[di.id] = other;
+    // Everything else keeps its side's hue so "my side clusters here, theirs
+    // there" survives, but muted so the pair still reads as the subject.
+    else colors[di.id] = di.family ? (di.family === famOfMine ? self : other) : muted;
+  });
+  return colors;
+}
+
+function jsdFor(d, a, b) {
+  const m = d.matrix;
+  if (!m || !m.personas) return null;
+  const i = m.personas.indexOf(a), j = m.personas.indexOf(b);
+  return (i < 0 || j < 0) ? null : m.jsd[i][j];
+}
+
+function overlapFor(d, a, b) {
+  const o = d.overlap;
+  if (!o || !o.personas) return null;
+  const i = o.personas.indexOf(a), j = o.personas.indexOf(b);
+  return (i < 0 || j < 0) ? null : o.cosine[i][j];
+}
+
+// ln(P/Q) per foundation, the same epsilon-smoothed form compare/divergence.py
+// uses, so a pair the exporter did not compute reads identically to one it did.
+function logRatiosFor(d, a, b) {
+  const pa = (d.diets.find(x => x.id === a) || {}).profile || {};
+  const pb = (d.diets.find(x => x.id === b) || {}).profile || {};
+  const eps = 1e-6, out = {};
+  d.foundations.forEach(f => {
+    out[f] = Math.log(((pa[f] || 0) + eps) / ((pb[f] || 0) + eps));
+  });
+  return out;
+}
+
 function render(d) {
+  const ref = d.reference || {};
+  if (SEL === null) {
+    SEL = {
+      mine: ref.mine || (d.diets[0] || {}).id,
+      theirs: ref.theirs || (d.diets[1] || {}).id,
+    };
+  }
+  const sel = SEL;
+  // True when the picker still sits on the pair everything was computed for.
+  const onRef = sel.mine === ref.mine && sel.theirs === ref.theirs;
+
+  app.innerHTML = "";
   document.getElementById("subtitle").textContent =
     `Generated ${new Date(d.generated_utc).toLocaleString()} · ${d.foundations.length} classic foundations`;
   if (d.summary_method) {
     const b = document.getElementById("method-badge");
     b.className = "badge"; b.textContent = d.summary_method === "claude" ? "Claude summary" : "numbers-only summary";
   }
-  const colors = {}; const c = ["--self", "--other", "--muted"];
-  d.diets.forEach((di, i) => colors[di.id] = getComputedStyle(document.documentElement).getPropertyValue(c[i] || "--muted").trim());
+  const colors = colourMap(d, sel);
+  picker(d, sel);
 
   // Row one is the number and the sentence that says what it means. The charts
   // are the evidence for that sentence and come after it — reading them first
@@ -97,12 +185,23 @@ function render(d) {
 
   // JSD panel
   const jp = panel(top, "Divergence");
-  if (d.comparison) {
-    jp.innerHTML += `<div class="jsd"><div class="num">${d.comparison.jsd.toFixed(3)}</div>
-      <div class="scale">Jensen–Shannon · 0 = identical emphasis, 1 = disjoint</div></div>`;
+  const selJsd = onRef && d.comparison ? d.comparison.jsd : jsdFor(d, sel.mine, sel.theirs);
+  if (selJsd !== null && selJsd !== undefined) {
+    const ov = overlapFor(d, sel.mine, sel.theirs);
+    // The overlap sits next to the divergence on purpose. Personas are weight
+    // profiles over one shared catalog, so two that read mostly the same outlets
+    // diverge little *by construction* — a small number with high overlap is an
+    // artifact, and a small number with low overlap is a finding.
+    const ovNote = ov === null ? "" :
+      `<div class="scale">Source overlap ${ov.toFixed(2)} · ` +
+      (ov > 0.5 ? "much of this similarity is shared sources"
+                : "these two read largely different sources") + `</div>`;
+    jp.innerHTML += `<div class="jsd"><div class="num">${selJsd.toFixed(3)}</div>
+      <div class="scale">Jensen–Shannon · 0 = identical emphasis, 1 = disjoint</div>
+      ${ovNote}</div>`;
   } else { jp.innerHTML += `<p class="sub">Need two scored diets to compare.</p>`; }
   const leg = document.createElement("div"); leg.className = "legend";
-  d.diets.forEach(di => leg.innerHTML += `<span><i class="dot" style="background:${colors[di.id]}"></i>${dietName(di)} · ${di.doc_count}</span>`);
+  pairDiets(d, sel).forEach(di => leg.innerHTML += `<span><i class="dot" style="background:${colors[di.id]}"></i>${dietName(di)} · ${di.doc_count}</span>`);
   jp.appendChild(leg);
 
   execSummary(top, d);
@@ -111,7 +210,9 @@ function render(d) {
   // where it differs, the trend.
   const rp = panel(app, "Foundation emphasis (composition)");
   rp.style.marginTop = "18px";
-  radar(rp, d.foundations, d.diets, colors);
+  // The pair as filled polygons. Ten polygons on one radar is unreadable, so the
+  // N-way view is the matrix below rather than more geometry here.
+  radar(rp, d.foundations, pairDiets(d, sel), colors);
   if (d.has_confidence_bands) {
     const cap = document.createElement("div"); cap.className = "sub";
     cap.style.marginTop = "8px"; cap.style.fontSize = "12px";
@@ -121,37 +222,178 @@ function render(d) {
   }
 
   // The other divergence: what each diet spent the day on.
-  agenda(app, d);
+  agenda(app, d, onRef);
 
   // Diverging bars (log-ratios)
-  if (d.comparison) {
-    const bp = panel(app, `Over / under-indexing — ${named(d, d.comparison.pair[0])} vs ${named(d, d.comparison.pair[1])} (log-ratio)`);
+  if (selJsd !== null && selJsd !== undefined) {
+    const bp = panel(app, `Over / under-indexing — ${named(d, sel.mine)} vs ${named(d, sel.theirs)} (log-ratio)`);
     bp.style.marginTop = "18px";
-    bars(bp, d.foundations, d.comparison.log_ratios, colors[d.comparison.pair[0]]);
+    // Oriented mine-first, so positive means "my diet over-indexes" — the
+    // convention CLAUDE.md §3(5) asks for.
+    const lr = onRef && d.comparison ? d.comparison.log_ratios
+                                     : logRatiosFor(d, sel.mine, sel.theirs);
+    bars(bp, d.foundations, lr, colors[sel.mine]);
   }
+  matrixPanel(app, d, sel, colors);
 
   // JSD over time
   jsdSeries(app, d);
 
   // Equality vs proportionality (MFQ-2)
-  fairnessSplit(app, d, colors);
+  fairnessSplit(app, d, colors, onRef);
 
   // Liberty / oppression (Claude tagger)
-  liberty(app, d, colors);
+  liberty(app, d, colors, onRef);
 
   // Summary cards
   if (d.diets.some(x => x.summary)) {
     const cards = document.createElement("div"); cards.className = "cards"; app.appendChild(cards);
-    d.diets.forEach(di => {
+    d.diets.filter(di => di.summary).forEach(di => {
       const card = panel(cards, dietName(di));
       card.className = "panel card";
       card.innerHTML += `<div class="meta">${di.doc_count} stories</div>` + paragraphs(di.summary || "—");
     });
   }
-  blindspots(app, d, colors);
+  blindspots(app, d, colors, onRef);
+  personaPanel(app, d, sel, colors);
 
   const cav = document.createElement("div"); cav.className = "caveat";
   cav.textContent = "⚠︎ " + d.caveat; app.appendChild(cav);
+}
+
+function pairDiets(d, sel) {
+  return [sel.mine, sel.theirs]
+    .map(id => d.diets.find(x => x.id === id))
+    .filter(Boolean);
+}
+
+// The pair is a choice, and the page has to say so. Everything the picker can
+// redraw is redrawn from the payload — no refetch, no backend.
+function picker(d, sel) {
+  if (d.diets.length < 2) return;
+  const wrap = document.createElement("div"); wrap.className = "picker";
+  const byFamily = {};
+  d.diets.forEach(di => (byFamily[di.family || "other"] ||= []).push(di));
+
+  function select(role, chosen) {
+    const opts = Object.entries(byFamily).map(([fam, list]) =>
+      `<optgroup label="${escapeHtml(familyName(fam))}">` +
+      list.map(di =>
+        `<option value="${escapeHtml(di.id)}"${di.id === chosen ? " selected" : ""}>` +
+        `${escapeHtml(dietName(di))}</option>`).join("") +
+      `</optgroup>`).join("");
+    const el = document.createElement("select");
+    el.innerHTML = opts;
+    el.setAttribute("aria-label", role === "mine" ? "my diet" : "compared diet");
+    el.onchange = () => { SEL = { ...SEL, [role]: el.value }; render(d); };
+    return el;
+  }
+
+  const mineDot = `<i class="swatch" style="background:var(--self)"></i>`;
+  const theirsDot = `<i class="swatch" style="background:var(--other)"></i>`;
+  const l1 = document.createElement("span"); l1.innerHTML = mineDot + " Comparing";
+  const l2 = document.createElement("span"); l2.innerHTML = theirsDot + " with";
+  wrap.append(l1, select("mine", sel.mine), l2, select("theirs", sel.theirs));
+  app.appendChild(wrap);
+}
+
+function familyName(fam) {
+  if (fam === "left") return "My side";
+  if (fam === "conservative_evangelical") return "Modeled conservative-evangelical";
+  return fam.replace(/_/g, " ");
+}
+
+// Said out loud rather than left for the reader to infer. Agenda, blindspots,
+// fairness, liberty and the summaries are computed in the pipeline for the pair
+// the export was built on; the picker cannot recompute them, so when it moves off
+// that pair those panels are labelled instead of silently redrawn.
+function pinnedNote(parent, d, onRef) {
+  if (onRef) return;
+  const ref = d.reference || {};
+  const n = document.createElement("div"); n.className = "pinned";
+  n.textContent = `Computed for ${named(d, ref.mine)} vs ${named(d, ref.theirs)} — `
+    + `the pair this snapshot was exported on, not the pair selected above.`;
+  parent.appendChild(n);
+}
+
+// Every persona against every other, with the source overlap that says how much
+// of each number is shared vocabulary rather than agreement. A table, not a
+// heatmap: at ten personas a table is readable and needs no legend to decode.
+function matrixPanel(app, d, sel, colors) {
+  const m = d.matrix;
+  if (!m || !m.personas || m.personas.length < 3) return;
+  const p = panel(app, "Divergence between every persona");
+  p.style.marginTop = "18px";
+  const sub = document.createElement("div"); sub.className = "sub";
+  sub.style.fontSize = "12px";
+  sub.innerHTML = "Foundation divergence above the diagonal, source overlap below it. "
+    + "Personas share one catalog, so low divergence between two that read the same "
+    + "outlets is an artifact of the overlap rather than agreement.";
+  p.appendChild(sub);
+
+  const ids = m.personas;
+  const max = Math.max(...ids.flatMap((_, i) => ids.map((__, j) => i === j ? 0 : m.jsd[i][j])), 1e-9);
+  let html = '<div class="mwrap"><table class="matrix"><tr><th></th>';
+  ids.forEach(id => html += `<th class="col">${escapeHtml(shortName(d, id))}</th>`);
+  html += "</tr>";
+  ids.forEach((rowId, i) => {
+    html += `<tr><th>${escapeHtml(shortName(d, rowId))}</th>`;
+    ids.forEach((colId, j) => {
+      if (i === j) { html += `<td style="color:var(--muted)">·</td>`; return; }
+      const upper = j > i;
+      const v = upper ? m.jsd[i][j] : overlapFor(d, rowId, colId);
+      if (v === null || v === undefined) { html += "<td></td>"; return; }
+      // Shade by magnitude on its own scale; divergence and overlap are not
+      // comparable numbers and must not share one ramp.
+      const t = upper ? Math.min(v / max, 1) : Math.min(v, 1);
+      const hue = upper ? "var(--other)" : "var(--self)";
+      const inPair = (rowId === sel.mine && colId === sel.theirs)
+                  || (rowId === sel.theirs && colId === sel.mine);
+      const ring = inPair ? "outline:1.5px solid var(--ink);" : "";
+      html += `<td style="background:color-mix(in srgb, ${hue} ${(t * 55).toFixed(0)}%, transparent);`
+            + `${ring}">${v.toFixed(upper ? 3 : 2)}</td>`;
+    });
+    html += "</tr>";
+  });
+  html += "</table></div>";
+  p.innerHTML += html;
+}
+
+// A persona is a modeling claim — "someone plausibly consumes this mix" — and a
+// page that reports numbers from it has to show the claim.
+function personaPanel(app, d, sel, colors) {
+  if (d.diets.length < 3) return;
+  const p = panel(app, "The personas");
+  p.style.marginTop = "18px";
+  const sub = document.createElement("div"); sub.className = "sub";
+  sub.style.fontSize = "12px";
+  sub.textContent = "Each is a documented weighting over a shared source catalog, not a person "
+    + "and not a measurement of anyone's consumption. Weights are asserted; see LIMITATIONS.md.";
+  p.appendChild(sub);
+  const ul = document.createElement("ul"); ul.className = "plist";
+  d.diets.forEach(di => {
+    const li = document.createElement("li");
+    const role = di.id === sel.mine ? " · selected as mine"
+               : di.id === sel.theirs ? " · selected as theirs" : "";
+    li.innerHTML =
+      `<div><i class="dot" style="background:${colors[di.id]}"></i> `
+      + `<span class="pname">${escapeHtml(dietName(di))}</span> `
+      + `<span class="sub" style="font-size:12px">${escapeHtml(familyName(di.family || ""))}`
+      + ` · ${di.doc_count} stories · ${di.source_count || 0} sources${role}</span></div>`
+      + (di.description ? `<div class="pdesc">${escapeHtml(di.description)}</div>` : "");
+    ul.appendChild(li);
+  });
+  p.appendChild(ul);
+  if (d.registry_version) {
+    const v = document.createElement("div"); v.className = "pinned";
+    v.textContent = `Source registry version ${d.registry_version}.`;
+    p.appendChild(v);
+  }
+}
+
+function shortName(d, id) {
+  const di = d.diets.find(x => x.id === id);
+  return di ? dietName(di) : id;
 }
 
 // Divergence over time. Two series off the same snapshots, because they answer
@@ -260,7 +502,7 @@ function jsdSeries(app, d) {
 // they disagree: both talk about fairness constantly and mean different things.
 // Shares are *within* fairness, so a diet that writes more doesn't read as
 // caring more about either half.
-function fairnessSplit(app, d, colors) {
+function fairnessSplit(app, d, colors, onRef) {
   const fs = d.fairness_split;
   const p = panel(app, "Fairness — equality vs proportionality");
   p.style.marginTop = "18px";
@@ -270,7 +512,10 @@ function fairnessSplit(app, d, colors) {
     return;
   }
 
-  const W = 900, rowH = 54, ids = Object.keys(fs.diets).sort();
+  // Payload order, not alphabetical: the reference pair leads it, and
+  // alphabetical order is what made "which diet is first" an accident.
+  const W = 900, rowH = 54;
+  const ids = d.diets.map(x => x.id).filter(id => fs.diets[id]);
   const H = ids.length * rowH + 34;
   const L = 150, R = 60;
   const svg = d3.select(p).append("svg").attr("viewBox", `0 0 ${W} ${H}`);
@@ -331,6 +576,7 @@ function fairnessSplit(app, d, colors) {
      liberal/conservative asymmetry replicates poorly when measured in language specifically,
      and proportionality is reported to bridge the divide rather than mark it.`;
   p.appendChild(cap);
+  pinnedNote(p, d, onRef);
 }
 
 // Liberty / oppression — the sixth foundation, scored by Claude because no
@@ -338,7 +584,7 @@ function fairnessSplit(app, d, colors) {
 // rather than a radar spoke: it is scored on a subset of documents, and folding
 // partial coverage into the five-way composition would move every other share
 // (and the headline divergence) as a side effect of coverage.
-function liberty(app, d, colors) {
+function liberty(app, d, colors, onRef) {
   const lib = d.liberty;
   const p = panel(app, "Liberty / oppression");
   p.style.marginTop = "18px";
@@ -349,7 +595,7 @@ function liberty(app, d, colors) {
     return;
   }
 
-  const ids = Object.keys(lib.diets).sort();
+  const ids = d.diets.map(x => x.id).filter(id => lib.diets[id]);
   const W = 900, rowH = 56, H = ids.length * rowH + 30, L = 150, R = 70;
   const maxMean = Math.max(0.25, d3.max(ids, id => lib.diets[id].mean) * 1.25);
   const x = d3.scaleLinear().domain([0, maxMean]).range([L, W - R]);
@@ -397,6 +643,7 @@ function liberty(app, d, colors) {
      from feeds only, and kept off the radar because partial coverage cannot go into a
      composition without moving every other share.`;
   p.appendChild(cap);
+  pinnedNote(p, d, onRef);
 }
 
 // Attention divergence, printed next to the foundation number rather than
@@ -405,7 +652,7 @@ function liberty(app, d, colors) {
 // same moral vocabulary. It is also not what the reader feels. What they feel
 // is the agenda — two people reading about different events — and that number
 // is large. Either one alone misleads, so the panel says both.
-function agenda(app, d) {
+function agenda(app, d, onRef) {
   const a = d.agenda;
   if (!a || !a.total_stories || (a.pair || []).length !== 2) return;
   const p = panel(app, "Same day, different agenda");
@@ -436,6 +683,7 @@ function agenda(app, d) {
     "what a reader experiences as a different world." +
     (a.thin ? " Thin coverage — one diet has few clustered articles, so treat this as provisional." : "");
   p.appendChild(note);
+  pinnedNote(p, d, onRef);
 }
 
 // Blindspots, read by theme. A cluster is the unit the asymmetry is measured on
@@ -445,7 +693,7 @@ function agenda(app, d) {
 // taxonomy server-side), but a `latest.js` written before theming existed has
 // clusters and no themes. That payload still renders, as clusters: an old file
 // on disk should look dated, not broken.
-function blindspots(app, d, colors) {
+function blindspots(app, d, colors, onRef) {
   const themes = d.blindspot_themes || [];
   const bs = d.blindspots || [];
   const p = panel(app, "Blindspots — what each diet covers that the other doesn't");
@@ -455,7 +703,14 @@ function blindspots(app, d, colors) {
     return;
   }
   const grid = document.createElement("div"); grid.className = "cards"; p.appendChild(grid);
-  d.diets.forEach(di => {
+  // Only the pair the blindspots were computed for. Every other persona would get
+  // an empty column, which reads as "this persona has no blindspots" rather than
+  // "this comparison was not run".
+  const ref = d.reference || {};
+  const columns = (ref.mine && ref.theirs)
+    ? [ref.mine, ref.theirs].map(id => d.diets.find(x => x.id === id)).filter(Boolean)
+    : d.diets.slice(0, 2);
+  columns.forEach(di => {
     const col = document.createElement("div"); col.className = "panel card";
     col.style.background = "transparent"; col.style.borderStyle = "dashed";
     col.innerHTML = `<h2 style="color:${colors[di.id]}">${dietName(di)} covers · other misses</h2>`;
@@ -476,6 +731,7 @@ function blindspots(app, d, colors) {
         "Re-run `python -m cluster run` to read them by theme. ") +
     "Coverage asymmetry is not a judgement about which story mattered more.";
   p.appendChild(note);
+  pinnedNote(p, d, onRef);
 }
 
 // One theme: the name a person would use, the counts, and the stories under it.

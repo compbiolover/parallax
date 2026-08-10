@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -81,7 +81,15 @@ CREATE INDEX IF NOT EXISTS idx_podcast_episodes_source
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS documents (
     id            TEXT PRIMARY KEY,      -- content hash (sha256 hex)
-    diet_id       TEXT NOT NULL,
+    -- LEGACY, kept for readability of pre-persona stores. It held the one diet a
+    -- document was ingested under, which was well-defined only while a source
+    -- belonged to exactly one diet. Nothing reads it now: membership is a
+    -- property of `source_id` (a source may be read by several personas at
+    -- different weights, so there is no single diet to record). New rows write ''.
+    -- Not dropped, because dropping a NOT NULL column means rebuilding
+    -- `documents` — the parent of five foreign keys — and this store holds the
+    -- only copy of the snapshot history.
+    diet_id       TEXT NOT NULL DEFAULT '',
     source_id     TEXT NOT NULL,
     stratum_id    TEXT,
     url           TEXT,
@@ -90,6 +98,9 @@ CREATE TABLE IF NOT EXISTS documents (
     fetched_utc   TEXT NOT NULL,
     word_count    INTEGER NOT NULL,
     minhash       TEXT,                  -- JSON array of the signature ints
+    -- LEGACY, same reason: it held stratum_weight * source_weight for that one
+    -- diet. Weight is now resolved per persona at aggregation time, which is what
+    -- lets one document count differently for two readers of the same source.
     weight        REAL NOT NULL DEFAULT 1.0,
     is_duplicate  INTEGER NOT NULL DEFAULT 0,
     duplicate_of  TEXT                   -- id of the canonical document, if dup
@@ -97,6 +108,8 @@ CREATE TABLE IF NOT EXISTS documents (
 
 CREATE INDEX IF NOT EXISTS idx_documents_diet ON documents(diet_id);
 CREATE INDEX IF NOT EXISTS idx_documents_dup  ON documents(is_duplicate);
+-- source_id is the join key for every aggregate query now that diet_id is not.
+CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_id);
 
 CREATE TABLE IF NOT EXISTS foundation_scores (
     document_id      TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -202,6 +215,24 @@ def _date_window(since: str | None, until: str | None) -> tuple[str, tuple[str, 
         clause += f" AND {DOC_DATE_SQL} < ?"
         params.append(until)
     return clause, tuple(params)
+
+
+def _source_filter(source_ids: Iterable[str]) -> tuple[str, tuple[str, ...]]:
+    """SQL fragment + params restricting documents to a set of source ids.
+
+    Documents are keyed by source, not by diet, because a source belongs to as
+    many personas as list it — so "this persona's documents" is a set membership
+    test rather than a column comparison.
+
+    An empty set yields ``AND 0``, which matches nothing. That is the whole
+    reason this is a helper: SQLite rejects an empty ``IN ()`` outright, and
+    omitting the clause instead would quietly return *every* document in the
+    store to a persona that consumes none.
+    """
+    ids = tuple(dict.fromkeys(source_ids))
+    if not ids:
+        return " AND 0", ()
+    return f" AND d.source_id IN ({','.join('?' * len(ids))})", ids
 
 
 @dataclass(frozen=True)
@@ -316,7 +347,6 @@ class Datastore:
         self,
         *,
         doc_id: str,
-        diet_id: str,
         source_id: str,
         stratum_id: str | None,
         url: str | None,
@@ -325,9 +355,12 @@ class Datastore:
         fetched_utc: str,
         word_count: int,
         minhash: list[int] | None,
-        weight: float = 1.0,
         is_duplicate: bool = False,
         duplicate_of: str | None = None,
+        # Legacy columns. Both are written blank/neutral on new rows and read by
+        # nothing; see the DDL comments on `documents`.
+        diet_id: str = "",
+        weight: float = 1.0,
     ) -> None:
         with self._tx() as conn:
             conn.execute(
@@ -402,37 +435,44 @@ class Datastore:
         for row in self.conn.execute(sql, params):
             yield row["id"], json.loads(row["minhash"])
 
-    def scores_for_diet(
+    def scores_for_sources(
         self,
-        diet_id: str,
+        source_ids: Iterable[str],
         scorer: str = "dictionary",
         since: str | None = None,
         until: str | None = None,
     ) -> list[sqlite3.Row]:
-        """All non-duplicate document scores for a diet.
+        """All non-duplicate document scores from a set of sources.
+
+        Returns ``source_id`` per row rather than a weight: weight is a property
+        of the persona doing the reading, so the caller multiplies it in (see
+        ``Registry.weights_for``). Two personas that share a source read the same
+        rows here and weight them differently, which is exactly the point.
 
         ``since``/``until`` restrict to the half-open date window
         ``[since, until)`` — see :func:`_date_window` for why plain string
         comparison is exact here. Omitting both gives every document ever
         ingested, which is what the headline dashboard numbers use.
         """
+        where, ids = _source_filter(source_ids)
         clause, params = _date_window(since, until)
         return list(
             self.conn.execute(
                 f"""
-                SELECT d.weight AS weight, s.*
+                SELECT d.source_id AS source_id, s.*
                 FROM foundation_scores s
                 JOIN documents d ON d.id = s.document_id
-                WHERE d.diet_id = ? AND d.is_duplicate = 0 AND s.scorer = ?{clause}
+                WHERE d.is_duplicate = 0 AND s.scorer = ?{where}{clause}
+                ORDER BY s.document_id
                 """,
-                (diet_id, scorer, *params),
+                (scorer, *ids, *params),
             )
         )
 
-    def fairness_split_for_diet(
-        self, diet_id: str, scorer: str = "dictionary"
-    ) -> tuple[list[tuple[float, float, float]], int]:
-        """``([(weight, equality, proportionality), ...], n_scored)`` for a diet.
+    def fairness_split_for_sources(
+        self, source_ids: Iterable[str], scorer: str = "dictionary"
+    ) -> tuple[list[tuple[str, float, float]], int]:
+        """``([(source_id, equality, proportionality), ...], n_scored)``.
 
         Only rows that were actually partitioned are returned; ``n_scored`` is
         the number of documents the scorer saw at all, so the caller can report
@@ -440,50 +480,52 @@ class Datastore:
         remainder as zeros would manufacture an equality/proportionality reading
         for every document that never discussed either.
         """
+        where, ids = _source_filter(source_ids)
         rows = self.conn.execute(
-            """
-            SELECT d.weight AS weight, s.equality AS eq, s.proportionality AS pr
+            f"""
+            SELECT d.source_id AS source_id, s.equality AS eq, s.proportionality AS pr
             FROM foundation_scores s
             JOIN documents d ON d.id = s.document_id
-            WHERE d.diet_id = ? AND d.is_duplicate = 0 AND s.scorer = ?
+            WHERE d.is_duplicate = 0 AND s.scorer = ?{where}
               AND s.equality IS NOT NULL AND s.proportionality IS NOT NULL
             """,
-            (diet_id, scorer),
+            (scorer, *ids),
         )
-        split = [(float(r["weight"] or 1.0), float(r["eq"]), float(r["pr"])) for r in rows]
+        split = [(r["source_id"], float(r["eq"]), float(r["pr"])) for r in rows]
         total = self.conn.execute(
-            """
+            f"""
             SELECT COUNT(*) AS n FROM foundation_scores s
             JOIN documents d ON d.id = s.document_id
-            WHERE d.diet_id = ? AND d.is_duplicate = 0 AND s.scorer = ?
+            WHERE d.is_duplicate = 0 AND s.scorer = ?{where}
             """,
-            (diet_id, scorer),
+            (scorer, *ids),
         ).fetchone()["n"]
         return split, total
 
-    def liberty_for_diet(
-        self, diet_id: str, scorer: str
-    ) -> tuple[list[tuple[float, float]], int]:
-        """``([(weight, liberty), ...], n_documents)`` for one diet.
+    def liberty_for_sources(
+        self, source_ids: Iterable[str], scorer: str
+    ) -> tuple[list[tuple[str, float]], int]:
+        """``([(source_id, liberty), ...], n_documents)``.
 
         Only rows carrying a liberty score are returned; ``n_documents`` is the
-        diet's whole non-duplicate corpus, so the caller can report what fraction
-        was actually tagged. Liberty coverage is always partial — the tagger runs
-        on feed-ingested documents only, and only when an API key is set — so a
-        mean over the tagged subset is not a mean over the diet.
+        whole non-duplicate corpus from those sources, so the caller can report
+        what fraction was actually tagged. Liberty coverage is always partial —
+        the tagger runs on feed-ingested documents only, and only when an API key
+        is set — so a mean over the tagged subset is not a mean over the diet.
         """
+        where, ids = _source_filter(source_ids)
         rows = self.conn.execute(
-            """
-            SELECT d.weight AS weight, s.liberty AS liberty
+            f"""
+            SELECT d.source_id AS source_id, s.liberty AS liberty
             FROM foundation_scores s
             JOIN documents d ON d.id = s.document_id
-            WHERE d.diet_id = ? AND d.is_duplicate = 0 AND s.scorer = ?
+            WHERE d.is_duplicate = 0 AND s.scorer = ?{where}
               AND s.liberty IS NOT NULL
             """,
-            (diet_id, scorer),
+            (scorer, *ids),
         )
-        scored = [(float(r["weight"] or 1.0), float(r["liberty"])) for r in rows]
-        return scored, self.doc_count(diet_id)
+        scored = [(r["source_id"], float(r["liberty"])) for r in rows]
+        return scored, self.doc_count_for_sources(source_ids)
 
     def scorer_names(self) -> list[str]:
         """Distinct scorer names present in foundation_scores (e.g. 'dictionary',
@@ -491,11 +533,11 @@ class Datastore:
         rows = self.conn.execute("SELECT DISTINCT scorer FROM foundation_scores ORDER BY scorer")
         return [r["scorer"] for r in rows]
 
-    def paired_scores_for_diet(
-        self, diet_id: str, scorer_a: str, scorer_b: str,
+    def paired_scores_for_sources(
+        self, source_ids: Iterable[str], scorer_a: str, scorer_b: str,
         foundations: list[str] | None = None,
-    ) -> list[tuple[float, dict[str, float], dict[str, float]]]:
-        """Per non-duplicate document in a diet, ``(weight, scorer_a_map, scorer_b_map)``
+    ) -> list[tuple[str, dict[str, float], dict[str, float]]]:
+        """Per non-duplicate document, ``(source_id, scorer_a_map, scorer_b_map)``
         — only for documents scored by *both*. Pairing keeps the two taggers on the
         same document population (backfill writes dictionary rows but no transformer
         rows), which both the confidence band and the disagreement share rely on.
@@ -510,48 +552,68 @@ class Datastore:
         founds = [f for f in (foundations or list(CLASSIC_FOUNDATIONS)) if f in allowed]
         if not founds:
             founds = list(CLASSIC_FOUNDATIONS)
+        where, ids = _source_filter(source_ids)
         rows = self.conn.execute(
             f"""
-            SELECT d.weight AS weight,
+            SELECT d.source_id AS source_id,
                    {', '.join(f'a.{c} AS a_{c}' for c in founds)},
                    {', '.join(f'b.{c} AS b_{c}' for c in founds)}
             FROM foundation_scores a
             JOIN foundation_scores b ON a.document_id = b.document_id
             JOIN documents d ON d.id = a.document_id
-            WHERE d.diet_id = ? AND d.is_duplicate = 0
-              AND a.scorer = ? AND b.scorer = ?
+            WHERE d.is_duplicate = 0
+              AND a.scorer = ? AND b.scorer = ?{where}
+            ORDER BY a.document_id
             """,
-            (diet_id, scorer_a, scorer_b),
+            (scorer_a, scorer_b, *ids),
         )
         out = []
         for r in rows:
             a = {c: (r[f"a_{c}"] if r[f"a_{c}"] is not None else 0.0) for c in founds}
             b = {c: (r[f"b_{c}"] if r[f"b_{c}"] is not None else 0.0) for c in founds}
-            out.append((float(r["weight"] or 1.0), a, b))
+            out.append((r["source_id"], a, b))
         return out
 
-    def headlines_for_diet(self, diet_id: str, limit: int = 50) -> list[str]:
-        """Titles of non-duplicate documents for a diet, most recent first."""
+    def headlines_for_sources(self, source_ids: Iterable[str], limit: int = 50) -> list[str]:
+        """Titles of non-duplicate documents from a set of sources, newest first."""
+        where, ids = _source_filter(source_ids)
         rows = self.conn.execute(
-            """
-            SELECT title FROM documents
-            WHERE diet_id = ? AND is_duplicate = 0 AND title IS NOT NULL AND title != ''
-            ORDER BY COALESCE(published_utc, fetched_utc) DESC
+            f"""
+            SELECT d.title AS title FROM documents d
+            WHERE d.is_duplicate = 0 AND d.title IS NOT NULL AND d.title != ''{where}
+            ORDER BY COALESCE(d.published_utc, d.fetched_utc) DESC
             LIMIT ?
             """,
-            (diet_id, limit),
+            (*ids, limit),
         )
         return [r["title"] for r in rows]
 
-    def doc_count(
-        self, diet_id: str, since: str | None = None, until: str | None = None
+    def doc_count_for_sources(
+        self, source_ids: Iterable[str], since: str | None = None, until: str | None = None
     ) -> int:
+        where, ids = _source_filter(source_ids)
         clause, params = _date_window(since, until)
         return self.conn.execute(
             "SELECT COUNT(*) AS n FROM documents d "
-            f"WHERE d.diet_id = ? AND d.is_duplicate = 0{clause}",
-            (diet_id, *params),
+            f"WHERE d.is_duplicate = 0{where}{clause}",
+            (*ids, *params),
         ).fetchone()["n"]
+
+    def orphan_source_counts(self, known: Iterable[str]) -> dict[str, int]:
+        """``{source_id: n}`` for stored documents no persona can reach.
+
+        Under baked-in weights, deleting a source from the registry left its
+        documents counted in their diet forever. Now that weight is resolved from
+        the registry, those documents become invisible to every persona instead —
+        the registry is retroactive. That is the right behaviour and a silent one,
+        so the run says it out loud, the same way it says the lexicon changed.
+        """
+        keep = set(known)
+        rows = self.conn.execute(
+            "SELECT source_id, COUNT(*) AS n FROM documents "
+            "WHERE is_duplicate = 0 GROUP BY source_id"
+        )
+        return {r["source_id"]: r["n"] for r in rows if r["source_id"] not in keep}
 
     def document_date_range(self) -> tuple[str | None, str | None]:
         """Earliest and latest document date (``YYYY-MM-DD``) over non-duplicates.
@@ -717,6 +779,8 @@ class Datastore:
     # conservative-evangelical diet"), the short one fits a chart legend.
     DIET_LABEL_PREFIX = "diet_label:"
     DIET_SHORT_LABEL_PREFIX = "diet_short_label:"
+    # Which side of the comparison a persona sits on.
+    PERSONA_FAMILY_PREFIX = "persona_family:"
     # And the outlets', for the same reason: `source_id` is `christianity_today`,
     # which is not what a masthead is called.
     SOURCE_LABEL_PREFIX = "source_label:"
@@ -733,6 +797,14 @@ class Datastore:
     def diet_short_labels(self) -> dict[str, str]:
         """``{diet_id: short_label}``, for diets that supplied a short one."""
         return self._labels(self.DIET_SHORT_LABEL_PREFIX)
+
+    def set_persona_family(self, persona_id: str, family: str) -> None:
+        self.set_meta(f"{self.PERSONA_FAMILY_PREFIX}{persona_id}", family)
+
+    def persona_families(self) -> dict[str, str]:
+        """``{persona_id: family}``. What lets a surface colour by side rather
+        than by position in a list — the bug ``digest/render.py`` documents."""
+        return self._labels(self.PERSONA_FAMILY_PREFIX)
 
     def set_source_label(self, source_id: str, name: str) -> None:
         self.set_meta(f"{self.SOURCE_LABEL_PREFIX}{source_id}", name)
@@ -763,14 +835,18 @@ class Datastore:
     def iter_embeddings(
         self, embedder: str | None = None
     ) -> Iterator[tuple[str, str, str | None, list[int], list[float]]]:
-        """Yield (document_id, diet_id, title, _, vector) for non-duplicate docs.
+        """Yield (document_id, source_id, title, _, vector) for non-duplicate docs.
+
+        Keyed by source rather than diet: a document belongs to every persona that
+        reads its source, so clustering resolves membership per persona afterwards
+        instead of being handed one diet per document.
 
         When ``embedder`` is given, only rows produced by that embedder are
         yielded — embeddings from different embedders live in incompatible vector
         spaces (and often different dimensions), so clustering must not mix them.
         """
         sql = """
-            SELECT e.document_id AS id, d.diet_id AS diet_id, d.title AS title,
+            SELECT e.document_id AS id, d.source_id AS source_id, d.title AS title,
                    e.vector AS vector
             FROM embeddings e JOIN documents d ON d.id = e.document_id
             WHERE d.is_duplicate = 0
@@ -780,7 +856,7 @@ class Datastore:
             sql += " AND e.embedder = ?"
             params = (embedder,)
         for r in self.conn.execute(sql, params):
-            yield r["id"], r["diet_id"], r["title"], [], json.loads(r["vector"])
+            yield r["id"], r["source_id"], r["title"], [], json.loads(r["vector"])
 
     def embedder_names(self) -> list[str]:
         """Distinct embedder names present in the embeddings table."""
@@ -829,7 +905,7 @@ class Datastore:
         return list(self.conn.execute("SELECT * FROM clusters ORDER BY size DESC"))
 
     def cluster_members(self, cluster_id: int) -> list[sqlite3.Row]:
-        """Members of a cluster with diet, title, outlet, and link.
+        """Members of a cluster with source, title, outlet, and link.
 
         The link is the point: a story is only checkable if the reader can go
         read it, and ``CLAUDE.md`` §0 permits exactly that — summarize and
@@ -838,7 +914,7 @@ class Datastore:
         return list(
             self.conn.execute(
                 """
-                SELECT d.id AS id, d.diet_id AS diet_id, d.title AS title,
+                SELECT d.id AS id, d.title AS title,
                        d.url AS url, d.source_id AS source_id
                 FROM document_clusters dc JOIN documents d ON d.id = dc.document_id
                 WHERE dc.cluster_id = ?
@@ -848,27 +924,41 @@ class Datastore:
             )
         )
 
-    def cluster_diet_counts(self) -> list[sqlite3.Row]:
-        """``(cluster_id, diet_id, n)`` for the whole clustering, in one query.
+    def cluster_source_counts(self) -> list[sqlite3.Row]:
+        """``(cluster_id, source_id, n)`` for the whole clustering, in one query.
 
         What the agenda metrics run on. Asking per cluster instead would be one
         query per story on a corpus that has hundreds of them.
+
+        Grouped by source, not by diet, because with a shared catalog a document
+        belongs to every persona that reads its source — which ``GROUP BY
+        diet_id`` cannot express. Callers cross these counts with each persona's
+        membership set.
         """
         return list(
             self.conn.execute(
                 """
-                SELECT dc.cluster_id AS cluster_id, d.diet_id AS diet_id,
+                SELECT dc.cluster_id AS cluster_id, d.source_id AS source_id,
                        COUNT(*) AS n
                 FROM document_clusters dc JOIN documents d ON d.id = dc.document_id
                 WHERE dc.cluster_id != -1
-                GROUP BY dc.cluster_id, d.diet_id
+                GROUP BY dc.cluster_id, d.source_id
                 """
             )
         )
 
-    def diet_ids(self) -> list[str]:
-        rows = self.conn.execute("SELECT DISTINCT diet_id FROM documents ORDER BY diet_id")
-        return [r["diet_id"] for r in rows]
+    def source_ids_present(self) -> list[str]:
+        """Sources that actually yielded documents.
+
+        Not the authority on which personas exist — the registry is. A persona
+        whose feeds were all unreachable today still exists, and inferring the
+        persona list from the corpus would drop it and silently reshape every
+        comparison.
+        """
+        rows = self.conn.execute(
+            "SELECT DISTINCT source_id FROM documents ORDER BY source_id"
+        )
+        return [r["source_id"] for r in rows]
 
     def counts(self) -> dict[str, int]:
         total = self.conn.execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"]

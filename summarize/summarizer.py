@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 
 from compare.divergence import jensen_shannon_divergence, log_ratios
 from ingestion.datastore import Datastore
-from ingestion.pipeline import diet_profiles
+from ingestion.pipeline import persona_profiles
 from scoring.claude_client import NO_TEXT, UNKNOWN, build_client, call_failed
 
 from .prompts import (
@@ -46,7 +46,11 @@ class SummaryResult:
 
 
 def gather(
-    store: Datastore, max_headlines: int = 50
+    store: Datastore,
+    registry,
+    pair,
+    max_headlines: int = 50,
+    personas: list[str] | None = None,
 ) -> tuple[list[DietContext], ComparisonContext | None]:
     """Pull per-diet contexts and a pairwise comparison from the datastore.
 
@@ -54,27 +58,41 @@ def gather(
     diet"), recorded at ingestion. Passing the machine id as the label is what
     put "modeled_ce" and "the self diet" in prose written for a person to read.
     """
-    profiles = diet_profiles(store)
+    profiles = persona_profiles(store, registry)
     labels = store.diet_labels()
     short_labels = store.diet_short_labels()
+    # The reference pair by default, not every persona. One call carries every
+    # context in its prompt and every section in its reply, and MAX_TOKENS caps
+    # thinking and prose together — so persona count buys prompt size and a
+    # higher chance of the empty-prose failure this file already guards against,
+    # not extra calls. Widen it deliberately with `summarize.personas: all`.
+    # `None` -> the pair; an explicit empty list -> every persona (that is what
+    # `summarize.personas: all` resolves to); otherwise exactly what was asked for.
+    if personas is None:
+        wanted = list(pair.ids)
+    elif not personas:
+        wanted = registry.persona_ids()
+    else:
+        wanted = personas
     contexts: list[DietContext] = []
-    for diet_id in store.diet_ids():
-        if diet_id not in profiles:
+    for persona_id in wanted:
+        if persona_id not in profiles:
             continue
+        weights = registry.weights_for(persona_id)
         contexts.append(
             DietContext(
-                diet_id=diet_id,
-                label=labels.get(diet_id) or diet_id,
-                short_label=short_labels.get(diet_id, ""),
-                doc_count=store.doc_count(diet_id),
-                profile=profiles[diet_id],
-                headlines=store.headlines_for_diet(diet_id, max_headlines),
+                diet_id=persona_id,
+                label=labels.get(persona_id) or persona_id,
+                short_label=short_labels.get(persona_id, ""),
+                doc_count=store.doc_count_for_sources(weights),
+                profile=profiles[persona_id],
+                headlines=store.headlines_for_sources(weights, max_headlines),
             )
         )
     comparison = None
-    scored = [c.diet_id for c in contexts]
-    if len(scored) >= 2:
-        a, b = sorted(scored)[:2]
+    scored = {c.diet_id for c in contexts}
+    if pair.mine in scored and pair.theirs in scored:
+        a, b = pair.mine, pair.theirs
         comparison = ComparisonContext(
             diet_a=a,
             diet_b=b,
@@ -119,8 +137,10 @@ class Summarizer:
         self.effort = effort
         self._client = client  # inject for testing; else built lazily from env
 
-    def summarize(self, store: Datastore) -> SummaryResult:
-        contexts, comparison = gather(store)
+    def summarize(
+        self, store: Datastore, registry, pair, personas: list[str] | None = None
+    ) -> SummaryResult:
+        contexts, comparison = gather(store, registry, pair, personas=personas)
         lexicon = store.get_meta("lexicon")
         if not contexts:
             return SummaryResult({}, "", self.model, "deterministic", _now_iso())
@@ -306,6 +326,22 @@ def _match_heading(head: str, table: list[tuple[frozenset[str], str]]) -> str | 
     return None if tied else best
 
 
+_BRACKETED = re.compile(r"\[([a-z0-9_]+)\]\s*$")
+
+
+def _bracketed_id(head: str, known: set[str]) -> str | None:
+    """The ``[persona_id]`` the prompt asks for, when it is there and is real.
+
+    An id the model invented is ignored rather than trusted, so a hallucinated
+    bracket degrades to the token matcher instead of creating a phantom section.
+    """
+    m = _BRACKETED.search(head)
+    if m is None:
+        return None
+    candidate = m.group(1)
+    return candidate if candidate in known else None
+
+
 def _heading_table(contexts) -> list[tuple[frozenset[str], str]]:
     """Every name a diet answers to: its label, its short label, its id."""
     table: list[tuple[frozenset[str], str]] = []
@@ -318,8 +354,17 @@ def _heading_table(contexts) -> list[tuple[frozenset[str], str]]:
 
 
 def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
-    """Split Claude's ``## <label>`` / ``## Executive`` sections back apart."""
+    """Split Claude's ``## <label> [<id>]`` / ``## Executive`` sections back apart.
+
+    The bracketed id is tried first and the token matcher is the fallback. Token
+    overlap alone was a lucky parser rather than a robust one: it works for two
+    diets whose labels share no vocabulary, and mis-assigns as soon as a library
+    of personas has labels like "Movement-media reader" and "Party-mainstream
+    reader" in it. The failure is silent — a persona's panel simply stops
+    appearing — which is why the prompt now asks for the id and this reads it.
+    """
     table = _heading_table(contexts)
+    known = {ctx.diet_id for ctx in contexts}
     sections: dict[str, str] = {}
     current: str | None = None
     buf: list[str] = []
@@ -334,8 +379,10 @@ def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
             flush()
             buf = []
             head = m.group(1).strip().lower()
-            current = ("executive" if head.startswith("exec")
-                       else _match_heading(head, table) or head)
+            current = (
+                "executive" if head.startswith("exec")
+                else _bracketed_id(head, known) or _match_heading(head, table) or head
+            )
         else:
             buf.append(line)
     flush()

@@ -22,6 +22,9 @@ from cluster.themes import (
 from cluster.titles import clean_title, clean_titles, is_boilerplate
 from ingestion.datastore import Datastore
 
+# The reference pair, each persona reading its own source.
+MEMBERS = {"self": {"src_self"}, "modeled_ce": {"src_modeled_ce"}}
+
 # -- titles -----------------------------------------------------------------
 
 
@@ -454,7 +457,7 @@ def test_settings_effort_reaches_the_call(monkeypatch):
     import cluster.blindspot as bs
 
     seen: dict = {}
-    monkeypatch.setattr(bs, "articles_from_store", lambda store, spots: {})
+    monkeypatch.setattr(bs, "articles_from_store", lambda store, spots, members: {})
     monkeypatch.setattr(bs, "assign_themes",
                         lambda entries, client=None, **kw: seen.update(kw) or {})
     monkeypatch.setattr(bs, "group_blindspots", lambda *a, **k: [])
@@ -462,18 +465,18 @@ def test_settings_effort_reaches_the_call(monkeypatch):
     class _Store:
         def replace_blindspot_themes(self, rows): pass
 
-    bs._theme_blindspots(_Store(), [object()], None, None, True, "medium")
+    bs._theme_blindspots(_Store(), [object()], MEMBERS, None, None, True, "medium")
     assert seen["effort"] == "medium"
 
     # Not configured at all: `assign_themes` applies its own default.
     seen.clear()
-    bs._theme_blindspots(_Store(), [object()], None, None, True)
+    bs._theme_blindspots(_Store(), [object()], MEMBERS, None, None, True)
     assert "effort" not in seen
 
     # Configured as null: that is an instruction, and it has to survive. This is
     # the distinction a `None` default cannot carry, which is why UNSET exists.
     seen.clear()
-    bs._theme_blindspots(_Store(), [object()], None, None, True, None)
+    bs._theme_blindspots(_Store(), [object()], MEMBERS, None, None, True, None)
     assert seen["effort"] is None
 
 
@@ -530,7 +533,7 @@ def _seed(store):
     ]
     for i, (diet, title, text) in enumerate(rows):
         store.upsert_document(
-            doc_id=f"d{i}", diet_id=diet, source_id="s", stratum_id=None, url=None,
+            doc_id=f"d{i}", source_id=f"src_{diet}", stratum_id=None, url=None,
             title=title, published_utc=None, fetched_utc="2026-07-31T00:00:00+00:00",
             word_count=40, minhash=None)
         store.upsert_embedding(document_id=f"d{i}", vector=emb.embed(text),
@@ -543,11 +546,11 @@ def test_a_cluster_run_persists_themes_for_the_surfaces_to_read(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     store = Datastore(":memory:")
     _seed(store)
-    outcome = run_clustering(store, min_cluster_size=3, dominance=0.8,
+    outcome = run_clustering(store, MEMBERS, min_cluster_size=3, dominance=0.8,
                              min_blindspot_size=3)
     assert outcome.themes
     assert {t.title for t in outcome.themes} == {
-        t.title for t in themes_from_store(store)}
+        t.title for t in themes_from_store(store, MEMBERS)}
     assert {row["theme_key"] for row in store.blindspot_theme_rows()}
     store.close()
 
@@ -557,7 +560,7 @@ def test_a_reclustering_does_not_inherit_yesterdays_names(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     store = Datastore(":memory:")
     _seed(store)
-    run_clustering(store, min_cluster_size=3, dominance=0.8, min_blindspot_size=3)
+    run_clustering(store, MEMBERS, min_cluster_size=3, dominance=0.8, min_blindspot_size=3)
     store.replace_clustering([(0, "label", 3)], [("d0", 0)])
     assert store.blindspot_theme_rows() == []
     store.close()
@@ -569,9 +572,9 @@ def test_a_store_with_no_persisted_themes_still_reads_by_theme(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     store = Datastore(":memory:")
     _seed(store)
-    run_clustering(store, min_cluster_size=3, dominance=0.8, min_blindspot_size=3)
+    run_clustering(store, MEMBERS, min_cluster_size=3, dominance=0.8, min_blindspot_size=3)
     store.replace_blindspot_themes([])
-    themes = themes_from_store(store)
+    themes = themes_from_store(store, MEMBERS)
     assert themes and all(isinstance(t, Theme) for t in themes)
     assert all(t.method == "taxonomy" for t in themes)
     store.close()
@@ -580,11 +583,11 @@ def test_a_store_with_no_persisted_themes_still_reads_by_theme(monkeypatch):
 def test_persisted_names_are_the_ones_that_get_read():
     store = Datastore(":memory:")
     _seed(store)
-    run_clustering(store, min_cluster_size=3, claude_themes=False)
+    run_clustering(store, MEMBERS, min_cluster_size=3, claude_themes=False)
     rows = store.blindspot_theme_rows()
     store.replace_blindspot_themes(
         [(r["document_id"], "renamed", "A Name From The Run", "claude") for r in rows])
-    assert {t.title for t in themes_from_store(store)} == {"A Name From The Run"}
+    assert {t.title for t in themes_from_store(store, MEMBERS)} == {"A Name From The Run"}
     store.close()
 
 

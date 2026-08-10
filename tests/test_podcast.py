@@ -198,13 +198,21 @@ class _FakeTranscriber:
 
 
 def _registry(url, ingest_type="podcast_rss"):
-    from ingestion.config import Diet, Registry, Source
+    from ingestion.config import Persona, Registry, Source, Stratum
 
-    return Registry(version=1, diets=[Diet(id="modeled_ce", label="Modeled", sources=[
-        Source(id="show", name="A Show", medium="podcast", role="talk",
-               ingest_type=ingest_type, url=url, weight=1.0, diet_id="modeled_ce",
-               stratum_id="talk_radio", diet_weight=1.0),
-    ])])
+    return Registry(
+        version=3,
+        strata=[Stratum(id="talk_radio")],
+        sources=[
+            Source(id="show", name="A Show", medium="podcast", role="talk",
+                   ingest_type=ingest_type, url=url, stratum_id="talk_radio"),
+        ],
+        personas=[
+            Persona(id="modeled_ce", label="Modeled", family="right",
+                    stratum_weights={"talk_radio": 1.0},
+                    source_weights={"show": 1.0}),
+        ],
+    )
 
 
 def _run(store, feed_server, transcriber, **kwargs):

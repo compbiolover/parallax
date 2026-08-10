@@ -15,13 +15,20 @@ from summarize.summarizer import (
     gather,
 )
 
+from .registries import pair, registry
+
+
+def _reg():
+    """Both personas, each reading its own source."""
+    return registry(self={"src_self": 1.0}, modeled_ce={"src_modeled_ce": 1.0})
+
 
 def _seed_store():
     store = Datastore(":memory:")
     for i, diet in enumerate(["self", "modeled_ce"]):
         doc_id = f"{diet}-{i}"
         store.upsert_document(
-            doc_id=doc_id, diet_id=diet, source_id="s", stratum_id=None,
+            doc_id=doc_id, source_id=f"src_{diet}", stratum_id=None,
             url="http://x", title=f"{diet} headline", published_utc=None,
             fetched_utc="2026-07-23T00:00:00+00:00", word_count=100, minhash=None,
         )
@@ -71,7 +78,7 @@ def test_unparseable_response_falls_back_to_whole_text():
 def test_deterministic_fallback_without_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     store = _seed_store()
-    result = Summarizer().summarize(store)
+    result = Summarizer().summarize(store, _reg(), pair())
     assert result.method == "deterministic"
     assert set(result.per_diet) == {"self", "modeled_ce"}
     assert "Jensen-Shannon" in result.executive
@@ -92,7 +99,7 @@ def test_fallback_note_names_the_actual_cause(monkeypatch):
             def create(**kwargs):
                 raise TimeoutError("upstream took too long")
 
-    result = Summarizer(client=_Boom()).summarize(store)
+    result = Summarizer(client=_Boom()).summarize(store, _reg(), pair())
     assert result.method == "deterministic"
     for text in [result.executive, *result.per_diet.values()]:
         assert "the Claude call failed (TimeoutError)" in text
@@ -103,7 +110,7 @@ def test_fallback_note_names_the_actual_cause(monkeypatch):
 def test_fallback_note_names_an_empty_response(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     store = _seed_store()
-    result = Summarizer(client=_FakeClient(blocks=[])).summarize(store)
+    result = Summarizer(client=_FakeClient(blocks=[])).summarize(store, _reg(), pair())
     assert result.method == "deterministic"
     assert "Claude returned no summary text" in result.executive
     store.close()
@@ -119,7 +126,7 @@ def test_a_falsy_injected_client_is_still_the_client(monkeypatch):
     client.__class__.__bool__ = lambda self: False
     try:
         store = _seed_store()
-        result = Summarizer(client=client).summarize(store)
+        result = Summarizer(client=client).summarize(store, _reg(), pair())
         assert result.method == "claude"
         assert client.messages.calls, "the injected client was never called"
         store.close()
@@ -136,7 +143,7 @@ def test_missing_package_is_not_reported_as_a_missing_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.setattr(mod, "build_client", lambda: (None, NO_PACKAGE))
     store = _seed_store()
-    result = Summarizer().summarize(store)
+    result = Summarizer().summarize(store, _reg(), pair())
     assert "the `anthropic` package is not installed" in result.executive
     assert "no ANTHROPIC_API_KEY set" not in result.executive
     store.close()
@@ -196,22 +203,28 @@ def test_the_summarizer_is_given_the_diets_human_labels():
     as the label is what put "modeled_ce" in prose meant for a person."""
     store = _seed_store()
     _seed_labels(store)
-    contexts, _ = gather(store)
+    contexts, _ = gather(store, _reg(), pair())
     assert {c.label for c in contexts} == {
         "My diet", "Modeled conservative-evangelical diet"}
     store.close()
 
 
-def test_the_prompt_carries_labels_and_forbids_the_ids():
+def test_the_prompt_carries_labels_and_forbids_the_ids_in_the_prose():
+    """The id now appears in the prompt on purpose, bracketed, because heading
+    matching by token overlap mis-assigns between similar persona labels. That
+    raises the chance of an id leaking into the prose, so the rule against it is
+    explicit rather than implied by absence — and the comparison line, the
+    sentence most likely to be paraphrased directly, still carries labels only."""
     ctx = [DietContext("self", "My diet", 3, {"care": 1.0}, ["a headline"]),
            DietContext("modeled_ce", "Modeled conservative-evangelical diet", 2,
                        {"loyalty": 1.0}, ["b headline"])]
     cmp = ComparisonContext("self", "modeled_ce", 0.12, {"care": 0.4})
     prompt = build_user_prompt(ctx, cmp)
     assert "Modeled conservative-evangelical diet" in prompt
-    # the ids are database keys; nothing in the data block should invite them
-    assert "modeled_ce" not in prompt
-    assert "machine ids" in SYSTEM_PROMPT
+    # Only ever bracketed, as the matching token — never loose in a sentence.
+    assert "[modeled_ce]" in prompt
+    assert prompt.count("modeled_ce") == prompt.count("[modeled_ce]")
+    assert "must never appear in the prose" in SYSTEM_PROMPT
 
 
 def test_the_style_rules_are_in_the_system_prompt():
@@ -267,7 +280,7 @@ def test_the_numbers_only_fallback_names_the_diets_too():
     """Same reader, same morning. The fallback has no excuse the model doesn't."""
     store = _seed_store()
     _seed_labels(store)
-    result = Summarizer().summarize(store)
+    result = Summarizer().summarize(store, _reg(), pair())
     assert "Modeled conservative-evangelical diet" in result.executive
     assert not re.search(r"\bmodeled_ce\b", result.executive)
     store.close()
@@ -294,20 +307,22 @@ def test_the_labels_command_records_them_without_re_ingesting():
     `christianity_today` is a key rather than a masthead."""
     from types import SimpleNamespace
 
-    from ingestion.pipeline import _store_diet_labels
+    from ingestion.pipeline import _store_persona_labels
 
     store = Datastore(":memory:")
     sources = [SimpleNamespace(id="christianity_today", name="Christianity Today"),
                SimpleNamespace(id="unnamed", name="")]
     registry = SimpleNamespace(
-        diets=[
-            SimpleNamespace(id="self", label="My diet", short_label="My diet"),
+        personas=[
+            SimpleNamespace(id="self", label="My diet", short_label="My diet",
+                            family="left"),
             SimpleNamespace(id="modeled_ce", label="Modeled conservative-evangelical diet",
-                            short_label="The modeled diet"),
+                            short_label="The modeled diet",
+                            family="conservative_evangelical"),
         ],
         all_sources=lambda: sources,
     )
-    _store_diet_labels(store, registry)
+    _store_persona_labels(store, registry)
     assert store.diet_labels()["modeled_ce"] == "Modeled conservative-evangelical diet"
     assert store.diet_short_labels()["modeled_ce"] == "The modeled diet"
     assert store.source_labels() == {"christianity_today": "Christianity Today"}
@@ -316,7 +331,7 @@ def test_the_labels_command_records_them_without_re_ingesting():
 
 def test_injected_client_path_and_persist():
     store = _seed_store()
-    result = Summarizer(client=_FakeClient()).summarize(store)
+    result = Summarizer(client=_FakeClient()).summarize(store, _reg(), pair())
     assert result.method == "claude"
     assert result.per_diet["self"] == "S."
     assert result.executive == "E."
@@ -336,7 +351,7 @@ def test_a_response_with_no_text_falls_back_instead_of_writing_nothing():
     it and nothing said why."""
     store = _seed_store()
     client = _FakeClient(blocks=[_ThinkingBlock()], stop_reason="max_tokens")
-    result = Summarizer(client=client).summarize(store)
+    result = Summarizer(client=client).summarize(store, _reg(), pair())
     assert result.method == "deterministic"
     assert result.executive.strip()
     assert all(t.strip() for t in result.per_diet.values())
@@ -348,7 +363,7 @@ def test_a_refusal_is_read_before_the_content():
     content, so `stop_reason` has to be checked first."""
     store = _seed_store()
     client = _FakeClient(blocks=[], stop_reason="refusal")
-    result = Summarizer(client=client).summarize(store)
+    result = Summarizer(client=client).summarize(store, _reg(), pair())
     assert result.method == "deterministic"
     assert result.executive.strip()
     store.close()
@@ -360,7 +375,7 @@ def test_the_token_budget_leaves_room_for_thinking_and_prose():
 
     store = _seed_store()
     client = _FakeClient()
-    Summarizer(client=client).summarize(store)
+    Summarizer(client=client).summarize(store, _reg(), pair())
     call = client.messages.calls[0]
     assert call["max_tokens"] == MAX_TOKENS >= 16000
     assert call["output_config"] == {"effort": DEFAULT_EFFORT}
@@ -375,7 +390,7 @@ def test_a_reply_with_no_prose_is_asked_again_before_giving_up():
     store = _seed_store()
     client = _FakeClient(queue=[[_ThinkingBlock()], None])   # then the usual reply
 
-    result = Summarizer(client=client).summarize(store)
+    result = Summarizer(client=client).summarize(store, _reg(), pair())
 
     assert len(client.messages.calls) == 2
     assert result.method == "claude"
@@ -386,7 +401,7 @@ def test_a_second_empty_reply_falls_back_rather_than_asking_forever():
     store = _seed_store()
     client = _FakeClient(queue=[[_ThinkingBlock()], [_ThinkingBlock()]])
 
-    result = Summarizer(client=client).summarize(store)
+    result = Summarizer(client=client).summarize(store, _reg(), pair())
 
     assert len(client.messages.calls) == 2
     assert result.method == "deterministic"
@@ -396,7 +411,7 @@ def test_a_second_empty_reply_falls_back_rather_than_asking_forever():
 def test_the_effort_level_is_configurable():
     store = _seed_store()
     client = _FakeClient()
-    Summarizer(client=client, effort="high").summarize(store)
+    Summarizer(client=client, effort="high").summarize(store, _reg(), pair())
     assert client.messages.calls[0]["output_config"] == {"effort": "high"}
     store.close()
 
@@ -418,7 +433,7 @@ def test_only_prose_blocks_reach_the_summary():
     store = _seed_store()
     client = _FakeClient(blocks=[_TypedBlock("NOT PROSE"),
                                  _FakeBlock("## Executive\nE.")])
-    result = Summarizer(client=client).summarize(store)
+    result = Summarizer(client=client).summarize(store, _reg(), pair())
     assert result.executive == "E."
     assert "NOT PROSE" not in result.executive
     store.close()
@@ -432,7 +447,7 @@ def test_a_missing_diet_section_is_reported_not_silently_blank(caplog):
     _seed_labels(store)
     client = _FakeClient(blocks=[_FakeBlock("## My diet\nMine.\n## Executive\nE.")])
     with caplog.at_level("WARNING"):
-        result = Summarizer(client=client).summarize(store)
+        result = Summarizer(client=client).summarize(store, _reg(), pair())
     assert result.per_diet["self"] == "Mine."
     assert result.per_diet["modeled_ce"] == ""
     assert "modeled_ce" in caplog.text
@@ -446,7 +461,10 @@ def test_a_partial_result_is_persisted_and_the_report_names_the_shortfall(monkey
     from summarize.summarizer import Summarizer, SummaryResult
 
     partial = SummaryResult({"self": "Mine.", "modeled_ce": ""}, "E.", "m", "claude", "t")
-    monkeypatch.setattr(Summarizer, "summarize", lambda self, store: partial)
+    monkeypatch.setattr(
+        Summarizer, "summarize",
+        lambda self, store, registry, pair, personas=None: partial,
+    )
 
     store = _seed_store()
     detail = _step_summarize_detail(store)
@@ -460,7 +478,10 @@ def test_an_executive_only_result_says_so(monkeypatch):
     from summarize.summarizer import Summarizer, SummaryResult
 
     only_diets = SummaryResult({"self": "Mine."}, "", "m", "claude", "t")
-    monkeypatch.setattr(Summarizer, "summarize", lambda self, store: only_diets)
+    monkeypatch.setattr(
+        Summarizer, "summarize",
+        lambda self, store, registry, pair, personas=None: only_diets,
+    )
 
     store = _seed_store()
     assert "no executive" in _step_summarize_detail(store)
@@ -473,7 +494,7 @@ def test_a_truncated_but_usable_summary_is_kept():
     store = _seed_store()
     client = _FakeClient(blocks=[_FakeBlock("## Executive\nHalf a sen")],
                          stop_reason="max_tokens")
-    result = Summarizer(client=client).summarize(store)
+    result = Summarizer(client=client).summarize(store, _reg(), pair())
     assert result.method == "claude"
     assert result.executive == "Half a sen"
     store.close()
@@ -487,10 +508,13 @@ def test_the_daily_step_does_not_report_success_on_empty_summaries(monkeypatch):
     from summarize.summarizer import Summarizer, SummaryResult
 
     empty = SummaryResult({"self": "", "modeled_ce": ""}, "", "m", "claude", "t")
-    monkeypatch.setattr(Summarizer, "summarize", lambda self, store: empty)
+    monkeypatch.setattr(
+        Summarizer, "summarize",
+        lambda self, store, registry, pair, personas=None: empty,
+    )
 
     store = _seed_store()
-    detail = _step_summarize(store, DailyConfig())
+    detail = _step_summarize(store, DailyConfig(), _reg(), pair())
     assert "nothing persisted" in detail
     assert "executive" not in store.all_summaries()
     store.close()
@@ -507,7 +531,7 @@ def test_the_daily_step_reports_the_diets_it_actually_wrote():
 def _step_summarize_detail(store):
     from daily.runner import DailyConfig, _step_summarize
 
-    return _step_summarize(store, DailyConfig())
+    return _step_summarize(store, DailyConfig(), _reg(), pair())
 
 
 def test_the_daily_run_reads_the_configured_effort():
@@ -516,3 +540,51 @@ def test_the_daily_run_reads_the_configured_effort():
     cfg = DailyConfig.from_settings({"summarize": {"effort": "low"}})
     assert cfg.summary_effort == "low"
     assert DailyConfig.from_settings({}).summary_effort is None
+
+
+# -- persona-aware parsing and tone -----------------------------------------
+
+
+def test_a_section_is_matched_by_its_bracketed_id_first():
+    """Token overlap was a lucky parser: it works for two labels sharing no
+    vocabulary and mis-assigns as soon as a library has "Movement-media reader"
+    and "Party-mainstream reader" in it. The failure is a panel that quietly stops
+    appearing."""
+    contexts = [
+        DietContext("left_activist", "Movement-media reader", 3, {"care": 1.0}, []),
+        DietContext("left_moderate_dem", "Party-mainstream reader", 3, {"care": 1.0}, []),
+    ]
+    text = (
+        "## Movement-media reader [left_activist]\nActivist prose.\n"
+        "## Party-mainstream reader [left_moderate_dem]\nModerate prose.\n"
+        "## Executive\nE.\n"
+    )
+    per_diet, executive = _parse_sections(text, contexts)
+    assert per_diet["left_activist"] == "Activist prose."
+    assert per_diet["left_moderate_dem"] == "Moderate prose."
+    assert executive == "E."
+
+
+def test_an_invented_bracketed_id_falls_back_rather_than_inventing_a_section():
+    contexts = [DietContext("self", "My diet", 3, {"care": 1.0}, [])]
+    per_diet, _ = _parse_sections("## My diet [not_a_persona]\nMine.\n", contexts)
+    assert per_diet["self"] == "Mine."
+
+
+def test_the_prompt_asks_for_the_id_and_supplies_it_in_the_data():
+    ctx = [DietContext("ce_devout", "Devotionally-heavy reader", 3, {"care": 1.0}, ["h"])]
+    prompt = build_user_prompt(ctx, None)
+    assert "## <label> [<id>]" in prompt
+    assert "[ce_devout]" in prompt
+
+
+def test_the_system_prompt_forbids_describing_a_persona_as_a_person():
+    """An outlet list invites description of coverage. A persona named
+    "Devotionally-heavy reader" invites description of a believer's inner life,
+    and nothing in this pipeline measures anyone's faith."""
+    lowered = SYSTEM_PROMPT.lower()
+    assert "a diet is not a person" in lowered
+    assert "never psychologize" in lowered
+    assert "do not rank" in lowered
+    for forbidden in ("beliefs", "motives", "intelligence", "sincerity"):
+        assert forbidden in lowered, forbidden

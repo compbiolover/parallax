@@ -8,7 +8,19 @@
 
 # --- Source registry -------------------------------------------------------
 sources:
+  # The public, committed model: the source catalog and the documented personas.
   registry: config/sources.yaml
+  # YOUR OWN diet, merged over the file above. Keep it out of the public registry:
+  # that one holds documented *models* of media environments, while this one
+  # describes a real person's real consumption — which CLAUDE.md §0 says Parallax
+  # does not collect and does not publish. It is gitignored, and absent by
+  # default, the same way config/settings.yaml is absent until you copy this file.
+  #
+  # Same shape as sources.yaml (`strata`, `catalog`, `personas`); entries are
+  # merged by id, so a persona or source you define with an existing id replaces
+  # the public one wholesale and a new id is appended. Then point the reference
+  # pair below at your persona.
+  local_registry: config/personas.local.yaml
 
 # --- Datastore -------------------------------------------------------------
 # MVP: SQLite on local disk. Move to Postgres + pgvector when co-locating
@@ -21,6 +33,19 @@ datastore:
 
 # --- Ingestion -------------------------------------------------------------
 ingestion:
+  # Which personas' sources to fetch: `all` (the default) or a list of persona ids.
+  #
+  # Adding a persona is free — it is a weighting over sources already in the
+  # catalog, so nothing extra is fetched, scored, embedded or tagged. Adding the
+  # *sources* a new persona needs is not free: they cost ingestion time, GDELT
+  # backfill time (one query per domain at ~1 request/5s), and liberty-tagger
+  # spend, all per document. The shipped library needs roughly four times the
+  # catalog two diets did.
+  #
+  # Narrowing this is not free either: a persona whose sources are never fetched
+  # has an empty profile and renders as a blank column. `all` is the honest
+  # default; this is here for someone who has looked at the bill.
+  personas: all
   user_agent: "parallax-research-bot/0.1 (+https://github.com/compbiolover/parallax)"
   respect_robots_txt: true
   request_timeout_seconds: 30
@@ -173,6 +198,21 @@ cluster:
 
 # --- Comparison ------------------------------------------------------------
 compare:
+  # THE PAIR every headline number is about: the JSD, the per-foundation
+  # log-ratios, the agenda divergence, the blindspots, the email, and the dated
+  # snapshot series. Other personas stay in the payload and stay selectable in
+  # the dashboard; these two are what the numbers describe.
+  #
+  # `mine` first is not cosmetic. It fixes the log-ratio sign to "positive = my
+  # diet over-indexes" (CLAUDE.md §3(5)), and it lets every surface colour by
+  # role in the comparison rather than by position in a list.
+  #
+  # CHANGING THIS BREAKS THE SERIES. Every snapshot already recorded compares
+  # `self` with `modeled_ce`; the column keeps its name across a change but stops
+  # meaning the same thing, so the run warns and the chart marks the break.
+  reference_pair:
+    mine: self
+    theirs: modeled_ce
   headline_metric: jensenshannon  # base-2, squared to divergence, bounded [0,1]
   also_report:
     - log_ratio                   # ln(P_i / Q_i); index form 100 = parity
@@ -184,6 +224,13 @@ compare:
 # --- Summarization ---------------------------------------------------------
 summarize:
   model: claude-opus-5
+  # Which personas get written prose: `pair` (the reference pair, the default),
+  # `all`, or an explicit list of ids. This is a reliability knob as much as a
+  # cost one — one call carries every persona's headlines in its prompt and every
+  # persona's section in its reply, under a max_tokens that covers thinking and
+  # prose together. Eight personas is a much better chance of the empty-prose
+  # failure the summarizer already guards against.
+  personas: pair
   # Thinking depth: low | medium | high | xhigh | max. Opus 5 thinks by default
   # and `max_tokens` caps thinking *and* the prose together, so effort is the
   # lever for cost and latency here. `low` is the default — this is a bounded
@@ -243,4 +290,8 @@ digest:
   enabled: false
   # Which diet is yours. Your own blindspots lead the email — equal styling is
   # not equal prominence on a phone, where second means scrolled past.
+  #
+  # Defaults to `compare.reference_pair.mine`; set it only to override that. The
+  # email always compares the reference pair and no more: it has no picker, and a
+  # phone-length brief that tried to cover ten personas is one nobody finishes.
   own_diet: self

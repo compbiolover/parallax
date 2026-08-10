@@ -441,13 +441,91 @@ diet spent the day on. Its limits:
 
 ## Representativeness limits
 
-- The "other" diet is a **model**, not a measurement of any individual's consumption. It
-  is versioned in `config/sources.yaml` and its conclusions should be sensitivity-tested
+- The modeled diets are **models**, not measurements of any individual's consumption. They
+  are versioned in `config/sources.yaml` and their conclusions should be sensitivity-tested
   against source weighting.
 - **Outlet bias ≠ audience consumption.** The model targets what is plausibly *consumed*,
   not merely what is *published*, but this mapping is approximate.
 - Validate against external benchmarks (Pew on evangelical media use; Media Cloud
   attention data) rather than treating the source list as self-evidently representative.
+
+## A persona claims more than an outlet list does
+
+Parallax compares **personas**: named weightings over a shared catalog of sources. Four
+per side ship in `config/sources.yaml`. This is a stronger claim than the source list it
+replaced, and the strength is easy to miss because it reads as a label rather than as an
+assertion.
+
+- **An outlet list says "these outlets published this." A persona says "someone plausibly
+  consumes these, in roughly this proportion."** The second is a behavioural claim about a
+  reader, and nothing here validates it. No audience panel, no diary study, no survey.
+- **The weights are the least-evidenced and most load-bearing part of the whole tool.** No
+  source gives the devotional-versus-cable split of a devout evangelical's week, or the
+  policy-journal share of a wonk's. Every number on the dashboard is downstream of numbers
+  that were reasoned about and written down, not measured. Sensitivity-test by moving
+  stratum weights by ±50% and asking whether the finding survives — cheap now, because
+  weights resolve at aggregation and no re-ingestion is needed.
+- **Persona count is not persona coverage.** Four a side does not cover the space of
+  American media diets. It means four points were written down.
+- **A named archetype invites over-reading.** "Devotionally-heavy reader" is a weighting of
+  feeds. It is not a person, not a demographic, and not a claim about anyone's faith,
+  intelligence or sincerity. The summarizer is instructed at the system-prompt level not to
+  write as though it were, but that is an instruction to a model and not a guarantee.
+- **`ce_devout` will show high sanctity, and that is mostly the genre.** Devotional and
+  teaching content is saturated with purity, authority and loyalty vocabulary regardless of
+  anyone's politics. It is the most confident-looking number this tool will produce and
+  among the least meaningful — the same class of error as the fairness-lexicon asymmetry
+  documented above, arrived at from the other direction.
+- **A devotional-heavy persona will also show few blindspots**, because devotionals carry
+  almost no news agenda and therefore land in few story clusters. That is a fact about
+  measurement, not about what that diet misses.
+- **Personas over a shared catalog are correlated by construction.** Two that read mostly
+  the same outlets have a small divergence for a mechanical reason. The dashboard prints a
+  source-overlap matrix beside the divergence matrix for exactly this: low divergence with
+  high overlap is an artifact, low divergence with low overlap is a finding. The shipped
+  activist and progressive personas overlap 0.83.
+- **Blindspot counting is unweighted.** A source weighted 0.05 counts the same as one at
+  1.0 for "did this reach them at all", because the question is binary. A fractional
+  "partly saw it" would not be interpretable, but the consequence is that a persona's
+  blindspot list is insensitive to how much of its attention a source actually holds.
+
+## The reference pair is a choice, and the registry is retroactive
+
+- **Every headline number is about two personas**, named in `compare.reference_pair`. The
+  JSD, the log-ratios, the agenda divergence, the blindspots, the email and the dated
+  snapshot series are all about that pair. Choosing a different pair changes all of them
+  while the column names stay the same, so the pair travels with every recorded snapshot
+  and the run warns when it changes.
+- **Per-foundation log-ratios are oriented `mine` first**, so positive means the reader's
+  own diet over-indexes, as §3(5) of `CLAUDE.md` specifies. Rows recorded before the pair
+  was named carry the opposite sign: the previous code took the first two ids in sorted
+  order, and `modeled_ce` sorts before `self`. Nothing charts historical log-ratios, so the
+  practical discontinuity is zero, but the stored values are not comparable across that
+  change.
+- **Weights now resolve at aggregation rather than being stored per document**, which makes
+  the registry retroactive: re-weighting a persona changes what the entire corpus says
+  about it, including for dates already past. Recorded snapshots are immutable and
+  unaffected; the live all-time basis is not. That is the price of being able to
+  sensitivity-test weighting at all, and it is the right trade, but a number that moved
+  because a weight was edited looks exactly like a number that moved because the news did.
+- **Documents from a source dropped from the catalog become invisible to every persona**
+  rather than staying counted as they used to. The run reports the orphaned counts rather
+  than letting the corpus quietly shrink.
+
+## Cross-diet deduplication can manufacture a blindspot
+
+This one is pre-existing and this branch makes it more likely rather than causing it.
+
+Near-duplicate detection is global: `_seed_index` seeds from every stored signature with no
+diet or persona filter, and every aggregate filters `is_duplicate = 0`. So when the same
+wire story runs in outlets on both sides, whichever is fetched first keeps it and the other
+is dropped — never embedded, never clustered. A story both sides genuinely carried can
+therefore register as one side's blindspot.
+
+With more personas over a larger catalog, near-duplicates crossing persona boundaries get
+more common. "What they see that I don't" being a dedup artifact is the most damaging
+failure mode this tool has, and it is not yet quantified against real data. Until it is,
+treat a blindspot on a wire-service story with particular suspicion.
 
 ## Guarding against confirmation bias
 

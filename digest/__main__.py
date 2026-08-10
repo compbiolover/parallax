@@ -21,8 +21,9 @@ DEFAULT_PREVIEW = "data/digest-preview.html"
 
 def main(argv: list[str] | None = None) -> int:
     from compare.history import DEFAULT_SERIES_LIMIT
+    from compare.reference import resolve
     from dashboard.export import build_payload
-    from ingestion.config import load_settings
+    from ingestion.config import load_registry, load_settings
     from ingestion.datastore import Datastore
 
     from .render import build_digest
@@ -44,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--history-limit", type=int,
                         help="snapshots in the sparkline (default from settings)")
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("--mine", help="persona id for your side of the reference pair")
+    parser.add_argument("--theirs", help="persona id for the other side")
     args = parser.parse_args(argv)
 
     # Flags documented as --dry-run only should say so rather than being
@@ -55,6 +58,11 @@ def main(argv: list[str] | None = None) -> int:
                         format="%(levelname)s %(name)s: %(message)s")
 
     settings = load_settings(args.settings)
+    registry = load_registry(settings=settings)
+    pair = resolve(
+        settings, args.mine, args.theirs,
+        available=registry.persona_ids(), families=registry.families(),
+    )
     db = args.db or (settings.get("datastore", {}) or {}).get("path", "data/parallax.sqlite")
     own = args.own_diet or (settings.get("digest", {}) or {}).get("own_diet")
     # Same default the daily run uses, so `make digest` and `make daily` don't
@@ -64,7 +72,9 @@ def main(argv: list[str] | None = None) -> int:
 
     store = Datastore(db)
     try:
-        digest = build_digest(build_payload(store, limit), own_diet=own)
+        digest = build_digest(
+            build_payload(store, registry, pair, limit), own_diet=own or pair.mine
+        )
     finally:
         store.close()
 

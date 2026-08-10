@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import sqlite3
 
-from compare.fairness import LOW_COVERAGE, all_diet_fairness, diet_fairness_profile, gap
+from compare.fairness import (
+    LOW_COVERAGE,
+    all_persona_fairness,
+    gap,
+    persona_fairness_profile,
+)
 from ingestion.datastore import Datastore
 from scoring.dictionary import DictionaryScorer
 from scoring.fairness_split import (
@@ -20,6 +25,8 @@ from scoring.foundations import (
     MFQ2_FOUNDATIONS,
 )
 from scoring.seed_lexicon import SEED_LEXICON
+
+from .registries import pair, registry
 
 EQUALITY_TEXT = (
     "The ruling entrenches unequal access to justice. Systemic discrimination has "
@@ -134,6 +141,11 @@ def test_both_framings_register_comparable_fairness():
 
 # -- persistence -----------------------------------------------------------
 
+def _reg():
+    """Both personas, each reading its own source."""
+    return registry(self={"src_self": 1.0}, modeled_ce={"src_modeled_ce": 1.0})
+
+
 def _store_with_split():
     store = Datastore(":memory:")
     scorer = DictionaryScorer(splitter=FairnessSplitter())
@@ -142,7 +154,7 @@ def _store_with_split():
             did = f"{diet}-{i}"
             score = scorer.score(text)
             store.upsert_document(
-                doc_id=did, diet_id=diet, source_id="s", stratum_id=None, url=None,
+                doc_id=did, source_id=f"src_{diet}", stratum_id=None, url=None,
                 title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
                 word_count=score.word_count, minhash=None,
             )
@@ -157,7 +169,7 @@ def _store_with_split():
 
 def test_split_round_trips_through_the_datastore():
     store = _store_with_split()
-    rows, total = store.fairness_split_for_diet("self")
+    rows, total = store.fairness_split_for_sources(["src_self"])
     assert total == 3 and len(rows) == 3
     assert all(eq >= 0 and pr >= 0 for _w, eq, pr in rows)
     store.close()
@@ -166,7 +178,7 @@ def test_split_round_trips_through_the_datastore():
 def test_unsplit_rows_are_excluded_not_zeroed():
     store = Datastore(":memory:")
     store.upsert_document(
-        doc_id="d", diet_id="self", source_id="s", stratum_id=None, url=None,
+        doc_id="d", source_id="src_self", stratum_id=None, url=None,
         title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
         word_count=50, minhash=None,
     )
@@ -174,7 +186,7 @@ def test_unsplit_rows_are_excluded_not_zeroed():
         document_id="d", scorer="dictionary", foundations={"fairness": 0.4},
         sentiment=0.0, moral_word_ratio=0.1, matched_words=5,
     )
-    rows, total = store.fairness_split_for_diet("self")
+    rows, total = store.fairness_split_for_sources(["src_self"])
     assert total == 1 and rows == []       # counted, but not treated as 0/0
     store.close()
 
@@ -204,7 +216,7 @@ def test_migration_adds_columns_to_a_pre_split_database(tmp_path):
     cols = {r["name"] for r in store.conn.execute("PRAGMA table_info(foundation_scores)")}
     assert {"equality", "proportionality"} <= cols
     store.upsert_document(
-        doc_id="d", diet_id="self", source_id="s", stratum_id=None, url=None,
+        doc_id="d", source_id="src_self", stratum_id=None, url=None,
         title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
         word_count=50, minhash=None,
     )
@@ -213,7 +225,7 @@ def test_migration_adds_columns_to_a_pre_split_database(tmp_path):
         sentiment=0.0, moral_word_ratio=0.1, matched_words=5,
         equality=0.3, proportionality=0.1,
     )
-    rows, _ = store.fairness_split_for_diet("self")
+    rows, _ = store.fairness_split_for_sources(["src_self"])
     assert len(rows) == 1
     store.close()
 
@@ -231,7 +243,7 @@ def test_migration_is_idempotent(tmp_path):
 
 def test_diets_lean_opposite_ways():
     store = _store_with_split()
-    profiles = all_diet_fairness(store)
+    profiles = all_persona_fairness(store, _reg())
     assert profiles["self"].leans == "equality"
     assert profiles["modeled_ce"].leans == "proportionality"
     store.close()
@@ -239,7 +251,7 @@ def test_diets_lean_opposite_ways():
 
 def test_profile_reports_coverage():
     store = _store_with_split()
-    profile = diet_fairness_profile(store, "self")
+    profile = persona_fairness_profile(store, {"src_self": 1.0})
     assert profile.docs_split == 3 and profile.docs_total == 3
     assert profile.coverage == 1.0
     assert not profile.thin
@@ -252,7 +264,7 @@ def test_thin_coverage_is_flagged():
     for i in range(60):
         did = f"self-pad-{i}"
         store.upsert_document(
-            doc_id=did, diet_id="self", source_id="s", stratum_id=None, url=None,
+            doc_id=did, source_id="src_self", stratum_id=None, url=None,
             title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
             word_count=50, minhash=None,
         )
@@ -260,25 +272,28 @@ def test_thin_coverage_is_flagged():
             document_id=did, scorer="dictionary", foundations={"fairness": 0.1},
             sentiment=0.0, moral_word_ratio=0.1, matched_words=2,
         )
-    profile = diet_fairness_profile(store, "self")
+    profile = persona_fairness_profile(store, {"src_self": 1.0})
     assert profile.coverage < LOW_COVERAGE
     assert profile.thin
     store.close()
 
 
-def test_gap_is_none_with_one_diet():
+def test_gap_is_none_when_the_pair_is_not_both_profiled():
     store = Datastore(":memory:")
-    assert gap({}) is None
+    assert gap({}, pair()) is None
     store.close()
 
 
-def test_gap_points_the_right_way():
+def test_gap_is_oriented_mine_first_not_alphabetically():
+    """The gap used to take the first two ids in sorted order, so its sign was an
+    accident of spelling: `modeled_ce` sorts before `self`, which inverted it
+    relative to CLAUDE.md §3(5)."""
     store = _store_with_split()
-    profiles = all_diet_fairness(store)
-    g = gap(profiles)
-    assert g["pair"] == ["modeled_ce", "self"]
-    # modeled_ce leans proportionality, so its equality share is the lower one.
-    assert g["equality_gap"] < 0
+    profiles = all_persona_fairness(store, _reg())
+    g = gap(profiles, pair())
+    assert g["pair"] == ["self", "modeled_ce"]
+    # `self` leans equality, so mine-first makes the equality gap positive.
+    assert g["equality_gap"] > 0
     store.close()
 
 

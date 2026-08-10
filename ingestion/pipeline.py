@@ -77,6 +77,12 @@ class PipelineConfig:
     liberty_model: str | None = None      # None -> scoring.liberty.DEFAULT_MODEL
     liberty_effort: str | None = None     # None -> DEFAULT_EFFORT ('low')
     liberty_batch: bool = True            # Batch API: half price, overnight-friendly
+    # Which personas' sources to actually fetch. None = the whole catalog, which
+    # is the default: a persona whose sources are never fetched has an empty
+    # profile and renders as a blank column. Narrow it only after looking at the
+    # bill — ingestion, scoring, embedding and liberty tagging are per document,
+    # so they scale with the catalog rather than with the number of personas.
+    ingest_personas: list[str] | None = None
 
     @classmethod
     def from_settings(cls, settings: dict) -> PipelineConfig:
@@ -105,7 +111,17 @@ class PipelineConfig:
             liberty_model=lib_cfg.get("model"),
             liberty_effort=lib_cfg.get("effort"),
             liberty_batch=bool(lib_cfg.get("batch", True)),
+            ingest_personas=_ingest_personas(ing),
         )
+
+
+def _ingest_personas(ingestion_cfg: dict) -> list[str] | None:
+    """``ingestion.personas``: omitted or ``all`` for the whole catalog, otherwise
+    a list of persona ids whose sources are the only ones fetched."""
+    value = ingestion_cfg.get("personas", "all")
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return None
 
 
 @dataclass
@@ -117,7 +133,7 @@ class RunStats:
     skipped_short: int = 0
     errors: int = 0
     liberty_scored: int = 0
-    per_diet: dict[str, int] = field(default_factory=dict)
+    per_source: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -210,7 +226,7 @@ def run(
     _check_lexicon_change(store, lexicon_name)
     store.set_meta("lexicon", lexicon_name)
     store.set_meta("embedder", getattr(embedder, "name", type(embedder).__name__))
-    _store_diet_labels(store, registry)
+    _store_persona_labels(store, registry)
     _store_transformer_meta(store, transformer)
     robots = RobotsCache(cfg.user_agent, cfg.timeout) if cfg.respect_robots else None
     limiter = RateLimiter(cfg.per_host_rpm)
@@ -222,7 +238,11 @@ def run(
     liberty = liberty_tagger if liberty_tagger is not None else _build_liberty(cfg)
     liberty_texts: dict[str, str] | None = {} if liberty is not None else None
 
-    sources = list(registry.ingestable(("rss",)))
+    # Only ask the registry to resolve a scope when one is configured. The ingest
+    # loop is deliberately undemanding about what a registry is — the test doubles
+    # supply sources and nothing else — and an unconfigured run needs no scope.
+    scope = registry.scope(cfg.ingest_personas) if cfg.ingest_personas else None
+    sources = list(registry.ingestable(("rss",), scope))
     for position, source in enumerate(sources, start=1):
         before = (stats.stored, stats.fetched, stats.errors)
         started = time.monotonic()
@@ -329,7 +349,7 @@ def backfill(
     _check_lexicon_change(store, lexicon_name)
     store.set_meta("lexicon", lexicon_name)
     store.set_meta("embedder", getattr(embedder, "name", type(embedder).__name__))
-    _store_diet_labels(store, registry)
+    _store_persona_labels(store, registry)
     robots = (
         RobotsCache(cfg.user_agent, cfg.timeout)
         if (extract_bodies and cfg.respect_robots) else None
@@ -337,11 +357,16 @@ def backfill(
     limiter = RateLimiter(cfg.per_host_rpm)
     index = _seed_index(store, cfg.near_dup_threshold)
     stats = RunStats()
-    # One GDELT query per unique (diet, domain) — several sources share a domain.
-    seen_domains: set[tuple[str, str]] = set()
+    # One GDELT query per unique domain — several sources share one. Keyed on
+    # domain alone now that the catalog is flat: while sources were diet-private
+    # this was keyed on (diet, domain), which would have fetched a shared domain
+    # once per diet. No shipped domain was in both diets, so nothing changes
+    # numerically; it is simply the right key for a catalog personas share.
+    seen_domains: set[str] = set()
 
-    for source in registry.backfillable():
-        key = (source.diet_id, source.domain or "")
+    scope = registry.scope(cfg.ingest_personas) if cfg.ingest_personas else None
+    for source in registry.backfillable(scope):
+        key = source.domain or ""
         if key in seen_domains:
             continue
         seen_domains.add(key)
@@ -450,8 +475,8 @@ def _check_lexicon_change(store: Datastore, lexicon_name: str) -> None:
         )
 
 
-def _store_diet_labels(store: Datastore, registry) -> None:
-    """Record each diet's human label from the registry.
+def _store_persona_labels(store: Datastore, registry) -> None:
+    """Record each persona's human label and family from the registry.
 
     Everything downstream had only the machine id to work with, so the
     generated summaries called the diets "modeled_ce" and "self" in prose meant
@@ -461,10 +486,14 @@ def _store_diet_labels(store: Datastore, registry) -> None:
     # `getattr` because the registry here is duck-typed: the ingest loop only
     # ever asks it for sources, and the test doubles supply exactly that. A
     # provenance record is not the place to start demanding a fuller object.
-    for diet in getattr(registry, "diets", ()):
-        label = (diet.label or "").strip()
-        if label and label != diet.id:
-            store.set_diet_label(diet.id, label, (diet.short_label or "").strip())
+    for persona in getattr(registry, "personas", ()):
+        label = (persona.label or "").strip()
+        if label and label != persona.id:
+            store.set_diet_label(persona.id, label, (persona.short_label or "").strip())
+        # The family is what lets the dashboard colour by side rather than by
+        # position in a list, which is the bug digest/render.py documents.
+        if persona.family:
+            store.set_persona_family(persona.id, persona.family)
     # Outlet names too. A blindspot lists which outlets carried a story, and
     # `christianity_today` is a key rather than a masthead. Same duck-typing as
     # above, for the same reason.
@@ -572,11 +601,11 @@ def _ingest_one(
     is_dup = dup_of is not None
 
     store.upsert_document(
-        doc_id=doc_id, diet_id=source.diet_id, source_id=source.id,
+        doc_id=doc_id, source_id=source.id,
         stratum_id=source.stratum_id, url=link, title=title,
         published_utc=published_utc, fetched_utc=_now_iso(),
         word_count=score.word_count, minhash=signature_list(mh),
-        weight=source.diet_weight, is_duplicate=is_dup, duplicate_of=dup_of,
+        is_duplicate=is_dup, duplicate_of=dup_of,
     )
     store.upsert_scores(
         document_id=doc_id, scorer=score.scorer, foundations=score.foundations,
@@ -612,16 +641,24 @@ def _ingest_one(
             # Buffered, not persisted: raw text is discarded at the end of this
             # run (§0), so the liberty tagger has to see it before then.
             liberty_texts[doc_id] = text
-        stats.per_diet[source.diet_id] = stats.per_diet.get(source.diet_id, 0) + 1
+        stats.per_source[source.id] = stats.per_source.get(source.id, 0) + 1
 
 
-def diet_profiles(
+def persona_profiles(
     store: Datastore,
+    registry: Registry,
     scorer_name: str = "dictionary",
     since: str | None = None,
     until: str | None = None,
 ) -> dict[str, dict[str, float]]:
-    """Build a normalized foundation composition per diet from stored scores.
+    """Build a normalized foundation composition per persona from stored scores.
+
+    Weights come from the registry rather than from the document row: a source
+    read by four personas has four weights, so there was never a single number to
+    bake in. The corollary is that the registry is *retroactive* — re-weighting a
+    persona changes what the whole corpus says about it, with no re-ingest. That
+    is what makes the weighting sensitivity-testing in ``CLAUDE.md`` §5 cheap
+    enough to actually do, and it is recorded in ``LIMITATIONS.md`` as a cost.
 
     ``since``/``until`` (``YYYY-MM-DD``, half-open) restrict the profile to
     documents dated in that window, which is how ``compare.history`` builds a
@@ -631,8 +668,11 @@ def diet_profiles(
     from scoring.foundations import CLASSIC_FOUNDATIONS
 
     profiles: dict[str, dict[str, float]] = {}
-    for diet_id in store.diet_ids():
-        rows = store.scores_for_diet(diet_id, scorer_name, since=since, until=until)
+    for persona_id in registry.persona_ids():
+        weights_by_source = registry.weights_for(persona_id)
+        rows = store.scores_for_sources(
+            weights_by_source, scorer_name, since=since, until=until
+        )
         scores = [
             DocumentScore(
                 foundations={f: (row[f] or 0.0) for f in CLASSIC_FOUNDATIONS},
@@ -643,9 +683,9 @@ def diet_profiles(
             )
             for row in rows
         ]
-        weights = [row["weight"] or 1.0 for row in rows]
+        weights = [weights_by_source.get(row["source_id"], 0.0) for row in rows]
         if scores:
-            profiles[diet_id] = to_composition(aggregate_profile(scores, weights))
+            profiles[persona_id] = to_composition(aggregate_profile(scores, weights))
     return profiles
 
 

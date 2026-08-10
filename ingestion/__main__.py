@@ -19,7 +19,14 @@ from compare.divergence import jensen_shannon_divergence, log_ratios
 
 from .config import load_registry, load_settings
 from .datastore import Datastore
-from .pipeline import PipelineConfig, RunStats, SourceProgress, backfill, diet_profiles, run
+from .pipeline import (
+    PipelineConfig,
+    RunStats,
+    SourceProgress,
+    backfill,
+    persona_profiles,
+    run,
+)
 
 
 def _db_path(args: argparse.Namespace, settings: dict) -> str:
@@ -36,7 +43,7 @@ def format_progress(event: SourceProgress) -> str:
     double-digit number means something hit the 30s fetch timeout.
     """
     src = event.source
-    head = f"  [{event.index:>2}/{event.total}] {src.id:<28} {src.diet_id:<12}"
+    head = f"  [{event.index:>2}/{event.total}] {src.id:<28} {src.stratum_id:<20}"
     if event.failed:
         return f"{head} feed unreachable ({event.seconds:.1f}s)"
     detail = f"{event.stored} stored / {event.fetched} fetched"
@@ -69,18 +76,54 @@ def _print_stats(stats: RunStats) -> None:
     print(f"  near duplicates    : {stats.near_duplicates}")
     print(f"  skipped (too short): {stats.skipped_short}")
     print(f"  errors             : {stats.errors}")
-    if stats.per_diet:
-        print("  per diet           :")
-        for diet, n in sorted(stats.per_diet.items()):
-            print(f"    {diet}: {n}")
+    if stats.per_source:
+        print("  per source         :")
+        for source_id, n in sorted(stats.per_source.items()):
+            print(f"    {source_id}: {n}")
 
 
-def _print_compare(store: Datastore) -> None:
-    profiles = diet_profiles(store)
+def _print_personas(registry, store: Datastore, settings: dict) -> None:
+    """The persona library, and what each one would actually be measured on.
+
+    Prints the document count alongside the source count because the gap between
+    them is the useful part: a persona with sources and no documents has not been
+    ingested, and one with neither is not in the reference pair's scope.
+    """
+    from compare.reference import resolve
+
+    pair = resolve(settings, available=registry.persona_ids(),
+                   families=registry.families())
+    print(f"Registry version {registry.version} — {len(registry.sources)} sources "
+          f"in {len(registry.strata)} strata, ingested once each.")
+    print(f"Reference pair: {pair.mine} (mine) vs {pair.theirs} (theirs)\n")
+    for family, ids in registry.families().items():
+        print(f"{family}:")
+        for persona_id in ids:
+            persona = registry.persona(persona_id)
+            weights = registry.weights_for(persona_id)
+            docs = store.doc_count_for_sources(weights)
+            role = (" [mine]" if persona_id == pair.mine
+                    else " [theirs]" if persona_id == pair.theirs else "")
+            print(f"  {persona_id:22} {persona.display_label:22} "
+                  f"{len(weights):>3} sources  {docs:>5} docs{role}")
+        print()
+    orphans = store.orphan_source_counts(
+        {s.id for s in registry.sources}
+    )
+    if orphans:
+        # A source dropped from the catalog leaves its documents reachable by no
+        # persona. Said out loud, because the corpus otherwise quietly shrinks.
+        total = sum(orphans.values())
+        print(f"{total} stored documents belong to {len(orphans)} source(s) no "
+              f"persona reads: {', '.join(sorted(orphans))}")
+
+
+def _print_compare(store: Datastore, registry) -> None:
+    profiles = persona_profiles(store, registry)
     if not profiles:
         print("No scored documents yet — run `python -m ingestion run` first.")
         return
-    print("\nDiet foundation profiles (composition, sums to 1):")
+    print("\nPersona foundation profiles (composition, sums to 1):")
     for diet, prof in profiles.items():
         pretty = ", ".join(f"{k}={v:.3f}" for k, v in prof.items())
         print(f"  {diet}: {pretty}")
@@ -130,7 +173,7 @@ def _podcasts(store: Datastore, settings: dict, args, progress) -> None:
     if args.transformer is not None:
         cfg.transformer_enabled = args.transformer
 
-    registry = load_registry()
+    registry = load_registry(settings=settings)
     sources = [s for s in registry.all_sources()
                if s.ingest_type == "podcast_rss" and s.url]
     if progress is not None:
@@ -151,7 +194,7 @@ def _podcasts(store: Datastore, settings: dict, args, progress) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingestion", description="Parallax Phase 1 pipeline")
     parser.add_argument("command",
-                        choices=["run", "backfill", "podcasts", "compare", "labels"],
+                        choices=["run", "backfill", "podcasts", "compare", "labels", "personas"],
                         help="what to do")
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
@@ -207,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
                 cfg.transformer_enabled = args.transformer
             embedder, _ = build_embedder(settings)
             if args.command == "run":
-                registry = load_registry()
+                registry = load_registry(settings=settings)
                 if progress is not None:
                     n = len(list(registry.ingestable(("rss",))))
                     print(f"Ingesting {n} RSS source(s), up to "
@@ -219,7 +262,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Backfilling {args.days}d of history from GDELT "
                       f"(≤{args.max_per_source}/source, "
                       f"{'bodies' if args.extract else 'titles only'})…")
-                stats = backfill(store, load_registry(), cfg, embedder=embedder,
+                stats = backfill(store, load_registry(settings=settings), cfg, embedder=embedder,
                                  days=args.days, max_per_source=args.max_per_source,
                                  extract_bodies=args.extract)
             _print_stats(stats)
@@ -227,21 +270,25 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "podcasts":
             _podcasts(store, settings, args, progress)
         elif args.command == "compare":
-            _print_compare(store)
+            _print_compare(store, load_registry(settings=settings))
+        elif args.command == "personas":
+            _print_personas(load_registry(settings=settings), store, settings)
         elif args.command == "labels":
             # Ingestion records these, so a store that has not been ingested
-            # since the labels were added still names its diets by machine id.
+            # since the labels were added still names its personas by machine id.
             # This writes them without re-fetching anything.
-            from .pipeline import _store_diet_labels
+            from .pipeline import _store_persona_labels
 
-            _store_diet_labels(store, load_registry())
+            _store_persona_labels(store, load_registry(settings=settings))
             recorded = store.diet_labels()
             short = store.diet_short_labels()
+            families = store.persona_families()
             if not recorded:
-                print("No diet labels in the registry to record.")
-            for diet_id, label in sorted(recorded.items()):
-                print(f"  {diet_id}: {label}"
-                      + (f"  (short: {short[diet_id]})" if diet_id in short else ""))
+                print("No persona labels in the registry to record.")
+            for persona_id, label in sorted(recorded.items()):
+                print(f"  {persona_id}: {label}"
+                      + (f"  (short: {short[persona_id]})" if persona_id in short else "")
+                      + (f"  [{families[persona_id]}]" if persona_id in families else ""))
     finally:
         store.close()
     return 0

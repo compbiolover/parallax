@@ -66,13 +66,17 @@ class FairnessProfile:
         return "balanced"
 
 
-def diet_fairness_profile(
-    store, diet_id: str, scorer: str = "dictionary"
+def persona_fairness_profile(
+    store, weights: dict[str, float], scorer: str = "dictionary"
 ) -> FairnessProfile:
-    """Reach-weighted equality/proportionality shares for one diet."""
-    rows, total = store.fairness_split_for_diet(diet_id, scorer)
+    """Reach-weighted equality/proportionality shares for one persona.
+
+    ``weights`` is ``{source_id: weight}`` from ``Registry.weights_for`` — the
+    persona's membership list and its weighting in one map."""
+    rows, total = store.fairness_split_for_sources(weights, scorer)
     eq_sum = pr_sum = 0.0
-    for weight, eq, pr in rows:
+    for source_id, eq, pr in rows:
+        weight = weights.get(source_id, 0.0)
         eq_sum += weight * eq
         pr_sum += weight * pr
 
@@ -83,29 +87,30 @@ def diet_fairness_profile(
     return FairnessProfile(eq_sum / mass, pr_sum / mass, len(rows), total)
 
 
-def all_diet_fairness(store, scorer: str = "dictionary") -> dict[str, FairnessProfile]:
-    """Profiles for every diet that has any document scored by ``scorer``."""
+def all_persona_fairness(store, registry, scorer: str = "dictionary") -> dict[str, FairnessProfile]:
+    """Profiles for every persona that has any document scored by ``scorer``."""
     out: dict[str, FairnessProfile] = {}
-    for diet_id in store.diet_ids():
-        profile = diet_fairness_profile(store, diet_id, scorer)
+    for persona_id in registry.persona_ids():
+        profile = persona_fairness_profile(store, registry.weights_for(persona_id), scorer)
         if profile.docs_total:
-            out[diet_id] = profile
+            out[persona_id] = profile
     return out
 
 
-def gap(profiles: dict[str, FairnessProfile]) -> dict | None:
-    """The equality-share difference between the first two diets, or ``None``.
+def gap(profiles: dict[str, FairnessProfile], pair) -> dict | None:
+    """The equality-share difference across the reference pair, or ``None``.
 
-    Positive ``equality_gap`` means the first diet (alphabetically, matching the
-    rest of the dashboard's pairing) leans more on equality than the second.
-    ``thin`` propagates: a gap computed from a thin profile is itself thin.
+    Positive ``equality_gap`` means ``pair.mine`` leans more on equality than
+    ``pair.theirs``. Oriented rather than alphabetical: the previous version took
+    the first two ids in sorted order, which made the sign an accident of
+    spelling. ``thin`` propagates: a gap computed from a thin profile is itself
+    thin.
     """
-    ids = sorted(profiles)
-    if len(ids) < 2:
+    mine, theirs = pair.mine, pair.theirs
+    if mine not in profiles or theirs not in profiles:
         return None
-    a, b = ids[:2]
     return {
-        "pair": [a, b],
-        "equality_gap": profiles[a].equality - profiles[b].equality,
-        "thin": profiles[a].thin or profiles[b].thin,
+        "pair": [mine, theirs],
+        "equality_gap": profiles[mine].equality - profiles[theirs].equality,
+        "thin": profiles[mine].thin or profiles[theirs].thin,
     }

@@ -74,23 +74,24 @@ def _disagreement_shares(pairs, foundations) -> dict[str, float]:
     return {f: split[f] / n for f in foundations}
 
 
-def diet_band(
+def persona_band(
     store,
-    diet_id: str,
+    weights: dict[str, float],
     transformer_scorer: str,
     dict_scorer: str = "dictionary",
     foundations=CLASSIC_FOUNDATIONS,
 ) -> dict[str, FoundationBand] | None:
-    """Confidence band per foundation for one diet, or ``None`` if the diet has
+    """Confidence band per foundation for one persona, or ``None`` if it has
     no documents scored by both taggers.
 
     Both compositions and the disagreement share are computed over the *same*
     paired document set (docs scored by both taggers), so the band reflects method
     disagreement rather than a difference in which documents each tagger saw.
     """
-    pairs = store.paired_scores_for_diet(
-        diet_id, dict_scorer, transformer_scorer, list(foundations)
+    rows = store.paired_scores_for_sources(
+        weights, dict_scorer, transformer_scorer, list(foundations)
     )
+    pairs = [(weights.get(source_id, 0.0), a, b) for source_id, a, b in rows]
     if not pairs:
         return None
 
@@ -108,14 +109,16 @@ def diet_band(
     return bands
 
 
-def all_diet_bands(
-    store, transformer_scorer: str, dict_scorer: str = "dictionary"
+def all_persona_bands(
+    store, registry, transformer_scorer: str, dict_scorer: str = "dictionary"
 ) -> dict[str, dict]:
-    """Bands for every diet that has both taggers' scores. Empty when the
+    """Bands for every persona that has both taggers' scores. Empty when the
     transformer never ran (dashboard then falls back to the dictionary profile)."""
     out: dict[str, dict] = {}
-    for diet_id in store.diet_ids():
-        band = diet_band(store, diet_id, transformer_scorer, dict_scorer)
+    for persona_id in registry.persona_ids():
+        band = persona_band(
+            store, registry.weights_for(persona_id), transformer_scorer, dict_scorer
+        )
         if band is not None:
-            out[diet_id] = band
+            out[persona_id] = band
     return out

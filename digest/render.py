@@ -185,12 +185,73 @@ def _check_own_diet(payload: dict, own: str | None) -> None:
 def _colours(payload: dict) -> dict[str, str]:
     """One diet -> colour map, built once and used by every panel.
 
-    The dashboard does the same thing (`colors[di.id]`), and it is the only way
-    the colours stay consistent: keying one panel off list index and another off
-    the ``own_diet`` setting lets them disagree about which diet is which.
+    Keyed on the diet's *role in the comparison* — mine or theirs — rather than on
+    its position in a list. Position was an alphabetical accident, and keying one
+    panel off list index while colouring another off the ``own_diet`` setting is
+    what once made the same diet blue in one panel and orange in another. With the
+    reference pair named, the role is a fact rather than a guess.
+
+    Anything outside the pair falls back to alternating, but the email only ever
+    renders the pair (see ``_pair_diets``), so that path is a safety net.
     """
-    ids = [d["id"] for d in payload.get("diets") or []]
-    return {diet_id: (DIET_A, DIET_B)[i % 2] for i, diet_id in enumerate(ids)}
+    reference = payload.get("reference") or {}
+    mine, theirs = reference.get("mine"), reference.get("theirs")
+    colours: dict[str, str] = {}
+    spare = 0
+    for diet in payload.get("diets") or []:
+        diet_id = diet["id"]
+        role = diet.get("role") or ("mine" if diet_id == mine else
+                                    "theirs" if diet_id == theirs else "")
+        if role == "mine":
+            colours[diet_id] = DIET_A
+        elif role == "theirs":
+            colours[diet_id] = DIET_B
+        else:
+            colours[diet_id] = (DIET_A, DIET_B)[spare % 2]
+            spare += 1
+    return colours
+
+
+def _others_note(payload: dict) -> str:
+    """"+N more in the dashboard", or empty when the pair is all there is.
+
+    The email must not hide that the pair is a choice. Every number in it is about
+    those two, and a reader who does not know a library exists cannot know that
+    picking a different pair would move them. It goes next to the pair rather than
+    in its own line, because phone height is the scarce resource here.
+    """
+    rest = len(payload.get("diets") or []) - 2
+    if rest <= 0:
+        return ""
+    return f" &middot; +{rest} more persona{'' if rest == 1 else 's'} in the dashboard"
+
+
+def _pair_rows(payload: dict, per_diet: dict | None) -> list[tuple[str, dict]]:
+    """``[(persona_id, values)]`` for the reference pair only, mine first.
+
+    The fairness and liberty panels are one row per persona. Unfiltered, a
+    ten-persona payload renders ten rows of small numbers on a phone.
+    """
+    rows = per_diet or {}
+    return [(d["id"], rows[d["id"]]) for d in _pair_diets(payload) if d["id"] in rows]
+
+
+def _pair_diets(payload: dict) -> list[dict]:
+    """Just the two personas the brief is about, `mine` first.
+
+    The email is pair-only on purpose. It has no picker, phone height is the
+    scarce resource, and the per-direction blindspot cap in this file exists
+    because an unfinished section is one where the author's own blindspots go
+    unread. A ten-persona brief guarantees that failure; the dashboard is where
+    the rest live.
+    """
+    diets = payload.get("diets") or []
+    reference = payload.get("reference") or {}
+    mine, theirs = reference.get("mine"), reference.get("theirs")
+    if mine is None and theirs is None:
+        return diets[:2]
+    by_id = {d["id"]: d for d in diets}
+    return [by_id[p] for p in (mine, theirs) if p in by_id]
 
 
 def _own_first(blindspots: list[dict], own: str | None) -> list[dict]:
@@ -276,7 +337,7 @@ def _composition_panel(payload: dict) -> str:
     cannot draw, and reading two aligned lists is if anything easier on a
     narrow screen than reading a polygon.
     """
-    diets = payload.get("diets") or []
+    diets = _pair_diets(payload)
     if not diets:
         return ""
     foundations = payload.get("foundations") or []
@@ -520,7 +581,7 @@ def _agenda_panel(payload: dict) -> str:
     """Attention divergence, set against the foundation number above it.
 
     The headline divergence is small on a real corpus and that is a finding,
-    not a bug: averaged over hundreds of documents, both diets speak roughly
+    not a bug: averaged over hundreds of documents, the two compared diets speak roughly
     the same moral vocabulary. It is also not the thing the reader feels. What
     they feel is the agenda — two people reading about different events — and
     that number is large. Printing them together is the whole point of the
@@ -563,7 +624,7 @@ def _agenda_panel(payload: dict) -> str:
     note = (
         "Same scale as the divergence above, over stories instead of "
         "foundations. Read them together: a small foundation divergence says "
-        "the two diets moralize in similar language"
+        "the two compared diets moralize in similar language"
         + (f" ({jsd:.3f} here)" if jsd is not None else "")
         + ", and a large attention divergence says they apply it to different "
         "events. The second is what a reader experiences as a different world."
@@ -652,7 +713,7 @@ def _executive_panel(payload: dict) -> str:
 
     It used to open the "What each diet said" panel, under that panel's title —
     which is a claim about what it is, and the wrong one: it is the paragraph
-    about both diets at once, and it is the part most likely to be the whole
+    about both compared diets at once, and it is the part most likely to be the whole
     reading on a phone.
     """
     executive = (payload.get("executive_summary") or "").strip()
@@ -669,7 +730,7 @@ def _executive_panel(payload: dict) -> str:
 def _summary_panel(payload: dict) -> str:
     parts = []
     colours = _colours(payload)
-    for diet in payload.get("diets") or []:
+    for diet in _pair_diets(payload):
         text = (diet.get("summary") or "").strip()
         if not text:
             continue
@@ -700,7 +761,7 @@ def _extra_panel(payload: dict) -> str:
     split = payload.get("fairness_split")
     if split:
         rows = []
-        for diet_id, values in (split.get("diets") or {}).items():
+        for diet_id, values in _pair_rows(payload, split.get("diets")):
             # Guard on the document count, not on `equality is None`.
             # `FairnessProfile` returns 0.0/0.0 when there is no fairness mass,
             # so the None check never fired and a diet with nothing to split
@@ -732,7 +793,7 @@ def _extra_panel(payload: dict) -> str:
     liberty = payload.get("liberty")
     if liberty:
         rows = []
-        for diet_id, values in (liberty.get("diets") or {}).items():
+        for diet_id, values in _pair_rows(payload, liberty.get("diets")):
             if not values.get("docs_scored"):
                 continue
             thin = " (thin coverage)" if values.get("thin") else ""
@@ -807,7 +868,8 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
             )
         pair_note = (
             f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding-top:6px;">'
-            f"{_esc(_named(payload, pair[0]))} vs {_esc(_named(payload, pair[1]))}</div>"
+            f"{_esc(_named(payload, pair[0]))} vs {_esc(_named(payload, pair[1]))}"
+            f"{_others_note(payload)}</div>"
             if pair else ""
         )
         head = (
@@ -864,7 +926,7 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
         f'<div style="font:700 19px -apple-system,BlinkMacSystemFont,sans-serif;'
         f'color:{INK};letter-spacing:-.01em;">Parallax</div>'
         f'<div style="font:13px -apple-system,sans-serif;color:{MUTED};">'
-        f"A moral-foundations mirror for two media diets</div></td></tr>"
+        f"A moral-foundations mirror for two modeled media diets</div></td></tr>"
         f"{panels}{footer}"
         f"</table></td></tr></table></body></html>"
     )
@@ -930,7 +992,7 @@ def _extra_text(payload: dict) -> list[str]:
     split = payload.get("fairness_split")
     if split:
         rows = []
-        for diet_id, values in (split.get("diets") or {}).items():
+        for diet_id, values in _pair_rows(payload, split.get("diets")):
             if not values.get("docs_split"):
                 rows.append(f"  {_named(payload, diet_id)}: not enough split-terms to partition")
                 continue
@@ -946,7 +1008,7 @@ def _extra_text(payload: dict) -> list[str]:
     liberty = payload.get("liberty")
     if liberty:
         rows = []
-        for diet_id, values in (liberty.get("diets") or {}).items():
+        for diet_id, values in _pair_rows(payload, liberty.get("diets")):
             if not values.get("docs_scored"):
                 continue
             thin = " (thin coverage)" if values.get("thin") else ""
@@ -979,7 +1041,12 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
                      else f"  {reason}")
         pair = _pair(payload)
         if pair:
-            lines.append(f"  {_named(payload, pair[0])} vs {_named(payload, pair[1])}")
+            rest = len(payload.get("diets") or []) - 2
+            more = (f"  (+{rest} more persona{'' if rest == 1 else 's'} in the dashboard)"
+                    if rest > 0 else "")
+            lines.append(
+                f"  {_named(payload, pair[0])} vs {_named(payload, pair[1])}{more}"
+            )
 
     # Directly under the number, as in the HTML. The two parts are one brief
     # and a screen reader should not meet the sections in a different order.
@@ -990,7 +1057,7 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
     lines += _agenda_text(payload)
 
     foundations = payload.get("foundations") or []
-    for diet in payload.get("diets") or []:
+    for diet in _pair_diets(payload):
         lines += ["", f"{_diet_label(diet)} ({diet.get('doc_count', 0)} docs)"]
         for f in foundations:
             value, spread = _foundation(diet, f)
@@ -1053,7 +1120,7 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
             if rest:
                 lines.append(f"    +{_more_themes(rest, escape=False)}")
 
-    said = [d for d in (payload.get("diets") or []) if (d.get("summary") or "").strip()]
+    said = [d for d in _pair_diets(payload) if (d.get("summary") or "").strip()]
     if said:
         lines += ["", "WHAT EACH DIET SAID"]
         for diet in said:

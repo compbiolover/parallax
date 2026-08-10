@@ -22,7 +22,10 @@ from ingestion.datastore import Datastore
 @dataclass
 class ClusterResult:
     doc_ids: list[str]
-    diets: list[str]
+    # The source each document came from. Persona membership is resolved from
+    # this, because a source several personas read puts its documents in all of
+    # their clusters — which one diet id per document could not express.
+    sources: list[str]
     titles: list[str | None]
     labels: list[int]         # cluster id per doc, -1 = noise
 
@@ -48,16 +51,16 @@ def compute_clustering(
     error is raised rather than crashing deep in numpy on ragged vectors.
     """
     active = store.get_meta("embedder")
-    ids, diets, titles, vectors = [], [], [], []
-    for doc_id, diet_id, title, _unused, vec in store.iter_embeddings(embedder=active):
+    ids, sources, titles, vectors = [], [], [], []
+    for doc_id, source_id, title, _unused, vec in store.iter_embeddings(embedder=active):
         ids.append(doc_id)
-        diets.append(diet_id)
+        sources.append(source_id)
         titles.append(title)
         vectors.append(vec)
 
     if len(ids) < max(2, min_cluster_size):
         # Too few documents to cluster meaningfully — everything is noise.
-        return ClusterResult(ids, diets, titles, [-1] * len(ids))
+        return ClusterResult(ids, sources, titles, [-1] * len(ids))
 
     dims = {len(v) for v in vectors}
     if len(dims) > 1:
@@ -70,7 +73,7 @@ def compute_clustering(
     X = np.asarray(vectors, dtype=np.float32)
     X = _reduce(X, svd_components, random_state)
     labels = _hdbscan_labels(X, min_cluster_size)
-    return ClusterResult(ids, diets, titles, [int(x) for x in labels])
+    return ClusterResult(ids, sources, titles, [int(x) for x in labels])
 
 
 def _reduce(X: np.ndarray, components: int, random_state: int) -> np.ndarray:

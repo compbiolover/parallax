@@ -12,6 +12,8 @@ from compare.history import (
 )
 from ingestion.datastore import Datastore
 
+from .registries import pair, registry
+
 # Emphasis profiles used to build a corpus that visibly changes partway through.
 CARE_HEAVY = {"care": 0.60, "fairness": 0.20, "loyalty": 0.07, "authority": 0.07, "sanctity": 0.06}
 BINDING_HEAVY = {"care": 0.06, "fairness": 0.07, "loyalty": 0.35,
@@ -21,7 +23,7 @@ BINDING_HEAVY = {"care": 0.06, "fairness": 0.07, "loyalty": 0.35,
 def _add(store, diet, day, scores, suffix="a", published=True):
     doc_id = f"{diet}-{day}-{suffix}"
     store.upsert_document(
-        doc_id=doc_id, diet_id=diet, source_id="s", stratum_id=None, url=None,
+        doc_id=doc_id, source_id=f"src_{diet}", stratum_id=None, url=None,
         title="t",
         published_utc=f"{day}T12:00:00+00:00" if published else None,
         fetched_utc=f"{day}T12:00:00+00:00",
@@ -32,6 +34,12 @@ def _add(store, diet, day, scores, suffix="a", published=True):
         sentiment=0.0, moral_word_ratio=0.2, matched_words=30,
     )
     return doc_id
+
+
+def _reg(*personas):
+    """A registry over `src_<persona>` sources, one per persona."""
+    names = personas or ("self", "modeled_ce")
+    return registry(**{name: {f"src_{name}": 1.0} for name in names})
 
 
 def _store(days=("2026-07-01", "2026-07-02", "2026-07-03")):
@@ -47,18 +55,20 @@ def _store(days=("2026-07-01", "2026-07-02", "2026-07-03")):
 def test_scores_filtered_to_half_open_window():
     store = _store()
     # [07-02, 07-03) is exactly one day: the 2nd.
-    rows = store.scores_for_diet("self", "dictionary", since="2026-07-02", until="2026-07-03")
+    mine = ["src_self"]
+    rows = store.scores_for_sources(mine, "dictionary", since="2026-07-02", until="2026-07-03")
     assert len(rows) == 1
-    assert store.doc_count("self", since="2026-07-02", until="2026-07-03") == 1
-    assert store.doc_count("self") == 3          # unbounded is still the whole corpus
+    assert store.doc_count_for_sources(mine, since="2026-07-02", until="2026-07-03") == 1
+    # Unbounded is still the whole corpus.
+    assert store.doc_count_for_sources(mine) == 3
     store.close()
 
 
 def test_undated_documents_fall_back_to_fetch_time():
     store = Datastore(":memory:")
     _add(store, "self", "2026-07-05", CARE_HEAVY, published=False)
-    assert store.doc_count("self", since="2026-07-05", until="2026-07-06") == 1
-    assert store.doc_count("self", since="2026-07-06", until="2026-07-07") == 0
+    assert store.doc_count_for_sources(["src_self"], since="2026-07-05", until="2026-07-06") == 1
+    assert store.doc_count_for_sources(["src_self"], since="2026-07-06", until="2026-07-07") == 0
     store.close()
 
 
@@ -88,7 +98,7 @@ def test_window_reacts_to_a_swing_that_cumulative_damps():
         _add(store, "self", day, CARE_HEAVY)
         _add(store, "modeled_ce", day, BINDING_HEAVY)
 
-    snap = build_snapshot(store, "2026-07-22", window_days=7)
+    snap = build_snapshot(store, _reg(), pair(), "2026-07-22", window_days=7)
     assert snap.window.jsd > snap.cumulative.jsd * 2
     store.close()
 
@@ -96,7 +106,7 @@ def test_window_reacts_to_a_swing_that_cumulative_damps():
 def test_single_diet_yields_no_divergence_but_still_records():
     store = Datastore(":memory:")
     _add(store, "self", "2026-07-01", CARE_HEAVY)
-    snap = build_snapshot(store, "2026-07-01")
+    snap = build_snapshot(store, _reg(), pair(), "2026-07-01")
     assert snap.cumulative.jsd is None
     assert snap.cumulative.pair is None
     assert snap.cumulative.diets["self"]["doc_count"] == 1
@@ -108,7 +118,7 @@ def test_diet_absent_from_the_window_is_reported_at_zero():
     from the series and reshape the comparison."""
     store = _store()
     _add(store, "self", "2026-07-10", CARE_HEAVY)        # only `self` publishes later
-    snap = build_snapshot(store, "2026-07-10", window_days=3)
+    snap = build_snapshot(store, _reg(), pair(), "2026-07-10", window_days=3)
     assert snap.window.diets["modeled_ce"]["doc_count"] == 0
     assert snap.window.diets["modeled_ce"]["composition"] is None
     assert snap.window.jsd is None                       # one scored diet in-window
@@ -118,7 +128,7 @@ def test_diet_absent_from_the_window_is_reported_at_zero():
 
 def test_values_are_rounded_for_storage():
     store = _store()
-    snap = build_snapshot(store, "2026-07-03")
+    snap = build_snapshot(store, _reg(), pair(), "2026-07-03")
     comp = snap.cumulative.diets["self"]["composition"]
     assert all(v == round(v, 6) for v in comp.values())
     store.close()
@@ -128,9 +138,9 @@ def test_values_are_rounded_for_storage():
 
 def test_same_day_reruns_leave_one_row():
     store = _store()
-    record_snapshot(store, "2026-07-03")
-    record_snapshot(store, "2026-07-03")
-    record_snapshot(store, "2026-07-03")
+    record_snapshot(store, _reg(), pair(), "2026-07-03")
+    record_snapshot(store, _reg(), pair(), "2026-07-03")
+    record_snapshot(store, _reg(), pair(), "2026-07-03")
     assert store.snapshot_count() == 1
     store.close()
 
@@ -138,7 +148,7 @@ def test_same_day_reruns_leave_one_row():
 def test_series_is_chronological_and_carries_both_bases():
     store = _store()
     for day in ("2026-07-03", "2026-07-01", "2026-07-02"):   # recorded out of order
-        record_snapshot(store, day)
+        record_snapshot(store, _reg(), pair(), day)
     series = load_series(store)
     assert [s["date"] for s in series] == ["2026-07-01", "2026-07-02", "2026-07-03"]
     for s in series:
@@ -152,7 +162,7 @@ def test_series_is_chronological_and_carries_both_bases():
 def test_limit_keeps_the_most_recent_still_oldest_first():
     store = _store()
     for day in ("2026-07-01", "2026-07-02", "2026-07-03"):
-        record_snapshot(store, day)
+        record_snapshot(store, _reg(), pair(), day)
     assert [s["date"] for s in load_series(store, limit=2)] == ["2026-07-02", "2026-07-03"]
     store.close()
 
@@ -161,7 +171,7 @@ def test_limit_keeps_the_most_recent_still_oldest_first():
 
 def test_backfill_reconstructs_past_days_and_marks_them():
     store = _store()
-    written = backfill_series(store, days=10, end_date="2026-07-03")
+    written = backfill_series(store, _reg(), pair(), days=10, end_date="2026-07-03")
     assert written == ["2026-07-01", "2026-07-02", "2026-07-03"]
     assert all(s["source"] == RECONSTRUCTED for s in load_series(store))
     store.close()
@@ -169,7 +179,7 @@ def test_backfill_reconstructs_past_days_and_marks_them():
 
 def test_backfill_stops_at_the_oldest_document():
     store = _store()
-    backfill_series(store, days=365, end_date="2026-07-03")
+    backfill_series(store, _reg(), pair(), days=365, end_date="2026-07-03")
     # Never walks back past 07-01 even though 365 days were requested.
     assert store.snapshot_count() == 3
     store.close()
@@ -179,8 +189,8 @@ def test_backfill_leaves_live_rows_alone():
     """A reconstruction must not overwrite a row that recorded the corpus as it
     actually stood — the two are not equivalent evidence."""
     store = _store()
-    record_snapshot(store, "2026-07-02")
-    written = backfill_series(store, days=10, end_date="2026-07-03")
+    record_snapshot(store, _reg(), pair(), "2026-07-02")
+    written = backfill_series(store, _reg(), pair(), days=10, end_date="2026-07-03")
     assert "2026-07-02" not in written
     by_date = {s["date"]: s for s in load_series(store)}
     assert by_date["2026-07-02"]["source"] == LIVE
@@ -190,8 +200,8 @@ def test_backfill_leaves_live_rows_alone():
 
 def test_backfill_overwrite_is_opt_in():
     store = _store()
-    record_snapshot(store, "2026-07-02")
-    written = backfill_series(store, days=10, end_date="2026-07-03", overwrite=True)
+    record_snapshot(store, _reg(), pair(), "2026-07-02")
+    written = backfill_series(store, _reg(), pair(), days=10, end_date="2026-07-03", overwrite=True)
     assert "2026-07-02" in written
     by_date = {s["date"]: s for s in load_series(store)}
     assert by_date["2026-07-02"]["source"] == RECONSTRUCTED
@@ -200,6 +210,6 @@ def test_backfill_overwrite_is_opt_in():
 
 def test_backfill_on_an_empty_store_is_a_no_op():
     store = Datastore(":memory:")
-    assert backfill_series(store, days=30) == []
+    assert backfill_series(store, _reg(), pair(), days=30) == []
     assert store.snapshot_count() == 0
     store.close()
