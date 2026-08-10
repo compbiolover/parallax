@@ -2,7 +2,7 @@
 # with a directory in the repo, and without this Make treats that directory as
 # the already-built artifact and refuses to run the recipe ("`digest' is up to
 # date"). Add new targets here as well as below; tests/test_makefile.py checks.
-.PHONY: help daily daily-fast dashboard history personas validate audit-lexicon \
+.PHONY: help daily daily-fast dashboard history personas sensitivity validate audit-lexicon \
         digest digest-send podcasts register-probe check-claude check-secrets \
         test lint
 .DEFAULT_GOAL := help
@@ -29,6 +29,9 @@ history:  ## Print the recorded snapshot series (JSD over time)
 
 personas:  ## List the persona library: family, sources, and what each models
 	$(PY) -m ingestion personas
+
+sensitivity:  ## Re-weight the personas and check whether the finding survives
+	$(PY) -m compare.sensitivity
 
 validate:  ## Score the gold set and report agreement (§5 trigger)
 	$(PY) -m validation --scorer ensemble

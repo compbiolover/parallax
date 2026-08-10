@@ -26,6 +26,11 @@ class ClusterResult:
     # this, because a source several personas read puts its documents in all of
     # their clusters — which one diet id per document could not express.
     sources: list[str]
+    # Every source that carried this story: its own, plus the outlets whose
+    # near-duplicate copies were collapsed into it. Coverage questions read this
+    # rather than `sources` — a wire story is clustered once, and crediting it to
+    # the one outlet fetched first is what made a shared story look one-sided.
+    coverage: list[frozenset[str]]
     titles: list[str | None]
     labels: list[int]         # cluster id per doc, -1 = noise
 
@@ -51,16 +56,20 @@ def compute_clustering(
     error is raised rather than crashing deep in numpy on ragged vectors.
     """
     active = store.get_meta("embedder")
-    ids, sources, titles, vectors = [], [], [], []
+    # Only canonical documents carry embeddings, so a wire story that ran in six
+    # outlets is clustered once. This restores the other five for coverage.
+    collapsed = store.duplicate_coverage()
+    ids, sources, coverage, titles, vectors = [], [], [], [], []
     for doc_id, source_id, title, _unused, vec in store.iter_embeddings(embedder=active):
         ids.append(doc_id)
         sources.append(source_id)
+        coverage.append(frozenset({source_id} | collapsed.get(doc_id, set())))
         titles.append(title)
         vectors.append(vec)
 
     if len(ids) < max(2, min_cluster_size):
         # Too few documents to cluster meaningfully — everything is noise.
-        return ClusterResult(ids, sources, titles, [-1] * len(ids))
+        return ClusterResult(ids, sources, coverage, titles, [-1] * len(ids))
 
     dims = {len(v) for v in vectors}
     if len(dims) > 1:
@@ -73,7 +82,7 @@ def compute_clustering(
     X = np.asarray(vectors, dtype=np.float32)
     X = _reduce(X, svd_components, random_state)
     labels = _hdbscan_labels(X, min_cluster_size)
-    return ClusterResult(ids, sources, titles, [int(x) for x in labels])
+    return ClusterResult(ids, sources, coverage, titles, [int(x) for x in labels])
 
 
 def _reduce(X: np.ndarray, components: int, random_state: int) -> np.ndarray:

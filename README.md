@@ -152,6 +152,7 @@ no text in it. Only the first of those is fixed by exporting a key.
 | `make digest-send` | render and mail the brief |
 | `make history` | print the recorded divergence series |
 | `make personas` | list the persona library: family, sources, and what each one models |
+| `make sensitivity` | move every stratum weight ±50% and report whether the finding survives |
 | `make validate` | score the gold set, report agreement, apply the §5 trigger |
 | `make audit-lexicon` | check a lexicon for equality/proportionality asymmetry |
 | `make register-probe` | check the liberty rubric scores both registers evenhandedly (costs API calls) |
@@ -245,6 +246,34 @@ membership also means reading a persona tells you its whole diet.
 
 A graphical builder for this is Phase 7 (`CLAUDE.md` §4). The export step already writes
 `dashboard/public/data/catalog.js`, which is the whole input that page needs.
+
+</details>
+
+<details>
+<summary><b>Checking whether a finding survives a different weighting</b></summary>
+
+The weights in `config/sources.yaml` are the least-evidenced part of this tool and every
+number sits downstream of them. Nothing tells you the devotional-versus-cable split of a
+devout evangelical's week; those numbers were reasoned about and written down.
+
+```bash
+make sensitivity        # or: python3 -m compare.sensitivity --factor 0.5
+```
+
+It moves each stratum weight ±50% in turn and re-aggregates. This is cheap only because
+weights resolve at aggregation rather than being stored per document — the score rows are
+read once and every perturbation is arithmetic in memory, with no re-ingestion and nothing
+written back.
+
+**Read the sign table, not the divergence range.** A headline that moves from 0.033 to
+0.041 is the same finding. A per-foundation log-ratio that changes sign is a different
+one, because the sign *is* the claim — which diet over-indexes on care. A flip means that
+claim was an artifact of a weighting nobody measured:
+
+```
+  SIGN FLIPS — these claims do not survive a re-weighting:
+    loyalty    flips when self/podcasts up, self/long_form down
+```
 
 </details>
 

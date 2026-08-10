@@ -189,8 +189,17 @@ class Registry:
         a source row shared by many readers.
         """
         persona = self.persona(persona_id)
-        if persona is None:
-            return {}
+        return {} if persona is None else self.weights_of(persona)
+
+    def weights_of(self, persona: Persona) -> dict[str, float]:
+        """``{source_id: weight}`` for a persona object, which need not be in the
+        registry.
+
+        Takes the persona rather than its id so a *hypothetical* one resolves
+        against the real catalog — which is what weighting sensitivity analysis
+        needs (:mod:`compare.sensitivity`): perturb a copy's stratum weights and
+        re-aggregate, with no re-ingestion and nothing written back.
+        """
         by_id = {s.id: s for s in self.sources}
         weights = {}
         for source_id in persona.source_weights:
