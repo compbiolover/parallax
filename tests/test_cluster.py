@@ -344,3 +344,50 @@ def test_agenda_counts_credit_a_collapsed_copy_to_its_own_outlet():
     counts = {(r["cluster_id"], r["source_id"]): r["n"] for r in store.cluster_source_counts()}
     assert counts == {(0, "src_self"): 1, (0, "src_modeled_ce"): 1}
     store.close()
+
+
+def test_a_duplicate_that_somehow_got_clustered_is_not_counted_twice():
+    """`document_clusters` holds only canonicals today, because only canonicals are
+    embedded. The query asserts it anyway: a duplicate landing there would be counted
+    on both legs of the union, and a double-counted outlet is the failure
+    cluster_source_counts exists to fix."""
+    store = Datastore(":memory:")
+    for doc_id, source_id, dup_of in [
+        ("canon", "src_self", None),
+        ("dup", "src_modeled_ce", "canon"),
+    ]:
+        store.upsert_document(
+            doc_id=doc_id, source_id=source_id, stratum_id=None, url=None, title="t",
+            published_utc=None, fetched_utc="2026-08-10T00:00:00+00:00",
+            word_count=200, minhash=None,
+            is_duplicate=dup_of is not None, duplicate_of=dup_of,
+        )
+    # Assign both, including the duplicate, which the pipeline would never do.
+    store.replace_clustering(clusters=[(0, "a story", 2)],
+                             assignments=[("canon", 0), ("dup", 0)])
+
+    counts = {(r["cluster_id"], r["source_id"]): r["n"] for r in store.cluster_source_counts()}
+    assert counts == {(0, "src_self"): 1, (0, "src_modeled_ce"): 1}
+    store.close()
+
+
+def test_an_empty_source_id_is_not_an_outlet():
+    """'' would bucket as a nameless share in the attention numbers. Guarded on both
+    legs of the union, matching duplicate_coverage."""
+    store = Datastore(":memory:")
+    for doc_id, source_id, dup_of in [
+        ("canon", "src_self", None),
+        ("nameless", "", "canon"),
+    ]:
+        store.upsert_document(
+            doc_id=doc_id, source_id=source_id, stratum_id=None, url=None, title="t",
+            published_utc=None, fetched_utc="2026-08-10T00:00:00+00:00",
+            word_count=200, minhash=None,
+            is_duplicate=dup_of is not None, duplicate_of=dup_of,
+        )
+    store.replace_clustering(clusters=[(0, "a story", 1)], assignments=[("canon", 0)])
+
+    sources = {r["source_id"] for r in store.cluster_source_counts()}
+    assert sources == {"src_self"}
+    assert store.duplicate_coverage() == {}
+    store.close()

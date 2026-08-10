@@ -949,12 +949,23 @@ class Datastore:
                 SELECT cluster_id, source_id, COUNT(*) AS n FROM (
                     SELECT dc.cluster_id AS cluster_id, d.source_id AS source_id
                     FROM document_clusters dc JOIN documents d ON d.id = dc.document_id
-                    WHERE dc.cluster_id != -1
+                    -- `is_duplicate = 0` is true by construction today, since only
+                    -- canonicals are embedded and therefore only canonicals are
+                    -- assigned. Asserted in the query anyway: were a duplicate ever
+                    -- to land here it would be counted twice, once on each leg, and
+                    -- a double-counted outlet is the failure this method exists to
+                    -- fix rather than to introduce.
+                    WHERE dc.cluster_id != -1 AND d.is_duplicate = 0
+                      AND d.source_id != ''
                     UNION ALL
                     SELECT dc.cluster_id AS cluster_id, dup.source_id AS source_id
                     FROM document_clusters dc
                     JOIN documents dup ON dup.duplicate_of = dc.document_id
+                    -- Same empty-source guard as `duplicate_coverage`: '' is not an
+                    -- outlet, and bucketing it would put a nameless share into the
+                    -- attention numbers.
                     WHERE dc.cluster_id != -1 AND dup.is_duplicate = 1
+                      AND dup.source_id != ''
                 )
                 GROUP BY cluster_id, source_id
                 """

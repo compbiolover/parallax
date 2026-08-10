@@ -117,8 +117,24 @@ class SensitivityReport:
         }
 
 
-def _rows(store, weights: dict[str, float], scorer: str) -> list:
-    return store.scores_for_sources(weights, scorer)
+def _check_factor(factor: float) -> float:
+    """A factor has to sit strictly inside (0, 1).
+
+    At 1.0 the downward multiplier is 0, which does not move a stratum's weight —
+    it deletes the stratum, and reports the result as if it were a re-weighting.
+    Above 1.0 the multiplier goes negative, and ``aggregate_profile`` skips
+    non-positive weights, so the run silently becomes that same deletion while
+    the report still says "down 150%". At or below 0 there is no perturbation at
+    all. None of those are meaningful answers to "would a different weighting
+    change the finding", so they are refused rather than reported.
+    """
+    if not 0.0 < factor < 1.0:
+        raise ValueError(
+            f"factor must be between 0 and 1 (exclusive), got {factor}. "
+            "At 1 the downward move deletes a stratum instead of re-weighting it, "
+            "and above 1 it goes negative and is silently dropped."
+        )
+    return factor
 
 
 def _profile(rows: list, weights: dict[str, float]) -> dict[str, float] | None:
@@ -170,7 +186,10 @@ def analyze(
     ``None`` when either persona has no scored documents — "the weighting does not
     matter" and "there is nothing to weight" are different statements, and a report
     full of zeros would read as the first.
+
+    Raises ``ValueError`` for a factor outside ``(0, 1)``; see :func:`_check_factor`.
     """
+    _check_factor(factor)
     personas = {}
     rows = {}
     weights = {}
@@ -180,7 +199,12 @@ def analyze(
             return None
         personas[persona_id] = persona
         weights[persona_id] = registry.weights_of(persona)
-        rows[persona_id] = _rows(store, weights[persona_id], scorer)
+        # The weights map doubles as the membership list — its keys are exactly the
+        # sources this persona reads — which is the convention every source-scoped
+        # query in the datastore takes (see `Registry.weights_for`). Fetched once
+        # here and reused for every perturbation below; scores do not depend on
+        # weights, only their aggregation does.
+        rows[persona_id] = store.scores_for_sources(weights[persona_id], scorer)
 
     base = {p: _profile(rows[p], weights[p]) for p in pair}
     if any(profile is None for profile in base.values()):
@@ -271,6 +295,16 @@ def format_report(report: SensitivityReport | None, limit: int = 10) -> str:
     return "\n".join(lines)
 
 
+def _factor_arg(value: str) -> float:
+    """argparse adapter, so a bad factor is a usage error and not a traceback."""
+    import argparse
+
+    try:
+        return _check_factor(float(value))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -284,8 +318,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
-    parser.add_argument("--factor", type=float, default=DEFAULT_FACTOR,
-                        help="fraction to move each stratum weight (default 0.5)")
+    parser.add_argument("--factor", type=_factor_arg, default=DEFAULT_FACTOR,
+                        help="fraction to move each stratum weight, 0 < f < 1 "
+                             "(default 0.5)")
     parser.add_argument("--scorer", default="dictionary")
     parser.add_argument("--mine", help="persona id for your side of the pair")
     parser.add_argument("--theirs", help="persona id for the other side")

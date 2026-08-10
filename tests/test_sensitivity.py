@@ -176,3 +176,31 @@ def test_the_report_serializes_flat():
         "flipped", "perturbations",
     }
     store.close()
+
+
+# -- the factor has to be a re-weighting, not a deletion ---------------------
+
+
+@pytest.mark.parametrize("bad", [1.0, 1.5, 0.0, -0.5])
+def test_a_factor_outside_zero_to_one_is_refused(bad):
+    """At 1.0 the downward multiplier is 0, which deletes a stratum rather than
+    re-weighting it. Above 1.0 it goes negative, and `aggregate_profile` skips
+    non-positive weights — so the run silently becomes that same deletion while the
+    report still says "down 150%". Both are wrong answers to "would a different
+    weighting change the finding", so neither is reported."""
+    registry = _registry({"a": 1.0}, {"c": 1.0})
+    store = _store([("src_a", CARE), ("src_c", BINDING)])
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        analyze(store, registry, ReferencePair("self", "modeled_ce"), factor=bad)
+    store.close()
+
+
+def test_a_bad_factor_on_the_command_line_is_a_usage_error():
+    """argparse, so it arrives as usage rather than as a traceback."""
+    import pytest as _pytest
+
+    from compare.sensitivity import main
+
+    with _pytest.raises(SystemExit) as excinfo:
+        main(["--factor", "2"])
+    assert excinfo.value.code == 2
