@@ -361,6 +361,10 @@ hypothesis the tool *tests*, not an axiom it assumes.
   the outlier.
 
 **Representativeness.** Version the source model; sensitivity-test conclusions against
-source weighting. Validate against external benchmarks (Pew on evangelical media use;
+source weighting — `make sensitivity` moves each stratum weight ±50% in turn and reports
+which per-foundation claims change sign, which is cheap because weights resolve at
+aggregation rather than being stored per document. Read the sign table rather than the
+divergence range: a headline that moves is the same finding, a log-ratio that flips is a
+different one. Validate against external benchmarks (Pew on evangelical media use;
 Media Cloud attention data). Distinguish *outlet* bias from *audience* consumption — model
 what is actually consumed, not merely what is published.

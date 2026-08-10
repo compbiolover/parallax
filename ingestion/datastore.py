@@ -934,18 +934,80 @@ class Datastore:
         belongs to every persona that reads its source — which ``GROUP BY
         diet_id`` cannot express. Callers cross these counts with each persona's
         membership set.
+
+        **Near-duplicates count for their own outlet.** Only canonical documents
+        are embedded and therefore clustered, so a wire story that ran in six
+        outlets appears once in ``document_clusters``. Counting only that copy
+        credited the story to whichever outlet happened to be fetched first and
+        recorded the other five as never having covered it — which is how a story
+        both sides carried came to read as one side's blindspot. The second leg of
+        the union puts each collapsed copy's outlet back.
         """
         return list(
             self.conn.execute(
                 """
-                SELECT dc.cluster_id AS cluster_id, d.source_id AS source_id,
-                       COUNT(*) AS n
-                FROM document_clusters dc JOIN documents d ON d.id = dc.document_id
-                WHERE dc.cluster_id != -1
-                GROUP BY dc.cluster_id, d.source_id
+                SELECT cluster_id, source_id, COUNT(*) AS n FROM (
+                    SELECT dc.cluster_id AS cluster_id, d.source_id AS source_id
+                    FROM document_clusters dc JOIN documents d ON d.id = dc.document_id
+                    WHERE dc.cluster_id != -1
+                    UNION ALL
+                    SELECT dc.cluster_id AS cluster_id, dup.source_id AS source_id
+                    FROM document_clusters dc
+                    JOIN documents dup ON dup.duplicate_of = dc.document_id
+                    WHERE dc.cluster_id != -1 AND dup.is_duplicate = 1
+                )
+                GROUP BY cluster_id, source_id
                 """
             )
         )
+
+    def duplicate_coverage(self) -> dict[str, set[str]]:
+        """``{canonical_document_id: {source_id, ...}}`` for collapsed near-duplicates.
+
+        Deduplication is right for scoring and wrong for coverage, and the two need
+        different answers from the same fact. Collapsing the same wire story into
+        one document keeps one outlet's moral vocabulary from being counted six
+        times; it must not also mean the other five outlets never ran it. The
+        outlets are recorded here so "did this reach them at all" — the binary
+        question blindspots ask — can be answered from what was actually fetched.
+
+        One level deep by construction: the near-duplicate index is seeded only
+        from non-duplicates (:meth:`iter_minhash_signatures` filters them), so
+        ``duplicate_of`` always names a canonical and never another duplicate.
+        """
+        rows = self.conn.execute(
+            "SELECT duplicate_of AS canonical, source_id FROM documents "
+            "WHERE is_duplicate = 1 AND duplicate_of IS NOT NULL AND source_id != ''"
+        )
+        out: dict[str, set[str]] = {}
+        for row in rows:
+            out.setdefault(row["canonical"], set()).add(row["source_id"])
+        return out
+
+    def duplicates_of(self, document_ids: Iterable[str]) -> dict[str, list[sqlite3.Row]]:
+        """``{canonical_id: [duplicate rows]}`` with title, url and source.
+
+        The collapsed copies are real articles at real URLs. A blindspot card's
+        claim is "these outlets carried it and yours did not", so the outlet list
+        has to include them or the claim is checkable against less than it should
+        be.
+        """
+        ids = tuple(dict.fromkeys(document_ids))
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            f"""
+            SELECT id, duplicate_of, title, url, source_id FROM documents
+            WHERE is_duplicate = 1 AND duplicate_of IN ({placeholders})
+            ORDER BY COALESCE(published_utc, fetched_utc) DESC
+            """,
+            ids,
+        )
+        out: dict[str, list[sqlite3.Row]] = {}
+        for row in rows:
+            out.setdefault(row["duplicate_of"], []).append(row)
+        return out
 
     def source_ids_present(self) -> list[str]:
         """Sources that actually yielded documents.

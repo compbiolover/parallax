@@ -84,6 +84,16 @@ def test_run_clustering_uses_ctfidf_labels():
 MEMBERS = {"self": {"src_self"}, "modeled_ce": {"src_modeled_ce"}}
 
 
+def _result(doc_ids, sources, titles, labels, coverage=None):
+    """A ClusterResult whose coverage defaults to each document's own source.
+
+    Coverage is a separate list because a collapsed near-duplicate's outlet also
+    carried the story; pass it explicitly to model that.
+    """
+    cov = coverage if coverage is not None else [frozenset({s}) for s in sources]
+    return ClusterResult(doc_ids, sources, cov, titles, labels)
+
+
 def test_detect_blindspots_direction_and_symmetry():
     # cluster 0: both personas (not a blindspot); 1: modeled_ce only; 2: self only
     labels = [0, 0, 0, 0, 1, 1, 1, 2, 2, 2]
@@ -91,7 +101,7 @@ def test_detect_blindspots_direction_and_symmetry():
                "src_modeled_ce", "src_modeled_ce", "src_modeled_ce",
                "src_self", "src_self", "src_self"]
     titles = ["t"] * 10
-    result = ClusterResult([f"d{i}" for i in range(10)], sources, titles, labels)
+    result = _result([f"d{i}" for i in range(10)], sources, titles, labels)
     bs = detect_blindspots(result, MEMBERS, dominance=0.8, min_size=3)
     by_diet = {b.dominant_diet: b for b in bs}
     assert set(by_diet) == {"modeled_ce", "self"}   # both directions surfaced
@@ -107,7 +117,7 @@ def test_a_third_persona_does_not_dilute_a_blindspot_out_of_existence():
     # persona nobody is comparing against, none from `self`.
     labels = [0, 0, 0, 0, 0]
     sources = ["src_modeled_ce", "src_modeled_ce", "src_third", "src_third", "src_third"]
-    result = ClusterResult([f"d{i}" for i in range(5)], sources, ["t"] * 5, labels)
+    result = _result([f"d{i}" for i in range(5)], sources, ["t"] * 5, labels)
     bs = detect_blindspots(result, MEMBERS, dominance=0.8, min_size=2)
     assert [b.dominant_diet for b in bs] == ["modeled_ce"]
     assert bs[0].dominant_share == 1.0   # of the pair's members, not the cluster's
@@ -119,7 +129,7 @@ def test_a_source_both_personas_read_makes_a_cluster_shared():
     """Two personas over one shared catalog can read the same outlet. A story it
     carried reached both of them, so it is not a blindspot for either."""
     shared = {"self": {"src_shared"}, "modeled_ce": {"src_shared"}}
-    result = ClusterResult(
+    result = _result(
         [f"d{i}" for i in range(4)], ["src_shared"] * 4, ["t"] * 4, [0, 0, 0, 0]
     )
     assert detect_blindspots(result, shared, dominance=0.8, min_size=2) == []
@@ -210,4 +220,127 @@ def test_too_few_docs_is_all_noise():
     store.upsert_embedding(document_id="d0", vector=emb.embed("hello"), embedder=emb.name)
     outcome = run_clustering(store, MEMBERS)
     assert outcome.n_clusters == 0 and outcome.blindspots == []
+    store.close()
+
+
+# -- collapsed near-duplicates keep their outlet's coverage ------------------
+
+
+def test_a_wire_story_both_sides_ran_stops_being_a_blindspot():
+    """The bug, stated as an A/B. Near-duplicate detection is global, so when the
+    same wire copy runs on both sides only the first-fetched copy survives — and
+    only it is embedded and clustered. Read from the surviving document's own source
+    the cluster looks 100% one-sided; read from every outlet that carried it, it is
+    a story both sides ran."""
+    doc_ids, sources, titles, labels = (
+        ["d0", "d1", "d2"], ["src_self"] * 3, ["t"] * 3, [0, 0, 0],
+    )
+
+    # What the old code saw: coverage is the surviving document's own source.
+    before = detect_blindspots(
+        _result(doc_ids, sources, titles, labels), MEMBERS, dominance=0.8, min_size=2
+    )
+    assert [b.dominant_share for b in before] == [1.0]
+
+    # What it is: d0's collapsed duplicate came from the other side's outlet.
+    after = detect_blindspots(
+        _result(doc_ids, sources, titles, labels, coverage=[
+            frozenset({"src_self", "src_modeled_ce"}),
+            frozenset({"src_self"}),
+            frozenset({"src_self"}),
+        ]),
+        MEMBERS, dominance=0.8, min_size=2,
+    )
+    assert after == [], "a story the other side also ran is not a blindspot"
+
+
+def test_a_cluster_that_is_only_a_shared_wire_story_is_not_a_blindspot():
+    result = _result(
+        ["d0", "d1"], ["src_self", "src_self"], ["t", "t"], [0, 0],
+        coverage=[frozenset({"src_self", "src_modeled_ce"})] * 2,
+    )
+    assert detect_blindspots(result, MEMBERS, dominance=0.8, min_size=2) == []
+
+
+def test_the_store_reads_coverage_back_from_the_duplicate_rows():
+    """Same correction on the persisted path, which is what the dashboard and the
+    email read. `duplicate_of` recorded the collapsed copy's outlet all along; it
+    was simply never looked at."""
+    from cluster.blindspot import blindspots_from_store
+
+    store = Datastore(":memory:")
+    _add = lambda doc_id, source_id, dup_of=None: store.upsert_document(  # noqa: E731
+        doc_id=doc_id, source_id=source_id, stratum_id=None, url=None, title="t",
+        published_utc=None, fetched_utc="2026-08-10T00:00:00+00:00",
+        word_count=200, minhash=None,
+        is_duplicate=dup_of is not None, duplicate_of=dup_of,
+    )
+    _add("canon", "src_self")
+    _add("dup", "src_modeled_ce", dup_of="canon")   # same wire story, other side
+    _add("own", "src_self")
+    store.replace_clustering(
+        clusters=[(0, "a story", 2)],
+        assignments=[("canon", 0), ("own", 0)],
+    )
+
+    assert store.duplicate_coverage() == {"canon": {"src_modeled_ce"}}
+    # Two `self` documents and one collapsed copy from the other side: 2/3 of the
+    # pair's coverage, under the 0.8 threshold, so not a blindspot. Reading only the
+    # surviving documents' own sources it was 2/2 and reported as one.
+    assert blindspots_from_store(store, MEMBERS, dominance=0.8, min_size=2) == []
+    assert blindspots_from_store(store, MEMBERS, dominance=0.6, min_size=2)[0].counts == {
+        "self": 2, "modeled_ce": 1,
+    }
+    store.close()
+
+
+def test_a_collapsed_copy_is_listed_among_the_outlets_that_carried_a_story():
+    """The outlet list is what makes a blindspot card checkable. A card naming one
+    masthead because deduplication hid the other two claims less than the corpus
+    supports."""
+    from cluster.blindspot import articles_from_store, blindspots_from_store
+
+    store = Datastore(":memory:")
+    for doc_id, source_id, dup_of, title in [
+        ("canon", "src_modeled_ce", None, "Senate advances the funding bill"),
+        ("dup", "src_ce_two", "canon", "Senate advances the funding bill"),
+        ("solo", "src_modeled_ce", None, "A second story on the same subject"),
+    ]:
+        store.upsert_document(
+            doc_id=doc_id, source_id=source_id, stratum_id=None,
+            url=f"https://example.test/{doc_id}", title=title, published_utc=None,
+            fetched_utc="2026-08-10T00:00:00+00:00", word_count=200, minhash=None,
+            is_duplicate=dup_of is not None, duplicate_of=dup_of,
+        )
+    store.set_source_label("src_modeled_ce", "The First Outlet")
+    store.set_source_label("src_ce_two", "The Second Outlet")
+    store.replace_clustering(clusters=[(0, "funding", 2)],
+                             assignments=[("canon", 0), ("solo", 0)])
+
+    members = {"self": {"src_self"}, "modeled_ce": {"src_modeled_ce", "src_ce_two"}}
+    spots = blindspots_from_store(store, members, dominance=0.8, min_size=2)
+    articles = articles_from_store(store, spots, members)
+    outlets = {a.outlet for a in articles[0]}
+    assert outlets == {"The First Outlet", "The Second Outlet"}
+    store.close()
+
+
+def test_agenda_counts_credit_a_collapsed_copy_to_its_own_outlet():
+    """Attention shares had the same flaw: a wire story counted for whichever
+    outlet was fetched first and as zero coverage for every other."""
+    store = Datastore(":memory:")
+    for doc_id, source_id, dup_of in [
+        ("canon", "src_self", None),
+        ("dup", "src_modeled_ce", "canon"),
+    ]:
+        store.upsert_document(
+            doc_id=doc_id, source_id=source_id, stratum_id=None, url=None, title="t",
+            published_utc=None, fetched_utc="2026-08-10T00:00:00+00:00",
+            word_count=200, minhash=None,
+            is_duplicate=dup_of is not None, duplicate_of=dup_of,
+        )
+    store.replace_clustering(clusters=[(0, "a story", 1)], assignments=[("canon", 0)])
+
+    counts = {(r["cluster_id"], r["source_id"]): r["n"] for r in store.cluster_source_counts()}
+    assert counts == {(0, "src_self"): 1, (0, "src_modeled_ce"): 1}
     store.close()

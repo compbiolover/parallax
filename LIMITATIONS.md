@@ -462,9 +462,15 @@ assertion.
 - **The weights are the least-evidenced and most load-bearing part of the whole tool.** No
   source gives the devotional-versus-cable split of a devout evangelical's week, or the
   policy-journal share of a wonk's. Every number on the dashboard is downstream of numbers
-  that were reasoned about and written down, not measured. Sensitivity-test by moving
-  stratum weights by ±50% and asking whether the finding survives — cheap now, because
-  weights resolve at aggregation and no re-ingestion is needed.
+  that were reasoned about and written down, not measured.
+
+  `make sensitivity` is the check, and it is cheap because weights resolve at aggregation:
+  it moves each stratum weight ±50% in turn and re-aggregates score rows already in the
+  store, with no re-ingestion and nothing written back. Read the **sign table** rather than
+  the divergence range. A headline that moves from 0.033 to 0.041 is the same finding; a
+  per-foundation log-ratio that changes sign is a different one, because the sign *is* the
+  claim — which diet over-indexes on care. A flip means that claim was an artifact of a
+  weighting nobody measured.
 - **Persona count is not persona coverage.** Four a side does not cover the space of
   American media diets. It means four points were written down.
 - **A named archetype invites over-reading.** "Devotionally-heavy reader" is a weighting of
@@ -512,20 +518,35 @@ assertion.
   rather than staying counted as they used to. The run reports the orphaned counts rather
   than letting the corpus quietly shrink.
 
-## Cross-diet deduplication can manufacture a blindspot
+## Deduplication, coverage, and what is still counted once
 
-This one is pre-existing and this branch makes it more likely rather than causing it.
+Near-duplicate detection is global: the index is seeded from every stored signature with no
+persona filter. When the same wire story runs in outlets on both sides, one copy is
+canonical and the rest are flagged `is_duplicate = 1`. Only canonicals are embedded, so a
+wire story that ran in six outlets is clustered once.
 
-Near-duplicate detection is global: `_seed_index` seeds from every stored signature with no
-diet or persona filter, and every aggregate filters `is_duplicate = 0`. So when the same
-wire story runs in outlets on both sides, whichever is fetched first keeps it and the other
-is dropped — never embedded, never clustered. A story both sides genuinely carried can
-therefore register as one side's blindspot.
+**For coverage this used to erase five outlets, and no longer does.** Blindspot detection
+and attention shares now read every source that carried a story — the canonical document's
+own, plus the outlets whose copies were collapsed into it (`duplicate_of` recorded them all
+along; nothing read it). Before that fix, a story both sides genuinely ran was credited to
+whichever outlet was fetched first and recorded as never covered by any other, which
+manufactured blindspots out of syndication. Collapsed copies are also listed in a blindspot
+card's outlet list, since that list is the part a reader can check.
 
-With more personas over a larger catalog, near-duplicates crossing persona boundaries get
-more common. "What they see that I don't" being a dedup artifact is the most damaging
-failure mode this tool has, and it is not yet quantified against real data. Until it is,
-treat a blindspot on a wire-service story with particular suspicion.
+**Two things remain true and are worth knowing:**
+
+- **A collapsed copy still does not contribute to any foundation profile.** Scoring counts
+  each story once, globally. That is right within a persona — nobody's moral vocabulary
+  should be counted six times for one wire story — but across personas it means the *second*
+  diet to be fetched loses that story's vocabulary from its composition entirely. Dedup
+  ought to be per-persona for scoring and is currently global. The effect is small (one
+  document among hundreds, and compositions converge) and fixing it would move the headline
+  divergence and break comparability with the recorded series, so it is written down here
+  rather than changed quietly.
+- **Coverage counting is binary and unweighted**, so a source weighted 0.05 counts the same
+  as one at 1.0 for "did this reach them at all". A fractional "partly saw it" would not be
+  interpretable, but a persona's blindspot list is therefore insensitive to how much of its
+  attention a source actually holds.
 
 ## Guarding against confirmation bias
 

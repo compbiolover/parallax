@@ -172,7 +172,11 @@ def detect_blindspots(
     cross-family blindspot for an arithmetic reason.
 
     A document from a source both personas read counts toward both, pulling the
-    share toward 0.5. That is right: it means both saw it.
+    share toward 0.5. That is right: it means both saw it. So does a story whose
+    near-duplicate copies were collapsed: coverage is read from every outlet that
+    carried it, not just the one whose copy survived deduplication. Crediting a
+    wire story to whichever outlet was fetched first is what let a story both sides
+    ran register as one side's blindspot.
 
     Counting is unweighted. A source weighted 0.05 counts the same as one at 1.0,
     because the question here is "did this reach them at all", which is binary; a
@@ -187,8 +191,8 @@ def detect_blindspots(
     a, b = pair
     out: list[Blindspot] = []
     for cid, idxs in _members_by_cluster(result).items():
-        in_a = [i for i in idxs if result.sources[i] in members[a]]
-        in_b = [i for i in idxs if result.sources[i] in members[b]]
+        in_a = [i for i in idxs if result.coverage[i] & members[a]]
+        in_b = [i for i in idxs if result.coverage[i] & members[b]]
         counts = {a: len(in_a), b: len(in_b)}
         size = len(in_a) + len(in_b)
         if size < min_size:
@@ -227,21 +231,26 @@ def blindspots_from_store(
 
     Lets the dashboard exporter surface blindspots without importing sklearn or
     recomputing embeddings — it just reads the stored assignment. Same
-    pair-restricted arithmetic as :func:`detect_blindspots`; see its docstring for
-    why the denominator is the pair rather than the cluster.
+    pair-restricted arithmetic as :func:`detect_blindspots`, and the same
+    coverage-not-source rule for collapsed near-duplicates; see its docstring for
+    both.
     """
     pair = list(members)
     if len(pair) != 2:
         raise ValueError(f"blindspots need exactly two personas, got {pair}")
     a, b = pair
+    collapsed = store.duplicate_coverage()
     out: list[Blindspot] = []
     for row in store.cluster_rows():
         cid = row["cluster_id"]
         if cid == -1:
             continue
         cluster = store.cluster_members(cid)
-        in_a = [m for m in cluster if m["source_id"] in members[a]]
-        in_b = [m for m in cluster if m["source_id"] in members[b]]
+        carried = {
+            m["id"]: {m["source_id"]} | collapsed.get(m["id"], set()) for m in cluster
+        }
+        in_a = [m for m in cluster if carried[m["id"]] & members[a]]
+        in_b = [m for m in cluster if carried[m["id"]] & members[b]]
         counts = {a: len(in_a), b: len(in_b)}
         size = len(in_a) + len(in_b)
         if size < min_size:
@@ -276,29 +285,37 @@ def articles_from_store(
     Only the dominant persona's: the card's claim is "these outlets carried it and
     yours did not", so listing the one or two articles from the other side
     under that heading would contradict the sentence above them.
+
+    Collapsed near-duplicates are listed alongside the canonical copy. They are
+    real articles at real URLs, and the outlet list is the part of a blindspot card
+    that makes it checkable — a card claiming three outlets carried a story is
+    worth more than the same card naming one because deduplication hid the rest.
     """
     outlets = store.source_labels()
     out: dict[int, list[Article]] = {}
     for spot in blindspots:
         sources = members.get(spot.dominant_diet, set())
+        cluster = store.cluster_members(spot.cluster_id)
+        collapsed = store.duplicates_of(m["id"] for m in cluster)
         articles: list[Article] = []
-        for member in store.cluster_members(spot.cluster_id):
-            if member["source_id"] not in sources:
-                continue
-            title = clean_title(member["title"])
-            if not title:
-                continue
-            articles.append(Article(
-                doc_id=member["id"],
-                title=title,
-                url=member["url"],
-                outlet=outlets.get(member["source_id"], ""),
-                # Carried so a story is still attributable in a store ingested
-                # before outlet names were recorded: the key de-slugs into a
-                # recognizable masthead, and no outlet at all is the one thing
-                # that would make the story uncheckable.
-                source_id=member["source_id"] or "",
-            ))
+        for member in cluster:
+            for row in (member, *collapsed.get(member["id"], ())):
+                if row["source_id"] not in sources:
+                    continue
+                title = clean_title(row["title"])
+                if not title:
+                    continue
+                articles.append(Article(
+                    doc_id=row["id"],
+                    title=title,
+                    url=row["url"],
+                    outlet=outlets.get(row["source_id"], ""),
+                    # Carried so a story is still attributable in a store ingested
+                    # before outlet names were recorded: the key de-slugs into a
+                    # recognizable masthead, and no outlet at all is the one thing
+                    # that would make the story uncheckable.
+                    source_id=row["source_id"] or "",
+                ))
         if articles:
             out[spot.cluster_id] = articles
     return out
