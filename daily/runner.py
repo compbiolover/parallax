@@ -42,6 +42,7 @@ from pathlib import Path
 
 from cluster.themes import UNSET as THEME_EFFORT_UNSET
 from compare.history import DEFAULT_SERIES_LIMIT, DEFAULT_WINDOW_DAYS
+from compare.reference import resolve
 from ingestion.datastore import Datastore
 
 # Step names, in execution order. ``snapshot`` runs before ``export`` so the
@@ -102,6 +103,13 @@ class DailyConfig:
     # podcasts (parallax[media]); None -> defaults from ingestion.podcast
     podcast_config: object = None
 
+    # comparison — which two personas every headline number is about
+    reference_mine: str | None = None      # None -> settings, then `self`
+    reference_theirs: str | None = None    # None -> settings, then `modeled_ce`
+    # Which personas get written prose. None -> the reference pair only; one call
+    # carries every context, so this is a prompt-size and reliability knob.
+    summary_personas: list[str] | None = None
+
     # digest
     own_diet: str | None = None           # whose blindspots lead the email
 
@@ -122,6 +130,7 @@ class DailyConfig:
         snap = (daily.get("snapshot", {}) or {})
         dig = (settings.get("digest", {}) or {})
         themes = ((settings.get("cluster", {}) or {}).get("themes", {}) or {})
+        ref = ((settings.get("compare", {}) or {}).get("reference_pair", {}) or {})
         cfg = cls(
             backfill_days=int(bf.get("days", 14)),
             backfill_max_per_source=int(bf.get("max_per_source", 250)),
@@ -140,6 +149,9 @@ class DailyConfig:
             model=(settings.get("summarize", {}) or {}).get("model"),
             summary_effort=(settings.get("summarize", {}) or {}).get("effort"),
             own_diet=dig.get("own_diet"),
+            reference_mine=ref.get("mine"),
+            reference_theirs=ref.get("theirs"),
+            summary_personas=_summary_personas(settings),
         )
         from ingestion.podcast import PodcastConfig
 
@@ -182,6 +194,23 @@ class DailyReport:
 
     def get(self, name: str) -> StepResult | None:
         return next((s for s in self.steps if s.name == name), None)
+
+
+def _summary_personas(settings: dict) -> list[str] | None:
+    """``summarize.personas``: ``pair`` (default), ``all``, or an explicit list.
+
+    ``None`` means the reference pair. One Claude call carries every persona's
+    headlines in its prompt and every persona's section in its reply, under a
+    ``max_tokens`` that covers thinking and prose together — so this is the knob
+    that keeps a ten-persona registry from making the brief less reliable rather
+    than more informative.
+    """
+    value = (settings.get("summarize", {}) or {}).get("personas", "pair")
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    if str(value).lower() == "all":
+        return []          # empty list = every persona; see `gather`
+    return None
 
 
 def _now_iso() -> str:
@@ -244,13 +273,14 @@ def _step_podcasts(store, cfg: DailyConfig, pcfg, registry, embedder, transforme
     return stats.line()
 
 
-def _step_cluster(store, cfg: DailyConfig) -> str:
+def _step_cluster(store, cfg: DailyConfig, registry, pair) -> str:
     from cluster.blindspot import run_clustering
 
     if store.embedding_count() == 0:
         return "no embeddings yet — nothing to cluster"
     outcome = run_clustering(
         store,
+        _pair_members(registry, pair),
         min_cluster_size=cfg.min_cluster_size,
         dominance=cfg.dominance,
         min_blindspot_size=cfg.min_blindspot_size,
@@ -261,18 +291,18 @@ def _step_cluster(store, cfg: DailyConfig) -> str:
     return (
         f"{outcome.n_docs} docs -> {outcome.n_clusters} clusters "
         f"({outcome.n_noise} noise), {len(outcome.blindspots)} blindspots "
-        f"in {len(outcome.themes)} themes"
+        f"in {len(outcome.themes)} themes, {pair.mine} vs {pair.theirs}"
     )
 
 
-def _step_summarize(store, cfg: DailyConfig) -> str:
+def _step_summarize(store, cfg: DailyConfig, registry, pair) -> str:
     from summarize.summarizer import DEFAULT_EFFORT, DEFAULT_MODEL, Summarizer
 
     summarizer = Summarizer(
         model=cfg.model or DEFAULT_MODEL,
         effort=cfg.summary_effort or DEFAULT_EFFORT,
     )
-    result = summarizer.summarize(store)
+    result = summarizer.summarize(store, registry, pair, cfg.summary_personas)
     # Test the *text*, not the dict. `{"self": "", "modeled_ce": ""}` is a
     # truthy dict of empty summaries, so this guard passed straight through an
     # empty result: the run persisted blank prose over the brief and reported
@@ -292,16 +322,24 @@ def _step_summarize(store, cfg: DailyConfig) -> str:
     return detail + ("" if result.executive.strip() else ", no executive")
 
 
-def _step_snapshot(store, cfg: DailyConfig) -> str:
+def _step_snapshot(store, cfg: DailyConfig, registry, pair) -> str:
     from compare.history import record_snapshot
 
-    snap = record_snapshot(store, window_days=cfg.window_days)
+    snap = record_snapshot(store, registry, pair, window_days=cfg.window_days)
     jsd = snap.window.jsd
-    moved = f"window JSD {jsd:.3f}" if jsd is not None else "window JSD n/a (one diet)"
+    moved = (
+        f"window JSD {jsd:.3f}" if jsd is not None
+        else "window JSD n/a (the pair is not both scored)"
+    )
     return f"recorded {snap.snapshot_date} ({moved}), {store.snapshot_count()} in history"
 
 
-def _payload(store, cfg: DailyConfig) -> dict:
+def _pair_members(registry, pair) -> dict[str, set[str]]:
+    """``{persona_id: {source_id, ...}}`` for the reference pair."""
+    return {p: set(registry.weights_for(p)) for p in pair}
+
+
+def _payload(store, cfg: DailyConfig, registry, pair) -> dict:
     """Today's payload, built once and shared by export and digest.
 
     Both steps used to call ``build_payload`` independently, which re-ran the
@@ -315,18 +353,26 @@ def _payload(store, cfg: DailyConfig) -> dict:
     from dashboard.export import build_payload
 
     if cfg._payload_cache is None:
-        cfg._payload_cache = build_payload(store, cfg.history_limit)
+        cfg._payload_cache = build_payload(store, registry, pair, cfg.history_limit)
     return cfg._payload_cache
 
 
-def _step_export(store, cfg: DailyConfig) -> str:
-    from dashboard.export import DEFAULT_OUT, write_payload_dict
+def _step_export(store, cfg: DailyConfig, registry, pair) -> str:
+    from dashboard.export import (
+        DEFAULT_CATALOG_OUT,
+        DEFAULT_OUT,
+        write_catalog,
+        write_payload_dict,
+    )
 
-    out = write_payload_dict(_payload(store, cfg), cfg.out or DEFAULT_OUT)
-    return f"wrote {out}"
+    out = write_payload_dict(_payload(store, cfg, registry, pair), cfg.out or DEFAULT_OUT)
+    # The model alongside the measurements. Corpus-free, so it is meaningful
+    # before the first run and is what a persona-authoring surface reads.
+    catalog = write_catalog(registry, pair, DEFAULT_CATALOG_OUT)
+    return f"wrote {out} and {catalog.name}"
 
 
-def _step_digest(store, cfg: DailyConfig) -> str:
+def _step_digest(store, cfg: DailyConfig, registry, pair) -> str:
     """Render the brief and mail it.
 
     Runs last, after export, so the email describes the same payload the
@@ -335,7 +381,9 @@ def _step_digest(store, cfg: DailyConfig) -> str:
     from digest.render import build_digest
     from digest.send import send
 
-    digest = build_digest(_payload(store, cfg), own_diet=cfg.own_diet)
+    digest = build_digest(
+        _payload(store, cfg, registry, pair), own_diet=cfg.own_diet or pair.mine
+    )
     reason = send(digest)
     if reason is None:
         return f"sent — {digest.subject}"
@@ -374,7 +422,11 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
         if cfg.transformer is not None:
             pcfg.transformer_enabled = cfg.transformer
 
-        registry = load_registry()
+        registry = load_registry(settings=settings)
+        pair = resolve(
+            settings, cfg.reference_mine, cfg.reference_theirs,
+            available=registry.persona_ids(), families=registry.families(),
+        )
         embedder = _build_embedder(settings)
         # Load Mformer once and share it — it is five RoBERTa models.
         transformer = _build_transformer(pcfg) if _needs_transformer(cfg) else None
@@ -390,11 +442,11 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
             "backfill": lambda: _step_backfill(store, cfg, pcfg, registry, embedder, transformer),
             "podcasts": lambda: _step_podcasts(store, cfg, pcfg, registry, embedder,
                                                transformer, progress),
-            "cluster": lambda: _step_cluster(store, cfg),
-            "summarize": lambda: _step_summarize(store, cfg),
-            "snapshot": lambda: _step_snapshot(store, cfg),
-            "export": lambda: _step_export(store, cfg),
-            "digest": lambda: _step_digest(store, cfg),
+            "cluster": lambda: _step_cluster(store, cfg, registry, pair),
+            "summarize": lambda: _step_summarize(store, cfg, registry, pair),
+            "snapshot": lambda: _step_snapshot(store, cfg, registry, pair),
+            "export": lambda: _step_export(store, cfg, registry, pair),
+            "digest": lambda: _step_digest(store, cfg, registry, pair),
         }
         for name in STEPS:
             report.steps.append(_run_step(name, step_args[name], cfg.enabled(name), progress))

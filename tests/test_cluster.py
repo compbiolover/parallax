@@ -72,7 +72,7 @@ def test_label_clusters_ctfidf_prefers_distinctive_terms():
 def test_run_clustering_uses_ctfidf_labels():
     store = Datastore(":memory:")
     _seed_topics(store, HashingEmbedder(dim=256))
-    run_clustering(store)
+    run_clustering(store, MEMBERS)
     labels = [r["label"] for r in store.cluster_rows()]
     # a cluster label should reflect one of the seeded topics, not generic filler
     joined = " ".join(labels).lower()
@@ -81,18 +81,48 @@ def test_run_clustering_uses_ctfidf_labels():
     store.close()
 
 
+MEMBERS = {"self": {"src_self"}, "modeled_ce": {"src_modeled_ce"}}
+
+
 def test_detect_blindspots_direction_and_symmetry():
-    # cluster 0: both diets (not a blindspot); 1: modeled_ce only; 2: self only
+    # cluster 0: both personas (not a blindspot); 1: modeled_ce only; 2: self only
     labels = [0, 0, 0, 0, 1, 1, 1, 2, 2, 2]
-    diets = ["self", "self", "modeled_ce", "modeled_ce",
-             "modeled_ce", "modeled_ce", "modeled_ce",
-             "self", "self", "self"]
+    sources = ["src_self", "src_self", "src_modeled_ce", "src_modeled_ce",
+               "src_modeled_ce", "src_modeled_ce", "src_modeled_ce",
+               "src_self", "src_self", "src_self"]
     titles = ["t"] * 10
-    result = ClusterResult([f"d{i}" for i in range(10)], diets, titles, labels)
-    bs = detect_blindspots(result, dominance=0.8, min_size=3)
+    result = ClusterResult([f"d{i}" for i in range(10)], sources, titles, labels)
+    bs = detect_blindspots(result, MEMBERS, dominance=0.8, min_size=3)
     by_diet = {b.dominant_diet: b for b in bs}
     assert set(by_diet) == {"modeled_ce", "self"}   # both directions surfaced
     assert all(b.cluster_id != 0 for b in bs)       # shared cluster excluded
+
+
+def test_a_third_persona_does_not_dilute_a_blindspot_out_of_existence():
+    """The dominance share used to be measured against every member of the
+    cluster, so a second persona on the same side split the coverage and pushed
+    the leader under the threshold — dropping a real cross-family blindspot for an
+    arithmetic reason."""
+    # One cluster: two docs from the pair's `modeled_ce`, three from a third
+    # persona nobody is comparing against, none from `self`.
+    labels = [0, 0, 0, 0, 0]
+    sources = ["src_modeled_ce", "src_modeled_ce", "src_third", "src_third", "src_third"]
+    result = ClusterResult([f"d{i}" for i in range(5)], sources, ["t"] * 5, labels)
+    bs = detect_blindspots(result, MEMBERS, dominance=0.8, min_size=2)
+    assert [b.dominant_diet for b in bs] == ["modeled_ce"]
+    assert bs[0].dominant_share == 1.0   # of the pair's members, not the cluster's
+    assert bs[0].size == 2               # the pair accounts for two
+    assert bs[0].cluster_size == 5       # the cluster itself is larger
+
+
+def test_a_source_both_personas_read_makes_a_cluster_shared():
+    """Two personas over one shared catalog can read the same outlet. A story it
+    carried reached both of them, so it is not a blindspot for either."""
+    shared = {"self": {"src_shared"}, "modeled_ce": {"src_shared"}}
+    result = ClusterResult(
+        [f"d{i}" for i in range(4)], ["src_shared"] * 4, ["t"] * 4, [0, 0, 0, 0]
+    )
+    assert detect_blindspots(result, shared, dominance=0.8, min_size=2) == []
 
 
 def _seed_topics(store, emb):
@@ -101,7 +131,7 @@ def _seed_topics(store, emb):
         nonlocal i
         did = f"d{i}"
         i += 1
-        store.upsert_document(doc_id=did, diet_id=diet, source_id="s", stratum_id=None,
+        store.upsert_document(doc_id=did, source_id=f"src_{diet}", stratum_id=None,
             url=None, title=title, published_utc=None,
             fetched_utc="2026-07-23T00:00:00+00:00", word_count=50, minhash=None)
         store.upsert_embedding(document_id=did, vector=emb.embed(text), embedder=emb.name)
@@ -117,12 +147,13 @@ def _seed_topics(store, emb):
 def test_run_clustering_end_to_end_separates_topics():
     store = Datastore(":memory:")
     _seed_topics(store, HashingEmbedder(dim=256))
-    outcome = run_clustering(store, min_cluster_size=3, dominance=0.8, min_blindspot_size=3)
+    outcome = run_clustering(store, MEMBERS, min_cluster_size=3, dominance=0.8,
+                             min_blindspot_size=3)
     assert outcome.n_clusters >= 2
     dirs = {b.dominant_diet for b in outcome.blindspots}
     assert "modeled_ce" in dirs and "self" in dirs
     # persisted assignment can be re-read without sklearn
-    assert len(blindspots_from_store(store)) == len(outcome.blindspots)
+    assert len(blindspots_from_store(store, MEMBERS)) == len(outcome.blindspots)
     store.close()
 
 
@@ -150,7 +181,7 @@ def test_clustering_clusters_only_active_embedder():
         fetched_utc="2026-07-23T00:00:00+00:00", word_count=10, minhash=None)
     store.upsert_embedding(document_id="stray", vector=[0.0] * 384, embedder="other(d=384)")
     store.set_meta("embedder", emb.name)
-    outcome = run_clustering(store)  # must not crash; ignores the stray dim-384 doc
+    outcome = run_clustering(store, MEMBERS)  # must not crash; ignores the stray dim-384 doc
     assert outcome.n_docs == 16  # only the 16 seeded same-embedder docs
     store.close()
 
@@ -177,6 +208,6 @@ def test_too_few_docs_is_all_noise():
         url=None, title="t", published_utc=None,
         fetched_utc="2026-07-23T00:00:00+00:00", word_count=10, minhash=None)
     store.upsert_embedding(document_id="d0", vector=emb.embed("hello"), embedder=emb.name)
-    outcome = run_clustering(store)
+    outcome = run_clustering(store, MEMBERS)
     assert outcome.n_clusters == 0 and outcome.blindspots == []
     store.close()

@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import argparse
 
-from ingestion.config import load_settings
+from compare.reference import resolve
+from ingestion.config import load_registry, load_settings
 from ingestion.datastore import Datastore
 
 from .blindspot import run_clustering
@@ -52,10 +53,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--theme-effort",
                         choices=["low", "medium", "high", "xhigh", "max"],
                         help="thinking depth for theme naming (default: low)")
+    parser.add_argument("--mine", help="persona id for your side of the reference pair")
+    parser.add_argument("--theirs", help="persona id for the other side")
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
     themes_cfg = ((settings.get("cluster", {}) or {}).get("themes", {}) or {})
+    registry = load_registry(settings=settings)
+    pair = resolve(
+        settings, args.mine, args.theirs,
+        available=registry.persona_ids(), families=registry.families(),
+    )
     store = Datastore(_db_path(args, settings))
     try:
         if store.embedding_count() == 0:
@@ -63,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         outcome = run_clustering(
             store,
+            {p: set(registry.weights_for(p)) for p in pair},
             min_cluster_size=args.min_cluster_size,
             dominance=args.dominance,
             min_blindspot_size=args.min_blindspot_size,

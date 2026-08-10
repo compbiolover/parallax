@@ -19,6 +19,13 @@ from daily.runner import DailyConfig
 from digest.render import _delta, _label, _own_first, build_digest, render_html, render_text
 from digest.send import NO_CONFIG, MailConfig, build_message, send
 
+from .registries import pair, registry
+
+
+def _reg():
+    """Both personas, each reading its own source."""
+    return registry(self={"src_self": 1.0}, modeled_ce={"src_modeled_ce": 1.0})
+
 FOUNDATIONS = ["care", "fairness", "loyalty", "authority", "sanctity"]
 
 
@@ -675,7 +682,7 @@ def test_an_unsendable_digest_fails_the_step_rather_than_passing_quietly(monkeyp
     monkeypatch.setattr("digest.send.send", lambda *a, **k: NO_CONFIG)
     monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
     with pytest.raises(RuntimeError, match="not configured"):
-        runner._step_digest(object(), DailyConfig(own_diet="self"))
+        runner._step_digest(object(), DailyConfig(own_diet="self"), _reg(), pair())
 
 
 def test_the_step_reports_the_actual_cause_not_a_generic_one(monkeypatch):
@@ -686,13 +693,13 @@ def test_the_step_reports_the_actual_cause_not_a_generic_one(monkeypatch):
                         lambda *a, **k: "digest send failed (OSError: connection refused)")
     monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
     with pytest.raises(RuntimeError, match="connection refused"):
-        runner._step_digest(object(), DailyConfig(own_diet="self"))
+        runner._step_digest(object(), DailyConfig(own_diet="self"), _reg(), pair())
 
 
 def test_a_sent_digest_reports_the_subject(monkeypatch):
     monkeypatch.setattr("digest.send.send", lambda *a, **k: None)
     monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
-    detail = runner._step_digest(object(), DailyConfig(own_diet="self"))
+    detail = runner._step_digest(object(), DailyConfig(own_diet="self"), _reg(), pair())
     assert "0.084" in detail
 
 

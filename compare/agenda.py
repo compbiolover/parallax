@@ -87,39 +87,61 @@ class AgendaComparison:
         }
 
 
-def attention_shares(store: Datastore) -> dict[str, dict[int, float]]:
-    """``{diet: {cluster_id: share of that diet's clustered articles}}``.
+def persona_cluster_counts(store: Datastore, registry) -> dict[str, dict[int, int]]:
+    """``{persona: {cluster_id: article count}}``.
 
-    Shares rather than counts, because the diets do not ingest the same volume
+    Built by crossing the per-source cluster counts with each persona's
+    membership, because a source several personas read contributes its articles to
+    every one of them. A ``GROUP BY diet_id`` cannot express that, which is why
+    the store now groups by source.
+    """
+    per_source: dict[str, dict[int, int]] = {}
+    for row in store.cluster_source_counts():
+        per_source.setdefault(row["source_id"], {})[row["cluster_id"]] = row["n"]
+    counts: dict[str, dict[int, int]] = {}
+    for persona_id in registry.persona_ids():
+        totals: dict[int, int] = {}
+        for source_id in registry.weights_for(persona_id):
+            for cluster_id, n in per_source.get(source_id, {}).items():
+                totals[cluster_id] = totals.get(cluster_id, 0) + n
+        if totals:
+            counts[persona_id] = totals
+    return counts
+
+
+def attention_shares(store: Datastore, registry) -> dict[str, dict[int, float]]:
+    """``{persona: {cluster_id: share of that persona's clustered articles}}``.
+
+    Shares rather than counts, because personas do not consume the same volume
     and a raw-count comparison would measure the source registry rather than the
     agenda.
     """
-    counts: dict[str, dict[int, int]] = {}
-    for row in store.cluster_diet_counts():
-        counts.setdefault(row["diet_id"], {})[row["cluster_id"]] = row["n"]
+    counts = persona_cluster_counts(store, registry)
     shares: dict[str, dict[int, float]] = {}
-    for diet, per_cluster in counts.items():
+    for persona_id, per_cluster in counts.items():
         total = sum(per_cluster.values())
         if total:
-            shares[diet] = {c: n / total for c, n in per_cluster.items()}
+            shares[persona_id] = {c: n / total for c, n in per_cluster.items()}
     return shares
 
 
-def compare_agendas(store: Datastore) -> AgendaComparison | None:
-    """Agenda divergence for the first two diets, or ``None`` if unclusterable.
+def compare_agendas(store: Datastore, registry, pair) -> AgendaComparison | None:
+    """Agenda divergence across the reference pair, or ``None`` if unclusterable.
 
     ``None`` rather than a zero: no clustering and "identical agendas" are not
     the same statement, and the surfaces render an absent metric as silence.
+
+    A story carried by a source *both* personas read counts for both, so it is
+    shared rather than exclusive. That is the correct reading and a consequence of
+    the shared catalog worth stating: overlap between two personas is partly a
+    fact about how much of their source lists coincide.
     """
-    counts: dict[str, dict[int, int]] = {}
-    for row in store.cluster_diet_counts():
-        counts.setdefault(row["diet_id"], {})[row["cluster_id"]] = row["n"]
-    diets = sorted(d for d, per_cluster in counts.items() if sum(per_cluster.values()))
-    if len(diets) < 2:
+    counts = persona_cluster_counts(store, registry)
+    a, b = pair.mine, pair.theirs
+    if a not in counts or b not in counts:
         return None
 
-    a, b = diets[:2]
-    shares = attention_shares(store)
+    shares = attention_shares(store, registry)
     clusters = sorted(set(shares[a]) | set(shares[b]))
     # The same JSD the foundation number uses, over cluster ids instead of
     # foundation names — so the two divergences are on one scale and the
@@ -132,12 +154,12 @@ def compare_agendas(store: Datastore) -> AgendaComparison | None:
 
     exclusive: dict[str, float] = {}
     exclusive_stories: dict[str, int] = {}
-    for diet, other in ((a, b), (b, a)):
-        mine, theirs = counts[diet], counts[other]
-        alone = [c for c in mine if not theirs.get(c)]
-        exclusive_stories[diet] = len(alone)
-        total = sum(mine.values())
-        exclusive[diet] = sum(mine[c] for c in alone) / total if total else 0.0
+    for persona_id, other_id in ((a, b), (b, a)):
+        ours, others = counts[persona_id], counts[other_id]
+        alone = [c for c in ours if not others.get(c)]
+        exclusive_stories[persona_id] = len(alone)
+        total = sum(ours.values())
+        exclusive[persona_id] = sum(ours[c] for c in alone) / total if total else 0.0
 
     shared = len(set(counts[a]) & set(counts[b]))
     articles = {d: sum(counts[d].values()) for d in (a, b)}

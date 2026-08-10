@@ -528,7 +528,7 @@ class _IngestCounters:
         self.skipped_short = 0
         self.near_duplicates = 0
         self.stored = 0
-        self.per_diet: dict[str, int] = {}
+        self.per_source: dict[str, int] = {}
 
     def reason(self) -> str:
         if self.skipped_short:

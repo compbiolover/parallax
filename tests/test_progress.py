@@ -17,11 +17,11 @@ from ingestion.datastore import Datastore
 from ingestion.pipeline import PipelineConfig, SourceProgress, run
 
 
-def _source(sid="fox_news", diet="modeled_ce") -> Source:
+def _source(sid="fox_news", stratum="national_cable") -> Source:
     return Source(
         id=sid, name=sid, medium="digital", role="national", ingest_type="rss",
-        url=f"https://example.com/{sid}/feed", weight=1.0, diet_id=diet,
-        stratum_id="s", diet_weight=1.0, domain="example.com",
+        url=f"https://example.com/{sid}/feed", stratum_id=stratum,
+        domain="example.com",
     )
 
 
@@ -34,11 +34,13 @@ def _event(**kw) -> SourceProgress:
 # -- the line itself --------------------------------------------------------
 
 
-def test_line_carries_position_source_and_diet():
+def test_line_carries_position_source_and_stratum():
     line = format_progress(_event(index=4, total=16))
     assert "[ 4/16]" in line
     assert "fox_news" in line
-    assert "modeled_ce" in line
+    # The stratum, not a diet: a source belongs to one stratum and to as many
+    # personas as list it, so there is no single diet to print here any more.
+    assert "national_cable" in line
 
 
 def test_line_carries_elapsed_seconds():

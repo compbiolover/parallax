@@ -19,7 +19,14 @@ from compare.divergence import jensen_shannon_divergence, log_ratios
 
 from .config import load_registry, load_settings
 from .datastore import Datastore
-from .pipeline import PipelineConfig, RunStats, SourceProgress, backfill, diet_profiles, run
+from .pipeline import (
+    PipelineConfig,
+    RunStats,
+    SourceProgress,
+    backfill,
+    persona_profiles,
+    run,
+)
 
 
 def _db_path(args: argparse.Namespace, settings: dict) -> str:
@@ -36,7 +43,7 @@ def format_progress(event: SourceProgress) -> str:
     double-digit number means something hit the 30s fetch timeout.
     """
     src = event.source
-    head = f"  [{event.index:>2}/{event.total}] {src.id:<28} {src.diet_id:<12}"
+    head = f"  [{event.index:>2}/{event.total}] {src.id:<28} {src.stratum_id:<20}"
     if event.failed:
         return f"{head} feed unreachable ({event.seconds:.1f}s)"
     detail = f"{event.stored} stored / {event.fetched} fetched"
@@ -69,18 +76,18 @@ def _print_stats(stats: RunStats) -> None:
     print(f"  near duplicates    : {stats.near_duplicates}")
     print(f"  skipped (too short): {stats.skipped_short}")
     print(f"  errors             : {stats.errors}")
-    if stats.per_diet:
-        print("  per diet           :")
-        for diet, n in sorted(stats.per_diet.items()):
-            print(f"    {diet}: {n}")
+    if stats.per_source:
+        print("  per source         :")
+        for source_id, n in sorted(stats.per_source.items()):
+            print(f"    {source_id}: {n}")
 
 
-def _print_compare(store: Datastore) -> None:
-    profiles = diet_profiles(store)
+def _print_compare(store: Datastore, registry) -> None:
+    profiles = persona_profiles(store, registry)
     if not profiles:
         print("No scored documents yet — run `python -m ingestion run` first.")
         return
-    print("\nDiet foundation profiles (composition, sums to 1):")
+    print("\nPersona foundation profiles (composition, sums to 1):")
     for diet, prof in profiles.items():
         pretty = ", ".join(f"{k}={v:.3f}" for k, v in prof.items())
         print(f"  {diet}: {pretty}")

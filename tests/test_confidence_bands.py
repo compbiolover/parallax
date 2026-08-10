@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from cluster.embed import HashingEmbedder
-from compare.confidence import diet_band
+from compare.confidence import persona_band
 from dashboard.export import build_payload
 from ingestion.datastore import Datastore
 from ingestion.pipeline import RunStats, _build_transformer, _ingest_one
 from scoring.dictionary import DictionaryScorer
 from scoring.foundations import CLASSIC_FOUNDATIONS
+
+from .registries import pair, registry
 
 
 class _StubTransformer:
@@ -28,6 +30,11 @@ def _source():
     return load_registry().backfillable()[0]
 
 
+def _one_source_registry(source_id: str):
+    """A registry whose single persona reads just this source."""
+    return registry(self={source_id: 1.0})
+
+
 # -- ingestion writes a second (transformer) score row --------------------
 
 def test_ingest_one_stores_transformer_row_when_supplied():
@@ -44,7 +51,7 @@ def test_ingest_one_stores_transformer_row_when_supplied():
     )
     assert "transformer/stub" in store.scorer_names()
     assert "dictionary" in store.scorer_names()
-    rows = store.scores_for_diet(_source().diet_id, "transformer/stub")
+    rows = store.scores_for_sources([_source().id], "transformer/stub")
     assert len(rows) == 1 and rows[0]["care"] == 0.9
     store.close()
 
@@ -118,9 +125,13 @@ def _store_with_paired_scores():
     return store
 
 
-def test_diet_band_point_is_between_the_two_estimates():
+def _weights():
+    return {"s": 1.0}
+
+
+def test_persona_band_point_is_between_the_two_estimates():
     store = _store_with_paired_scores()
-    bands = diet_band(store, "self", "transformer/stub")
+    bands = persona_band(store, _weights(), "transformer/stub")
     care = bands["care"]
     assert care.low == min(care.dictionary, care.transformer)
     assert care.high == max(care.dictionary, care.transformer)
@@ -128,23 +139,23 @@ def test_diet_band_point_is_between_the_two_estimates():
     store.close()
 
 
-def test_diet_band_disagreement_uses_ensemble_vote_convention():
+def test_persona_band_disagreement_uses_ensemble_vote_convention():
     # loyalty: dict rate>0 on doc0 (present), transformer 0.1<=0.5 (absent) -> split;
     # doc1 has no loyalty on either -> agree(absent). So 1/2 docs split.
     store = _store_with_paired_scores()
-    bands = diet_band(store, "self", "transformer/stub")
+    bands = persona_band(store, _weights(), "transformer/stub")
     assert bands["loyalty"].disagreement == 0.5
     assert bands["care"].disagreement == 0.0   # both fire care on both docs
     store.close()
 
 
-def test_diet_band_none_without_transformer_rows():
+def test_persona_band_none_without_transformer_rows():
     store = _store_with_paired_scores()
-    assert diet_band(store, "self", "does-not-exist") is None
+    assert persona_band(store, _weights(), "does-not-exist") is None
     store.close()
 
 
-def test_diet_band_ignores_dictionary_only_backfill_docs():
+def test_persona_band_ignores_dictionary_only_backfill_docs():
     # Both compositions must be built over the *paired* docs only. A dict-only
     # doc (as GDELT backfill produces) would shift the dictionary composition if
     # wrongly included, making the band conflate population with method.
@@ -164,7 +175,7 @@ def test_diet_band_ignores_dictionary_only_backfill_docs():
     store.upsert_scores(document_id="bf", scorer="dictionary", foundations={"loyalty": 1.0},
                         sentiment=0.0, moral_word_ratio=0.1, matched_words=5)
 
-    bands = diet_band(store, "self", "transformer/stub")
+    bands = persona_band(store, _weights(), "transformer/stub")
     # Paired-only: dict composition is pure care (1.0). If the backfill doc leaked
     # in it would be care=0.5, loyalty=0.5.
     assert bands["care"].dictionary == 1.0
@@ -178,7 +189,7 @@ def test_diet_band_ignores_dictionary_only_backfill_docs():
 def test_payload_has_bands_when_transformer_scorer_recorded():
     store = _store_with_paired_scores()
     store.set_meta("transformer_scorer", "transformer/stub")
-    p = build_payload(store)
+    p = build_payload(store, registry(self={"s": 1.0}), pair())
     assert p["has_confidence_bands"] is True
     assert p["band_scorers"]["transformer"] == "transformer/stub"
     diet = p["diets"][0]
@@ -192,7 +203,7 @@ def test_payload_has_bands_when_transformer_scorer_recorded():
 
 def test_payload_no_bands_without_transformer_meta():
     store = _store_with_paired_scores()   # rows exist but meta not set
-    p = build_payload(store)
+    p = build_payload(store, registry(self={"s": 1.0}), pair())
     assert p["has_confidence_bands"] is False
     assert p["band_scorers"] is None
     assert p["diets"][0]["band"] is None

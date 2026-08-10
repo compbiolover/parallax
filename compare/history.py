@@ -40,10 +40,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
 from scoring.foundations import CLASSIC_FOUNDATIONS
+
+logger = logging.getLogger(__name__)
 
 # A week: long enough to survive a quiet weekend, short enough to still move.
 DEFAULT_WINDOW_DAYS = 7
@@ -118,44 +121,57 @@ def today_utc() -> str:
     return datetime.now(UTC).date().isoformat()
 
 
-def _basis(store, scorer: str, since: str | None, until: str) -> Basis:
+def _basis(store, registry, pair, scorer: str, since: str | None, until: str) -> Basis:
     """Profiles, counts, and divergence over one date window.
 
-    Diets with no documents in the window are still reported, at count zero and
-    with no composition — a diet going quiet is a fact about the week, and
-    dropping it would silently reshape the series.
+    Every persona is reported, including those with no documents in the window —
+    at count zero and with no composition. A persona going quiet is a fact about
+    the week, and dropping it would silently reshape the series. That is also why
+    the persona list comes from the registry rather than from the corpus.
+
+    The divergence is computed on the named reference pair. It used to be the
+    first two ids in sorted order, which made the recorded series depend on how
+    the personas happened to be spelled — and would have changed the moment a
+    persona was added.
     """
     # Imported here, not at module scope: ``divergence`` pulls in scipy (~0.3s),
     # and the daily runner imports this module just to read two default constants.
     from compare.divergence import jensen_shannon_divergence, log_ratios
-    from ingestion.pipeline import diet_profiles
+    from ingestion.pipeline import persona_profiles
 
-    profiles = diet_profiles(store, scorer, since=since, until=until)
+    profiles = persona_profiles(store, registry, scorer, since=since, until=until)
     diets = {
-        diet_id: {
+        persona_id: {
             "composition": (
-                _round({f: profiles[diet_id].get(f, 0.0) for f in CLASSIC_FOUNDATIONS})
-                if diet_id in profiles else None
+                _round({f: profiles[persona_id].get(f, 0.0) for f in CLASSIC_FOUNDATIONS})
+                if persona_id in profiles else None
             ),
-            "doc_count": store.doc_count(diet_id, since=since, until=until),
+            "doc_count": store.doc_count_for_sources(
+                registry.weights_for(persona_id), since=since, until=until
+            ),
         }
-        for diet_id in store.diet_ids()
+        for persona_id in registry.persona_ids()
     }
 
-    ids = sorted(profiles)
-    if len(ids) < 2:
+    if pair.mine not in profiles or pair.theirs not in profiles:
         return Basis(jsd=None, pair=None, diets=diets)
-    a, b = ids[:2]
+    a, b = pair.mine, pair.theirs
     return Basis(
         jsd=_round(jensen_shannon_divergence(profiles[a], profiles[b])),
         pair=[a, b],
         diets=diets,
+        # Oriented mine-first, so positive means "my diet over-indexes" as
+        # CLAUDE.md §3(5) specifies. Rows recorded before the pair was named hold
+        # the opposite sign; nothing charts historical log-ratios, and the pair
+        # travels with every row so the two are distinguishable.
         log_ratios=_round(log_ratios(profiles[a], profiles[b])),
     )
 
 
 def build_snapshot(
     store,
+    registry,
+    pair,
     snapshot_date: str | None = None,
     window_days: int = DEFAULT_WINDOW_DAYS,
     scorer: str = "dictionary",
@@ -169,13 +185,18 @@ def build_snapshot(
         generated_utc=datetime.now(UTC).isoformat(),
         window_days=window_days,
         source=source,
-        cumulative=_basis(store, scorer, since=None, until=until),
-        window=_basis(store, scorer, since=_window_start(day, window_days), until=until),
+        cumulative=_basis(store, registry, pair, scorer, since=None, until=until),
+        window=_basis(
+            store, registry, pair, scorer,
+            since=_window_start(day, window_days), until=until,
+        ),
     )
 
 
 def record_snapshot(
     store,
+    registry,
+    pair,
     snapshot_date: str | None = None,
     window_days: int = DEFAULT_WINDOW_DAYS,
     scorer: str = "dictionary",
@@ -185,8 +206,14 @@ def record_snapshot(
 
     Idempotent per date: running the pipeline three times in a morning leaves
     one row, holding the last run's numbers.
+
+    Warns when the reference pair differs from the newest recorded row's. The
+    series keeps its column names across such a change but stops meaning the same
+    thing, and a divergence chart that silently splices two different comparisons
+    is worse than one with a visible gap.
     """
-    snap = build_snapshot(store, snapshot_date, window_days, scorer, source)
+    _warn_on_pair_change(store, pair)
+    snap = build_snapshot(store, registry, pair, snapshot_date, window_days, scorer, source)
     store.upsert_snapshot(
         snapshot_date=snap.snapshot_date,
         generated_utc=snap.generated_utc,
@@ -198,8 +225,28 @@ def record_snapshot(
     return snap
 
 
+def _warn_on_pair_change(store, pair) -> None:
+    rows = store.snapshot_rows()
+    if not rows:
+        return
+    try:
+        payload = json.loads(rows[-1]["payload"])
+    except (ValueError, KeyError, TypeError):
+        return
+    recorded = (payload.get("cumulative") or {}).get("pair")
+    if recorded and list(recorded) != pair.as_list():
+        logger.warning(
+            "reference pair changed from %s vs %s to %s vs %s — earlier points in "
+            "the divergence series describe the previous comparison and are not "
+            "continuous with the ones from here on",
+            recorded[0], recorded[1], pair.mine, pair.theirs,
+        )
+
+
 def backfill_series(
     store,
+    registry,
+    pair,
     days: int = 30,
     window_days: int = DEFAULT_WINDOW_DAYS,
     scorer: str = "dictionary",
@@ -225,7 +272,8 @@ def backfill_series(
             break
         if day in existing:
             continue
-        record_snapshot(store, day, window_days, scorer, source=RECONSTRUCTED)
+        record_snapshot(store, registry, pair, day, window_days, scorer,
+                        source=RECONSTRUCTED)
         written.append(day)
     return sorted(written)
 

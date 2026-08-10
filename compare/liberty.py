@@ -51,9 +51,12 @@ class LibertyProfile:
         return self.docs_scored == 0 or self.coverage < LOW_COVERAGE
 
 
-def diet_liberty_profile(store, diet_id: str, scorer: str) -> LibertyProfile:
-    """Reach-weighted liberty engagement for one diet."""
-    rows, total = store.liberty_for_diet(diet_id, scorer)
+def persona_liberty_profile(store, weights: dict[str, float], scorer: str) -> LibertyProfile:
+    """Reach-weighted liberty engagement for one persona.
+
+    ``weights`` is ``{source_id: weight}`` from ``Registry.weights_for``."""
+    scored, total = store.liberty_for_sources(weights, scorer)
+    rows = [(weights.get(source_id, 0.0), value) for source_id, value in scored]
     if not rows:
         return LibertyProfile(0.0, 0.0, 0, total)
     weight_sum = sum(w for w, _ in rows)
@@ -66,29 +69,28 @@ def diet_liberty_profile(store, diet_id: str, scorer: str) -> LibertyProfile:
     return LibertyProfile(mean, salient, len(rows), total)
 
 
-def all_diet_liberty(store, scorer: str) -> dict[str, LibertyProfile]:
-    """Profiles for every diet with any document in the corpus."""
+def all_persona_liberty(store, registry, scorer: str) -> dict[str, LibertyProfile]:
+    """Profiles for every persona with any document in the corpus."""
     out: dict[str, LibertyProfile] = {}
-    for diet_id in store.diet_ids():
-        profile = diet_liberty_profile(store, diet_id, scorer)
+    for persona_id in registry.persona_ids():
+        profile = persona_liberty_profile(store, registry.weights_for(persona_id), scorer)
         if profile.docs_total:
-            out[diet_id] = profile
+            out[persona_id] = profile
     return out
 
 
-def gap(profiles: dict[str, LibertyProfile]) -> dict | None:
-    """Difference in mean liberty between the first two diets, or ``None``.
+def gap(profiles: dict[str, LibertyProfile], pair) -> dict | None:
+    """Difference in mean liberty across the reference pair, or ``None``.
 
-    Positive means the first diet (alphabetically, matching the rest of the
-    dashboard's pairing) engages liberty more. ``thin`` propagates — a gap drawn
+    Positive means ``pair.mine`` engages liberty more. Oriented rather than
+    alphabetical, so the sign means something. ``thin`` propagates — a gap drawn
     from a thin profile is itself thin.
     """
-    ids = sorted(profiles)
-    if len(ids) < 2:
+    mine, theirs = pair.mine, pair.theirs
+    if mine not in profiles or theirs not in profiles:
         return None
-    a, b = ids[:2]
     return {
-        "pair": [a, b],
-        "mean_gap": profiles[a].mean - profiles[b].mean,
-        "thin": profiles[a].thin or profiles[b].thin,
+        "pair": [mine, theirs],
+        "mean_gap": profiles[mine].mean - profiles[theirs].mean,
+        "thin": profiles[mine].thin or profiles[theirs].thin,
     }

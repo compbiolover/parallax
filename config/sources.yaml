@@ -1,64 +1,118 @@
 # =============================================================================
 # Parallax source registry
 # =============================================================================
-# THE source model for both media diets. This file is the single source of
-# truth for what Parallax ingests, and it is versioned deliberately: every
-# conclusion the tool draws should be reproducible against a specific version
-# of this registry, and sensitivity-tested against the weighting choices below.
+# THE source model for every media diet Parallax compares. This file is the
+# single source of truth for what Parallax ingests, and it is versioned
+# deliberately: every conclusion the tool draws should be reproducible against a
+# specific version of this registry, and sensitivity-tested against the
+# weighting choices below.
 #
 # GUARDRAILS (see CLAUDE.md §0):
-#   - The "modeled" diet is a documented model of OUTLETS AND PROGRAMS, not any
+#   - Every persona here is a documented model of OUTLETS AND PROGRAMS, not any
 #     real individual's consumption. No private communications, ever.
+#   - A persona is a weighting over sources. It is not a person, and nothing
+#     downstream may describe it as one.
 #   - Model what is plausibly *consumed*, not merely what is *published*.
 #     Distinguish outlet bias from audience consumption.
-#   - Represent internal diversity; do not collapse a diet to one voice.
+#   - Represent internal diversity; do not collapse a family to one voice.
 #   - Honor robots.txt, rate limits, and each source's terms. Summarize and
 #     link; never republish.
+#   - Your OWN diet does not belong in this file. This one is public and
+#     committed; a real person's real consumption goes in the gitignored
+#     `config/personas.local.yaml`, which is merged over this file at load.
 #
-# SCHEMA:
+# =============================================================================
+# SCHEMA (version 3)
+# =============================================================================
+# Sources and personas are separate. A source is a fact about a publisher; a
+# persona is a fact about a reader. Keeping them apart is what lets several
+# personas share one source: a passive cable viewer and a devout evangelical
+# both watch Fox, and the catalog holds Fox exactly once. Every source is then
+# fetched, scored, embedded, and tagged once no matter how many personas
+# include it, so adding a persona costs nothing at runtime.
+#
 #   version        int    Bumped on any change to the source set or weights.
 #   updated        date   ISO-8601 date of last change.
-#   diets[]
-#     id           str    Stable machine id ("self" | "modeled_ce").
-#     label        str    Human label, used in prose (summaries name the diet
-#                           with it, so it should read as a noun phrase).
-#     short_label  str    Optional short form for chart legends and panel
-#                           headings, where the full label would wrap.
-#                           Defaults to `label`.
-#     description  str    What this diet models and how it was constructed.
-#     strata[]            Sources grouped by medium/role for stratified weighting.
-#       id         str    Stratum id.
-#       stratum_weight  float  Relative weight of this stratum within the diet.
-#                              Weights within a diet are normalized at runtime.
-#       rationale  str    Why this stratum is included and how it is weighted.
-#       sources[]
-#         id          str   Stable machine id, unique within the file.
-#         name        str   Display name.
-#         medium      enum  news | cable | talk_radio | podcast | youtube | newsletter
-#         role        str   Editorial role this source plays in the diet.
-#         ingest            How to pull it.
-#           type      enum  rss | gdelt | mediacloud | podcast_rss | youtube
-#           url       str   Feed / channel URL. null = TODO, verify before use.
-#           url_env   str   Name of an environment variable holding the feed URL,
-#                             for subscriber feeds whose URL is itself the
-#                             credential (a per-account token in the path or
-#                             query). Used when that variable is set and
-#                             non-empty; `url` is the fallback otherwise, so an
-#                             entry can carry the public feed and upgrade for
-#                             whoever holds the subscription. The name goes here;
-#                             the value goes in the environment (see .env.example
-#                             and scripts/bitwarden.conf.example) and never in
-#                             this file, which is public.
-#         weight      float Relative weight of this source within its stratum.
-#         rationale   str   Why this specific source, in one line.
-#         terms       str   Notes on robots.txt / ToS / rate limits if non-obvious.
+#
+#   strata[]              The global vocabulary of medium/role groupings. Global
+#                           because a stratum is a property of the source, not
+#                           of whoever consumes it.
+#     id           str    Stable stratum id, unique in this file.
+#     description  str    What belongs in this stratum and why it is separated.
+#
+#   catalog[]             Every source, once. No source is owned by a persona.
+#     id          str   Stable machine id, unique within the file. NEVER rename
+#                         one: it is the join key for every stored document, so
+#                         a rename orphans the corpus. The `self_` / `ce_`
+#                         prefixes are historical — they record which persona
+#                         first registered the source, not who may use it.
+#     name        str   Display name.
+#     medium      enum  news | cable | talk_radio | podcast | youtube | newsletter
+#     stratum     str   Which stratum this source belongs to (one, required).
+#     role        str   Editorial role this source plays.
+#     ingest            How to pull it.
+#       type      enum  rss | gdelt | mediacloud | podcast_rss | youtube
+#       url       str   Feed / channel URL. null = TODO, verify before use.
+#       url_env   str   Name of an environment variable holding the feed URL,
+#                         for subscriber feeds whose URL is itself the
+#                         credential (a per-account token in the path or
+#                         query). Used when that variable is set and
+#                         non-empty; `url` is the fallback otherwise, so an
+#                         entry can carry the public feed and upgrade for
+#                         whoever holds the subscription. The name goes here;
+#                         the value goes in the environment (see .env.example
+#                         and scripts/bitwarden.conf.example) and never in
+#                         this file, which is public.
+#     domain      str   Outlet domain for GDELT backfill, when it differs from
+#                         the feed host or the feed URL is null.
+#     rationale   str   Why this specific source, in one line. Required.
+#     terms       str   Notes on robots.txt / ToS / rate limits if non-obvious.
+#
+#   personas[]            A weight profile over the catalog.
+#     id           str   Stable machine id. Used as the diet key everywhere
+#                          downstream, so renaming one breaks recorded history.
+#     label        str   Human label, used in prose (summaries name the persona
+#                          with it, so it should read as a noun phrase).
+#     short_label  str   Optional short form for chart legends and panel
+#                          headings, where the full label would wrap.
+#                          Defaults to `label`.
+#     family       str   Which side of the comparison this persona belongs to.
+#                          Personas within a family are variants, not opponents.
+#     description  str   What this persona models and how it was constructed.
+#     strata            Map of stratum id -> weight. The medium-level multiplier:
+#                          it says how much a whole medium counts for this
+#                          reader, so per-source numbers stay small and
+#                          comparable within a stratum.
+#     sources           Map of source id -> weight within its stratum. This is
+#                          also the MEMBERSHIP LIST: a persona consumes exactly
+#                          the sources listed here and nothing else.
+#
+# Membership is opt-in, not inherited from the stratum, and that is deliberate.
+# Strata are shared — `podcasts` holds both NPR's Up First and Relatable — so
+# "every source in a weighted stratum" would hand every persona every other
+# persona's podcasts. The alternative to opt-in is an exclusion list per persona
+# that has to grow every time anyone adds a source, which is exactly the kind of
+# quiet, load-bearing omission this file is written to avoid. Listing membership
+# also means reading a persona tells you its entire diet.
+#
+# A source's effective weight is `strata[source.stratum] * sources[source.id]`.
+# Only *relative* weights matter — aggregation divides by the total — so the
+# absolute scale of these numbers carries no meaning on its own. Listing a source
+# whose stratum this persona gives no weight is an error, not a silent zero.
+#
+# CAUTION, and it is a real one: `stratum_weight` is a per-source multiplier,
+# NOT that stratum's share of the diet. Because strata hold different numbers of
+# sources, a stratum weighted 0.10 across ten sources contributes far more total
+# weight than one weighted 0.36 across two. `self`'s nominal 0.10 audio/video
+# strata are really about 18% of its weight. Read these numbers as relative
+# multipliers and check any conclusion against a re-weighting (CLAUDE.md §5).
 #
 # NOTE ON null URLs: a null `url` is an explicit TODO. Feed URLs must be
 # verified live (they move) before the source is activated in ingestion.
 # =============================================================================
 
-version: 2
-updated: 2026-08-07
+version: 3
+updated: 2026-08-10
 
 # Foundations this registry's downstream scoring targets. Kept here for
 # provenance; the scorer is the authority on the active label set.
@@ -70,349 +124,530 @@ foundations:
   - sanctity/degradation
   - liberty/oppression        # Claude-tagged; not covered by dictionary baseline
 
-diets:
+# =============================================================================
+# STRATA
+# =============================================================================
+strata:
+  - id: national_dailies
+    description: >
+      National general-interest dailies — the backbone of a mainstream diet.
+      Heavy syndication overlap across these and the wires; dedup matters.
+  - id: public_broadcast
+    description: >
+      Public and broadcast news — measured, institutional framing that
+      contrasts with the opinion-forward outlets in every family.
+  - id: long_form
+    description: >
+      Long-form magazines and explainer outlets — where framing and moral
+      argument are most explicit, so foundation signal is strongest here.
+  - id: national_cable
+    description: >
+      National cable news and its opinion desks. A large share of conservative
+      news attention, and the medium most likely to dominate a profile if
+      over-weighted.
+  - id: talk_radio
+    description: >
+      Talk radio and commentary audio. Under-measured by text-only tools yet
+      central to conservative media diets. Ingested via audio feeds and
+      transcribed (faster-whisper).
+  - id: digital_outlets
+    description: >
+      Digital-native outlets spanning hard-news-adjacent to explicitly
+      movement-aligned reporting. Captures written framing at scale.
+  - id: faith_media
+    description: >
+      Explicitly evangelical/Christian news outlets. Central to the sanctity and
+      loyalty framing this project studies; must not be omitted or collapsed
+      into generic "conservative".
+  - id: podcasts
+    description: >
+      Long-form podcast audio — the least syndicated, least filtered part of a
+      diet, and invisible to a text-only pipeline.
+  - id: youtube
+    description: >
+      Video programs, kept separate from podcasts because the ingest path is
+      different: captions first (youtube-transcript-api), audio fallback.
+
+# =============================================================================
+# CATALOG — every source, once. Grouped by stratum for readability only;
+# each entry's `stratum` field is what the loader reads.
+# =============================================================================
+catalog:
+
   # ---------------------------------------------------------------------------
-  # DIET 1 — the author's own diet ("self").
-  # Mainstream / center-left diet, stratified by role. Feed URLs verified live
-  # 2026-07-23 (HTTP 200, valid RSS/Atom); the podcast feeds added 2026-08-07
-  # were verified the same way, the YouTube ones could not be — see the note in
-  # that stratum. This is an editable model: tune the
-  # source set and reweight by your real attention. Because the pipeline is
-  # symmetric, this diet's foundation skew and blindspots are surfaced with
-  # equal prominence.
+  # national_dailies
+  # Feed URLs verified live 2026-07-23 (HTTP 200, valid RSS/Atom) except where
+  # a comment says otherwise.
+  # ---------------------------------------------------------------------------
+  - id: self_nyt_home
+    name: "The New York Times — Home Page"
+    medium: news
+    stratum: national_dailies
+    role: "national daily of record"
+    ingest:
+      type: rss
+      url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
+    rationale: "Highest-attention national daily; broad agenda-setting coverage."
+  - id: self_wapo_national
+    name: "The Washington Post — National"
+    medium: news
+    stratum: national_dailies
+    role: "national daily"
+    ingest:
+      type: rss
+      url: "https://feeds.washingtonpost.com/rss/national"
+    rationale: "Politics-heavy national coverage; strong care/fairness salience."
+  - id: self_guardian_us
+    name: "The Guardian — US"
+    medium: news
+    stratum: national_dailies
+    role: "center-left national daily"
+    ingest:
+      type: rss
+      url: "https://www.theguardian.com/us/rss"
+    rationale: "Explicit center-left framing; pronounced care/fairness emphasis."
+  - id: self_politico_picks
+    name: "Politico — Picks"
+    medium: news
+    stratum: national_dailies
+    role: "digital politics outlet"
+    ingest:
+      type: rss
+      # Politico's flagship feed (feed index: https://www.politico.com/rss).
+      # Genuine and long-standing, but Politico's edge returns 403 to
+      # datacenter/bot IPs, so it could NOT be verified from CI on
+      # 2026-07-23 — verify from a residential IP before relying on it.
+      url: "https://www.politico.com/rss/politicopicks.xml"
+    rationale: "Inside-DC politics framing; heavy authority/fairness salience."
+  - id: self_ap_topnews
+    name: "AP News — Top News"
+    medium: news
+    stratum: national_dailies
+    role: "wire service"
+    ingest:
+      type: rss
+      # AP dropped official RSS. The community project
+      # https://github.com/rererecursive/associated-press-rss can
+      # regenerate feeds, but its public S3 host now 404s (dead as of
+      # 2026-07-23). Self-host that scraper and point this url at your
+      # instance to activate. Left null so ingestion skips it until then.
+      url: null
+    # GDELT can still backfill AP historically by domain even without RSS.
+    domain: apnews.com
+    rationale: "Wire baseline; heavy syndication across the diet — dedup matters."
+
+  # ---------------------------------------------------------------------------
+  # public_broadcast
+  # ---------------------------------------------------------------------------
+  - id: self_npr_news
+    name: "NPR — News"
+    medium: news
+    stratum: public_broadcast
+    role: "public-radio national desk"
+    ingest:
+      type: rss
+      url: "https://feeds.npr.org/1001/rss.xml"
+    rationale: "Broad national coverage; public-radio framing."
+  - id: self_npr_politics
+    name: "NPR — Politics"
+    medium: news
+    stratum: public_broadcast
+    role: "public-radio politics desk"
+    ingest:
+      type: rss
+      url: "https://feeds.npr.org/1014/rss.xml"
+    rationale: "Politics vertical; sharpens the authority/fairness signal."
+  - id: self_pbs_newshour
+    name: "PBS NewsHour"
+    medium: news
+    stratum: public_broadcast
+    role: "public-television news"
+    ingest:
+      type: rss
+      url: "https://www.pbs.org/newshour/feeds/rss/headlines"
+    rationale: "Measured broadcast framing; long-form segments."
+  - id: self_bbc_world
+    name: "BBC News — World"
+    medium: news
+    stratum: public_broadcast
+    role: "international broadcaster"
+    ingest:
+      type: rss
+      url: "https://feeds.bbci.co.uk/news/world/rss.xml"
+    domain: bbc.com          # feed host is bbci.co.uk; articles live on bbc.com
+    rationale: "Non-US vantage point; counterweight to domestic framing."
+
+  # ---------------------------------------------------------------------------
+  # long_form
+  # ---------------------------------------------------------------------------
+  - id: self_atlantic
+    name: "The Atlantic"
+    medium: news
+    stratum: long_form
+    role: "long-form magazine"
+    ingest:
+      type: rss
+      url: "https://www.theatlantic.com/feed/all/"
+    rationale: "Essayistic, argument-forward; high explicit-morality density."
+  - id: self_vox
+    name: "Vox"
+    medium: news
+    stratum: long_form
+    role: "explainer / analysis"
+    ingest:
+      type: rss
+      url: "https://www.vox.com/rss/index.xml"
+    rationale: "Explainer framing; foregrounds care/fairness reasoning."
+  - id: self_goodgood
+    name: "Good Good News"
+    medium: news
+    stratum: long_form
+    role: "solutions / constructive journalism"
+    ingest:
+      type: rss
+      # Read in print and on the web, and ingestable as neither. As of
+      # 2026-08-07 goodgood.org serves a client-rendered app with no
+      # feed at /feed, /rss, /feed.xml or /sitemap.xml (all 404, as does
+      # /robots.txt), so there is nothing to subscribe to and no crawl
+      # policy to honour. The print edition is out of reach by
+      # definition. Left null so ingestion skips it; if they publish a
+      # feed, this entry is ready for the URL.
+      url: null
+    domain: goodgood.org
+    # Recorded even though it cannot be fetched. A source that shapes
+    # the diet but never reaches the corpus is a hole in the model, and
+    # a hole nobody wrote down reads later as an absence of that kind of
+    # coverage rather than an absence of measurement. This one is
+    # load-bearing: constructive journalism is the diet's main
+    # counterweight to conflict framing, and its absence pushes the
+    # measured profile toward harm.
+    rationale: "Solutions-first framing; the diet's counterweight to conflict-driven coverage."
+
+  # ---------------------------------------------------------------------------
+  # national_cable
+  # ---------------------------------------------------------------------------
+  - id: ce_foxnews_latest
+    name: "Fox News — Latest"
+    medium: cable
+    stratum: national_cable
+    role: "dominant national cable news"
+    ingest:
+      type: rss
+      url: "https://moxie.foxnews.com/google-publisher/latest.xml"
+    rationale: "Largest-reach conservative cable outlet; anchors the stratum."
+  - id: ce_foxnews_opinion
+    name: "Fox News — Opinion"
+    medium: cable
+    stratum: national_cable
+    role: "cable opinion / commentary"
+    ingest:
+      type: rss
+      url: "https://moxie.foxnews.com/google-publisher/opinion.xml"
+    rationale: "Opinion desk carries more explicit foundation framing than hard news."
+
+  # ---------------------------------------------------------------------------
+  # talk_radio
+  # ---------------------------------------------------------------------------
+  - id: ce_dailywire_mattwalsh
+    name: "The Matt Walsh Show (The Daily Wire)"
+    medium: talk_radio
+    stratum: talk_radio
+    role: "commentary talk audio"
+    ingest:
+      type: podcast_rss
+      # Daily Wire flagship commentary program (resolved via iTunes
+      # lookup). 2215 episodes with audio enclosures; verified 2026-07-23.
+      url: "https://rss.pdrl.fm/1fc256/feeds.megaphone.fm/BVDWV7762869899"
+    rationale: "Representative commentary talk audio; transcribe before scoring."
+
+  # ---------------------------------------------------------------------------
+  # digital_outlets
+  # ---------------------------------------------------------------------------
+  - id: ce_dailywire_news
+    name: "The Daily Wire — News"
+    medium: news
+    stratum: digital_outlets
+    role: "digital conservative outlet"
+    ingest:
+      type: rss
+      url: "https://www.dailywire.com/feeds/rss.xml"   # verified 2026-07-23 (50 items)
+    rationale: "High-reach digital conservative outlet."
+  - id: ce_thefp
+    name: "The Free Press"
+    medium: newsletter
+    stratum: digital_outlets
+    role: "heterodox / center-right digital"
+    ingest:
+      type: rss
+      url: "https://www.thefp.com/feed"
+    rationale: "Adds internal diversity; heterodox rather than movement-aligned."
+
+  # ---------------------------------------------------------------------------
+  # faith_media
+  # ---------------------------------------------------------------------------
+  - id: ce_christianitytoday
+    name: "Christianity Today"
+    medium: news
+    stratum: faith_media
+    role: "flagship evangelical magazine"
+    ingest:
+      type: rss
+      url: "https://www.christianitytoday.com/rss/"
+    rationale: "Mainstream-evangelical framing; strong sanctity/loyalty salience."
+  - id: ce_worldnews
+    name: "WORLD News Group"
+    medium: news
+    stratum: faith_media
+    role: "evangelical newsmagazine"
+    ingest:
+      type: rss
+      # WORLD's main news feed. wng.org also publishes podcast feeds
+      # (e.g. worldandeverything.xml) if audio is added later.
+      url: "https://wng.org/feeds/rss/topics.rss"   # verified 2026-07-23
+    rationale: "Explicitly Christian-worldview reporting; complements CT."
+
+  # ---------------------------------------------------------------------------
+  # podcasts
+  # Feed URLs verified live 2026-08-07 (HTTP 200, audio enclosures present).
+  # ---------------------------------------------------------------------------
+  - id: self_npr_upfirst
+    name: "Up First (NPR)"
+    medium: podcast
+    stratum: podcasts
+    role: "daily public-radio news briefing"
+    ingest:
+      type: podcast_rss
+      # 500 episodes with audio enclosures; verified 2026-08-07.
+      url: "https://feeds.npr.org/510318/podcast.xml"
+    rationale: "Daily national briefing; the audio counterpart to the NPR desks above."
+  - id: self_pbs_newshour_show
+    name: "PBS News Hour — Full Show"
+    medium: podcast
+    stratum: podcasts
+    role: "public-television nightly news"
+    ingest:
+      type: podcast_rss
+      # Resolved via iTunes lookup; 29 episodes live in the feed at a
+      # time, with audio enclosures. Verified 2026-08-07.
+      url: "https://www.pbs.org/newshour/feeds/rss/podcasts/show"
+    # Same newsroom as `self_pbs_newshour` above, in a different medium.
+    # Deliberate — a broadcast segment and a web headline frame the same
+    # story differently — but it does double-count PBS at the outlet
+    # level, and transcript text is unlikely to dedup against article
+    # text. Drop one of the two if PBS starts dominating the profile.
+    rationale: "Broadcast framing of the day's stories; overlaps the PBS RSS feed by design."
+  - id: self_nyt_daily
+    name: "The Daily (The New York Times)"
+    medium: podcast
+    stratum: podcasts
+    role: "daily news narrative"
+    ingest:
+      type: podcast_rss
+      # 2939 episodes with audio enclosures; verified 2026-08-07.
+      url: "https://feeds.simplecast.com/54nAGcIl"
+    rationale: "One story told at length; more explicit moral framing than the same paper's copy."
+  - id: self_radio_atlantic
+    name: "Radio Atlantic (The Atlantic)"
+    medium: podcast
+    stratum: podcasts
+    role: "long-form magazine audio"
+    ingest:
+      type: podcast_rss
+      # 377 episodes with audio enclosures; verified 2026-08-07.
+      url: "https://feeds.megaphone.fm/radioatlantic"
+    rationale: "Audio arm of a magazine already in the diet; argument-forward, high moral density."
+  - id: self_economist_intelligence
+    name: "The Intelligence (The Economist)"
+    medium: podcast
+    stratum: podcasts
+    role: "international daily analysis"
+    ingest:
+      type: podcast_rss
+      # 1990 episodes with audio enclosures; verified 2026-08-07.
+      url: "https://access.acast.com/rss/d556eb54-6160-4c85-95f4-47d9f5216c49"
+    rationale: "Non-US vantage and a market-liberal frame absent elsewhere in this diet."
+    terms: >
+      Some Economist episodes are subscriber-gated; the public feed can
+      carry a trailer where a full episode is expected. Check what
+      actually transcribes before trusting the weight.
+  - id: self_jacobin_radio
+    name: "Jacobin Radio"
+    medium: podcast
+    stratum: podcasts
+    role: "socialist-left commentary"
+    ingest:
+      type: podcast_rss
+      # 1887 episodes with audio enclosures; verified 2026-08-07.
+      url: "https://pinecast.com/feed/jacobin"
+    rationale: "Left-of-liberal frame; the diet's only source arguing from outside the liberal consensus."
+  - id: self_makingsense_harris
+    name: "Making Sense with Sam Harris"
+    medium: podcast
+    stratum: podcasts
+    role: "long-form interview / secular commentary"
+    ingest:
+      type: podcast_rss
+      # A Making Sense subscription comes with a per-account feed
+      # (samharris.org/subscriber-rss/?id=...). The token in that URL is
+      # the credential, and Sam Harris's own help pages say not to share
+      # it, so it is named here and stored in the environment — never
+      # written into this file. Put the value in Bitwarden Secrets
+      # Manager and let scripts/parallax-daily.sh export it.
+      url_env: PARALLAX_FEED_MAKINGSENSE
+      # Fallback for anyone without the subscription: the public feed,
+      # 502 items, verified 2026-08-07.
+      url: "https://rss.libsyn.com/shows/94577/destinations/480596.xml"
+    rationale: "Past rather than current listening; weighted to match."
+    terms: >
+      The public feed carries partial episodes — full audio is behind a
+      subscription. Transcripts will be truncated, which biases any
+      score toward the opening framing of an episode. Setting
+      PARALLAX_FEED_MAKINGSENSE to the subscriber feed removes that
+      bias; the subscriber URL is personal and must not be committed or
+      shared.
+  - id: ce_relatable_stuckey
+    name: "Relatable with Allie Beth Stuckey"
+    medium: podcast
+    stratum: podcasts
+    role: "long-form evangelical commentary"
+    ingest:
+      type: podcast_rss
+      # Resolved from Apple Podcasts id 1359249098 via iTunes lookup.
+      # 1445 episodes with audio enclosures; verified 2026-07-23.
+      url: "https://feeds.megaphone.fm/BMDC9964487814"
+    rationale: "Explicitly evangelical long-form commentary; transcribe before scoring."
+
+  # ---------------------------------------------------------------------------
+  # youtube
+  # Channel ids were read from the live channel pages on 2026-08-07 and
+  # are correct. The feed URLs themselves could NOT be verified from
+  # here: youtube.com/feeds/videos.xml returns 404 to this datacenter
+  # IP for every channel, including known-good ones. Same situation as
+  # `self_politico_picks` above — verify from a residential IP before
+  # relying on them.
+  # ---------------------------------------------------------------------------
+  - id: self_yt_alex_oconnor
+    name: "Alex O'Connor"
+    medium: youtube
+    stratum: youtube
+    role: "philosophy of religion, long-form"
+    ingest:
+      type: youtube
+      url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCC6qovOj_5xHoPmwcIEhcMQ"
+    rationale: "Moral argument made explicit — unusually direct evidence of which foundations are in play."
+  - id: self_yt_paulogia
+    name: "Paulogia"
+    medium: youtube
+    stratum: youtube
+    role: "ex-Christian apologetics criticism"
+    ingest:
+      type: youtube
+      url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCC0_0zNfnHBNi50okydMGkw"
+    # The one source here that speaks directly to the other family's
+    # subject matter, which makes it the most likely to produce
+    # same-story clusters rather than a blindspot in one direction.
+    rationale: "Addresses evangelical claims directly; sanctity and authority discourse from the outside."
+  - id: self_yt_frontline
+    name: "FRONTLINE PBS"
+    medium: youtube
+    stratum: youtube
+    role: "documentary journalism"
+    ingest:
+      type: youtube
+      url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCdsOGt7RU-E_u7gPKsFoSqQ"
+    rationale: "Feature-length investigation; care/harm framing at a length no daily reaches."
+    terms: >
+      Captions first (youtube-transcript-api), audio fallback. Summarize
+      and link only — never republish transcript text.
+
+# =============================================================================
+# PERSONAS
+# =============================================================================
+personas:
+
+  # ---------------------------------------------------------------------------
+  # `self` — the author's own diet, and one half of the default reference pair.
+  #
+  # This is an editable model: tune the weights to your real attention. Because
+  # the pipeline is symmetric, this persona's foundation skew and blindspots are
+  # surfaced with equal prominence to any other.
+  #
+  # The weights below are unchanged from registry version 2, where they were
+  # `stratum_weight * source weight` inside a nested `self` diet. Both `podcasts`
+  # and `youtube` carry 0.10 because version 2 held them in ONE stratum weighted
+  # 0.10; splitting that stratum while halving the number would have quietly
+  # halved every audio and video source. Only relative weights matter, so
+  # repeating the multiplier is exactly weight-preserving — which is what keeps
+  # the recorded divergence series continuous across the version bump.
   # ---------------------------------------------------------------------------
   - id: self
     label: "My diet"
     short_label: "My diet"
+    family: left
     description: >
       A model of the author's own media consumption: mainstream / center-left
       national news, public broadcasting, and long-form magazines. Weights are a
       first draft — adjust to reflect actual attention. Because the pipeline is
       symmetric, this diet's foundation skew and blindspots are reported as
-      prominently as the modeled diet's.
+      prominently as any modeled persona's.
     strata:
-      - id: national_dailies
-        stratum_weight: 0.36
-        rationale: >
-          National general-interest dailies — the backbone of the diet. Heavy
-          syndication overlap across these and the wires; dedup matters.
-        sources:
-          - id: self_nyt_home
-            name: "The New York Times — Home Page"
-            medium: news
-            role: "national daily of record"
-            ingest:
-              type: rss
-              url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
-            weight: 1.0
-            rationale: "Highest-attention national daily; broad agenda-setting coverage."
-          - id: self_wapo_national
-            name: "The Washington Post — National"
-            medium: news
-            role: "national daily"
-            ingest:
-              type: rss
-              url: "https://feeds.washingtonpost.com/rss/national"
-            weight: 0.9
-            rationale: "Politics-heavy national coverage; strong care/fairness salience."
-          - id: self_guardian_us
-            name: "The Guardian — US"
-            medium: news
-            role: "center-left national daily"
-            ingest:
-              type: rss
-              url: "https://www.theguardian.com/us/rss"
-            weight: 0.8
-            rationale: "Explicit center-left framing; pronounced care/fairness emphasis."
-          - id: self_politico_picks
-            name: "Politico — Picks"
-            medium: news
-            role: "digital politics outlet"
-            ingest:
-              type: rss
-              # Politico's flagship feed (feed index: https://www.politico.com/rss).
-              # Genuine and long-standing, but Politico's edge returns 403 to
-              # datacenter/bot IPs, so it could NOT be verified from CI on
-              # 2026-07-23 — verify from a residential IP before relying on it.
-              url: "https://www.politico.com/rss/politicopicks.xml"
-            weight: 0.7
-            rationale: "Inside-DC politics framing; heavy authority/fairness salience."
-          - id: self_ap_topnews
-            name: "AP News — Top News"
-            medium: news
-            role: "wire service"
-            ingest:
-              type: rss
-              # AP dropped official RSS. The community project
-              # https://github.com/rererecursive/associated-press-rss can
-              # regenerate feeds, but its public S3 host now 404s (dead as of
-              # 2026-07-23). Self-host that scraper and point this url at your
-              # instance to activate. Left null so ingestion skips it until then.
-              url: null
-            # GDELT can still backfill AP historically by domain even without RSS.
-            domain: apnews.com
-            weight: 0.7
-            rationale: "Wire baseline; heavy syndication across the diet — dedup matters."
-
-      - id: public_broadcast
-        stratum_weight: 0.31
-        rationale: >
-          Public and broadcast news — measured, institutional framing that
-          contrasts with the opinion-forward outlets in both diets.
-        sources:
-          - id: self_npr_news
-            name: "NPR — News"
-            medium: news
-            role: "public-radio national desk"
-            ingest:
-              type: rss
-              url: "https://feeds.npr.org/1001/rss.xml"
-            weight: 1.0
-            rationale: "Broad national coverage; public-radio framing."
-          - id: self_npr_politics
-            name: "NPR — Politics"
-            medium: news
-            role: "public-radio politics desk"
-            ingest:
-              type: rss
-              url: "https://feeds.npr.org/1014/rss.xml"
-            weight: 0.7
-            rationale: "Politics vertical; sharpens the authority/fairness signal."
-          - id: self_pbs_newshour
-            name: "PBS NewsHour"
-            medium: news
-            role: "public-television news"
-            ingest:
-              type: rss
-              url: "https://www.pbs.org/newshour/feeds/rss/headlines"
-            weight: 0.7
-            rationale: "Measured broadcast framing; long-form segments."
-          - id: self_bbc_world
-            name: "BBC News — World"
-            medium: news
-            role: "international broadcaster"
-            ingest:
-              type: rss
-              url: "https://feeds.bbci.co.uk/news/world/rss.xml"
-            domain: bbc.com          # feed host is bbci.co.uk; articles live on bbc.com
-            weight: 0.8
-            rationale: "Non-US vantage point; counterweight to domestic framing."
-
-      - id: long_form
-        stratum_weight: 0.23
-        rationale: >
-          Long-form magazines and explainer outlets — where framing and moral
-          argument are most explicit, so foundation signal is strongest here.
-        sources:
-          - id: self_atlantic
-            name: "The Atlantic"
-            medium: news
-            role: "long-form magazine"
-            ingest:
-              type: rss
-              url: "https://www.theatlantic.com/feed/all/"
-            weight: 1.0
-            rationale: "Essayistic, argument-forward; high explicit-morality density."
-          - id: self_vox
-            name: "Vox"
-            medium: news
-            role: "explainer / analysis"
-            ingest:
-              type: rss
-              url: "https://www.vox.com/rss/index.xml"
-            weight: 0.8
-            rationale: "Explainer framing; foregrounds care/fairness reasoning."
-          - id: self_goodgood
-            name: "Good Good News"
-            medium: news
-            role: "solutions / constructive journalism"
-            ingest:
-              type: rss
-              # Read in print and on the web, and ingestable as neither. As of
-              # 2026-08-07 goodgood.org serves a client-rendered app with no
-              # feed at /feed, /rss, /feed.xml or /sitemap.xml (all 404, as does
-              # /robots.txt), so there is nothing to subscribe to and no crawl
-              # policy to honour. The print edition is out of reach by
-              # definition. Left null so ingestion skips it; if they publish a
-              # feed, this entry is ready for the URL.
-              url: null
-            domain: goodgood.org
-            weight: 0.5
-            # Recorded even though it cannot be fetched. A source that shapes
-            # the diet but never reaches the corpus is a hole in the model, and
-            # a hole nobody wrote down reads later as an absence of that kind of
-            # coverage rather than an absence of measurement. This one is
-            # load-bearing: constructive journalism is the diet's main
-            # counterweight to conflict framing, and its absence pushes the
-            # measured profile toward harm.
-            rationale: "Solutions-first framing; the diet's counterweight to conflict-driven coverage."
-
-      - id: podcasts_youtube
-        stratum_weight: 0.10
-        rationale: >
-          Audio and video: the least syndicated, least filtered part of the
-          diet, and the part a text-only pipeline cannot see at all. Weighted
-          at 0.10 deliberately — this is listening the author is taking up
-          rather than listening already established, and §5 says model what is
-          consumed, not what is intended. An aspirational weight would inflate
-          a slice of the diet that is not being consumed yet, and it would do
-          so on the side of the comparison where the author is least likely to
-          notice. Raise it once the habit is real; it is the single easiest
-          number in this file to check against your own week.
-
-          Note that nothing ingests these yet — the pipeline pulls `rss` only
-          (Phase 4 in CLAUDE.md). They are registered so the model is written
-          down and the weights are ready when it lands.
-        sources:
-          # -- podcasts -------------------------------------------------------
-          - id: self_npr_upfirst
-            name: "Up First (NPR)"
-            medium: podcast
-            role: "daily public-radio news briefing"
-            ingest:
-              type: podcast_rss
-              # 500 episodes with audio enclosures; verified 2026-08-07.
-              url: "https://feeds.npr.org/510318/podcast.xml"
-            weight: 1.0
-            rationale: "Daily national briefing; the audio counterpart to the NPR desks above."
-          - id: self_pbs_newshour_show
-            name: "PBS News Hour — Full Show"
-            medium: podcast
-            role: "public-television nightly news"
-            ingest:
-              type: podcast_rss
-              # Resolved via iTunes lookup; 29 episodes live in the feed at a
-              # time, with audio enclosures. Verified 2026-08-07.
-              url: "https://www.pbs.org/newshour/feeds/rss/podcasts/show"
-            weight: 0.7
-            # Same newsroom as `self_pbs_newshour` above, in a different medium.
-            # Deliberate — a broadcast segment and a web headline frame the same
-            # story differently — but it does double-count PBS at the outlet
-            # level, and transcript text is unlikely to dedup against article
-            # text. Drop one of the two if PBS starts dominating the profile.
-            rationale: "Broadcast framing of the day's stories; overlaps the PBS RSS feed by design."
-          - id: self_nyt_daily
-            name: "The Daily (The New York Times)"
-            medium: podcast
-            role: "daily news narrative"
-            ingest:
-              type: podcast_rss
-              # 2939 episodes with audio enclosures; verified 2026-08-07.
-              url: "https://feeds.simplecast.com/54nAGcIl"
-            weight: 0.9
-            rationale: "One story told at length; more explicit moral framing than the same paper's copy."
-          - id: self_radio_atlantic
-            name: "Radio Atlantic (The Atlantic)"
-            medium: podcast
-            role: "long-form magazine audio"
-            ingest:
-              type: podcast_rss
-              # 377 episodes with audio enclosures; verified 2026-08-07.
-              url: "https://feeds.megaphone.fm/radioatlantic"
-            weight: 0.7
-            rationale: "Audio arm of a magazine already in the diet; argument-forward, high moral density."
-          - id: self_economist_intelligence
-            name: "The Intelligence (The Economist)"
-            medium: podcast
-            role: "international daily analysis"
-            ingest:
-              type: podcast_rss
-              # 1990 episodes with audio enclosures; verified 2026-08-07.
-              url: "https://access.acast.com/rss/d556eb54-6160-4c85-95f4-47d9f5216c49"
-            weight: 0.7
-            rationale: "Non-US vantage and a market-liberal frame absent elsewhere in this diet."
-            terms: >
-              Some Economist episodes are subscriber-gated; the public feed can
-              carry a trailer where a full episode is expected. Check what
-              actually transcribes before trusting the weight.
-          - id: self_jacobin_radio
-            name: "Jacobin Radio"
-            medium: podcast
-            role: "socialist-left commentary"
-            ingest:
-              type: podcast_rss
-              # 1887 episodes with audio enclosures; verified 2026-08-07.
-              url: "https://pinecast.com/feed/jacobin"
-            weight: 0.5
-            rationale: "Left-of-liberal frame; the diet's only source arguing from outside the liberal consensus."
-          - id: self_makingsense_harris
-            name: "Making Sense with Sam Harris"
-            medium: podcast
-            role: "long-form interview / secular commentary"
-            ingest:
-              type: podcast_rss
-              # A Making Sense subscription comes with a per-account feed
-              # (samharris.org/subscriber-rss/?id=...). The token in that URL is
-              # the credential, and Sam Harris's own help pages say not to share
-              # it, so it is named here and stored in the environment — never
-              # written into this file. Put the value in Bitwarden Secrets
-              # Manager and let scripts/parallax-daily.sh export it.
-              url_env: PARALLAX_FEED_MAKINGSENSE
-              # Fallback for anyone without the subscription: the public feed,
-              # 502 items, verified 2026-08-07.
-              url: "https://rss.libsyn.com/shows/94577/destinations/480596.xml"
-            weight: 0.4
-            rationale: "Past rather than current listening; weighted to match."
-            terms: >
-              The public feed carries partial episodes — full audio is behind a
-              subscription. Transcripts will be truncated, which biases any
-              score toward the opening framing of an episode. Setting
-              PARALLAX_FEED_MAKINGSENSE to the subscriber feed removes that
-              bias; the subscriber URL is personal and must not be committed or
-              shared.
-
-          # -- youtube --------------------------------------------------------
-          # Channel ids were read from the live channel pages on 2026-08-07 and
-          # are correct. The feed URLs themselves could NOT be verified from
-          # here: youtube.com/feeds/videos.xml returns 404 to this datacenter
-          # IP for every channel, including known-good ones. Same situation as
-          # `self_politico_picks` above — verify from a residential IP before
-          # relying on them.
-          - id: self_yt_alex_oconnor
-            name: "Alex O'Connor"
-            medium: youtube
-            role: "philosophy of religion, long-form"
-            ingest:
-              type: youtube
-              url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCC6qovOj_5xHoPmwcIEhcMQ"
-            weight: 0.7
-            rationale: "Moral argument made explicit — unusually direct evidence of which foundations are in play."
-          - id: self_yt_paulogia
-            name: "Paulogia"
-            medium: youtube
-            role: "ex-Christian apologetics criticism"
-            ingest:
-              type: youtube
-              url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCC0_0zNfnHBNi50okydMGkw"
-            weight: 0.6
-            # The one source here that speaks directly to the other diet's
-            # subject matter, which makes it the most likely to produce
-            # same-story clusters rather than a blindspot in one direction.
-            rationale: "Addresses evangelical claims directly; sanctity and authority discourse from the outside."
-          - id: self_yt_frontline
-            name: "FRONTLINE PBS"
-            medium: youtube
-            role: "documentary journalism"
-            ingest:
-              type: youtube
-              url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCdsOGt7RU-E_u7gPKsFoSqQ"
-            weight: 0.5
-            rationale: "Feature-length investigation; care/harm framing at a length no daily reaches."
-            terms: >
-              Captions first (youtube-transcript-api), audio fallback. Summarize
-              and link only — never republish transcript text.
+      national_dailies: 0.36
+      public_broadcast: 0.31
+      long_form: 0.23
+      # Audio and video: the least syndicated, least filtered part of the diet,
+      # and the part a text-only pipeline cannot see at all. Weighted at 0.10
+      # deliberately — this is listening the author is taking up rather than
+      # listening already established, and CLAUDE.md §5 says model what is
+      # consumed, not what is intended. An aspirational weight would inflate a
+      # slice of the diet that is not being consumed yet, and it would do so on
+      # the side of the comparison where the author is least likely to notice.
+      # Raise it once the habit is real; it is the single easiest number in this
+      # file to check against your own week.
+      podcasts: 0.10
+      youtube: 0.10
+    # The membership list. Nothing outside it reaches this persona — including
+    # the conservative-evangelical outlets, which are absent because they are
+    # unlisted rather than because they were forgotten.
+    sources:
+      self_nyt_home: 1.0
+      self_wapo_national: 0.9
+      self_guardian_us: 0.8
+      self_politico_picks: 0.7
+      self_ap_topnews: 0.7
+      self_npr_news: 1.0
+      self_npr_politics: 0.7
+      self_pbs_newshour: 0.7
+      self_bbc_world: 0.8
+      self_atlantic: 1.0
+      self_vox: 0.8
+      self_goodgood: 0.5
+      self_npr_upfirst: 1.0
+      self_pbs_newshour_show: 0.7
+      self_nyt_daily: 0.9
+      self_radio_atlantic: 0.7
+      self_economist_intelligence: 0.7
+      self_jacobin_radio: 0.5
+      self_makingsense_harris: 0.4
+      self_yt_alex_oconnor: 0.7
+      self_yt_paulogia: 0.6
+      self_yt_frontline: 0.5
 
   # ---------------------------------------------------------------------------
-  # DIET 2 — modeled conservative-evangelical diet ("modeled_ce").
-  # A documented MODEL of outlets/programs, stratified by medium and role to
-  # represent internal diversity (national cable, talk radio, digital, podcasts/
-  # YouTube, newsletters/aggregators) rather than collapsing to a single voice.
-  # Stratum weights are a first draft to be sensitivity-tested against Pew /
-  # Media Cloud attention data (see LIMITATIONS.md).
+  # `modeled_ce` — the blended conservative-evangelical model, and the other
+  # half of the default reference pair. Stratified by medium and role to
+  # represent internal diversity rather than collapsing to a single voice.
+  #
+  # This persona is deliberately the *blend*. The sharper single-mode personas
+  # (cable-only, talk-radio-led, devotional-heavy) are variants of it, and this
+  # one stays the reference so the recorded history keeps its meaning.
+  #
+  # Weights unchanged from version 2; `podcasts` carries the 0.10 that the
+  # combined podcasts_youtube stratum carried, for the reason given above.
   # ---------------------------------------------------------------------------
   - id: modeled_ce
     label: "Modeled conservative-evangelical diet"
     short_label: "The modeled diet"
+    family: conservative_evangelical
     description: >
       A versioned model of a conservative-evangelical information environment.
       Stratified by medium and role to capture internal diversity. This models
@@ -420,116 +655,19 @@ diets:
       documented first draft, to be validated against external attention
       benchmarks and sensitivity-tested.
     strata:
-      - id: national_cable
-        stratum_weight: 0.30
-        rationale: >
-          Cable remains a large share of conservative news attention. Weighted
-          highest but not dominant, to avoid collapsing the diet to cable framing.
-        sources:
-          - id: ce_foxnews_latest
-            name: "Fox News — Latest"
-            medium: cable
-            role: "dominant national cable news"
-            ingest:
-              type: rss
-              url: "https://moxie.foxnews.com/google-publisher/latest.xml"
-            weight: 1.0
-            rationale: "Largest-reach conservative cable outlet; anchors the stratum."
-          - id: ce_foxnews_opinion
-            name: "Fox News — Opinion"
-            medium: cable
-            role: "cable opinion / commentary"
-            ingest:
-              type: rss
-              url: "https://moxie.foxnews.com/google-publisher/opinion.xml"
-            weight: 0.6
-            rationale: "Opinion desk carries more explicit foundation framing than hard news."
-
-      - id: talk_radio
-        stratum_weight: 0.20
-        rationale: >
-          Talk radio is under-measured by text-only tools yet central to this
-          diet. Ingested via podcast/audio feeds and transcribed (faster-whisper).
-        sources:
-          - id: ce_dailywire_mattwalsh
-            name: "The Matt Walsh Show (The Daily Wire)"
-            medium: talk_radio
-            role: "commentary talk audio"
-            ingest:
-              type: podcast_rss
-              # Daily Wire flagship commentary program (resolved via iTunes
-              # lookup). 2215 episodes with audio enclosures; verified 2026-07-23.
-              url: "https://rss.pdrl.fm/1fc256/feeds.megaphone.fm/BVDWV7762869899"
-            weight: 1.0
-            rationale: "Representative commentary talk audio; transcribe before scoring."
-
-      - id: digital_outlets
-        stratum_weight: 0.20
-        rationale: >
-          Digital-native outlets spanning hard-news-adjacent to explicitly
-          faith-framed reporting. Captures written framing at scale.
-        sources:
-          - id: ce_dailywire_news
-            name: "The Daily Wire — News"
-            medium: news
-            role: "digital conservative outlet"
-            ingest:
-              type: rss
-              url: "https://www.dailywire.com/feeds/rss.xml"   # verified 2026-07-23 (50 items)
-            weight: 1.0
-            rationale: "High-reach digital conservative outlet."
-          - id: ce_thefp
-            name: "The Free Press"
-            medium: newsletter
-            role: "heterodox / center-right digital"
-            ingest:
-              type: rss
-              url: "https://www.thefp.com/feed"
-            weight: 0.7
-            rationale: "Adds internal diversity; heterodox rather than movement-aligned."
-
-      - id: faith_media
-        stratum_weight: 0.20
-        rationale: >
-          Explicitly evangelical/Christian outlets. Central to the sanctity and
-          loyalty framing this project studies; must not be omitted or collapsed
-          into generic "conservative."
-        sources:
-          - id: ce_christianitytoday
-            name: "Christianity Today"
-            medium: news
-            role: "flagship evangelical magazine"
-            ingest:
-              type: rss
-              url: "https://www.christianitytoday.com/rss/"
-            weight: 1.0
-            rationale: "Mainstream-evangelical framing; strong sanctity/loyalty salience."
-          - id: ce_worldnews
-            name: "WORLD News Group"
-            medium: news
-            role: "evangelical newsmagazine"
-            ingest:
-              type: rss
-              # WORLD's main news feed. wng.org also publishes podcast feeds
-              # (e.g. worldandeverything.xml) if audio is added later.
-              url: "https://wng.org/feeds/rss/topics.rss"   # verified 2026-07-23
-            weight: 0.8
-            rationale: "Explicitly Christian-worldview reporting; complements CT."
-
-      - id: podcasts_youtube
-        stratum_weight: 0.10
-        rationale: >
-          Long-form podcasts and YouTube programs where framing is least
-          filtered. Captions first (youtube-transcript-api), audio fallback.
-        sources:
-          - id: ce_relatable_stuckey
-            name: "Relatable with Allie Beth Stuckey"
-            medium: podcast
-            role: "long-form evangelical commentary"
-            ingest:
-              type: podcast_rss
-              # Resolved from Apple Podcasts id 1359249098 via iTunes lookup.
-              # 1445 episodes with audio enclosures; verified 2026-07-23.
-              url: "https://feeds.megaphone.fm/BMDC9964487814"
-            weight: 1.0
-            rationale: "Explicitly evangelical long-form commentary; transcribe before scoring."
+      # Cable remains a large share of conservative news attention. Weighted
+      # highest but not dominant, to avoid collapsing the diet to cable framing.
+      national_cable: 0.30
+      talk_radio: 0.20
+      digital_outlets: 0.20
+      faith_media: 0.20
+      podcasts: 0.10
+    sources:
+      ce_foxnews_latest: 1.0
+      ce_foxnews_opinion: 0.6
+      ce_dailywire_mattwalsh: 1.0
+      ce_dailywire_news: 1.0
+      ce_thefp: 0.7
+      ce_christianitytoday: 1.0
+      ce_worldnews: 0.8
+      ce_relatable_stuckey: 1.0

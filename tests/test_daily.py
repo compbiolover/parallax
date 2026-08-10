@@ -7,6 +7,13 @@ from daily.__main__ import _parse, build_config
 from daily.runner import DEFAULT_STEPS, STEPS, DailyConfig, format_report, run_daily
 from ingestion.datastore import Datastore
 
+from .registries import pair, registry
+
+
+def _reg():
+    """Both personas, each reading its own source."""
+    return registry(self={"src_self": 1.0}, modeled_ce={"src_modeled_ce": 1.0})
+
 
 def _stub_all(monkeypatch, record: list, failing: str | None = None):
     """Replace every step with a recorder so the runner is tested in isolation
@@ -204,7 +211,7 @@ def test_snapshot_step_records_a_dated_row():
                              "authority": 0.1, "sanctity": 0.1},
                 sentiment=0.0, moral_word_ratio=0.2, matched_words=20,
             )
-        detail = runner._step_snapshot(store, DailyConfig())
+        detail = runner._step_snapshot(store, DailyConfig(), _reg(), pair())
         assert store.snapshot_count() == 1
         assert "1 in history" in detail
     finally:
