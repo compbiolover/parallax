@@ -82,6 +82,42 @@ def _print_stats(stats: RunStats) -> None:
             print(f"    {source_id}: {n}")
 
 
+def _print_personas(registry, store: Datastore, settings: dict) -> None:
+    """The persona library, and what each one would actually be measured on.
+
+    Prints the document count alongside the source count because the gap between
+    them is the useful part: a persona with sources and no documents has not been
+    ingested, and one with neither is not in the reference pair's scope.
+    """
+    from compare.reference import resolve
+
+    pair = resolve(settings, available=registry.persona_ids(),
+                   families=registry.families())
+    print(f"Registry version {registry.version} — {len(registry.sources)} sources "
+          f"in {len(registry.strata)} strata, ingested once each.")
+    print(f"Reference pair: {pair.mine} (mine) vs {pair.theirs} (theirs)\n")
+    for family, ids in registry.families().items():
+        print(f"{family}:")
+        for persona_id in ids:
+            persona = registry.persona(persona_id)
+            weights = registry.weights_for(persona_id)
+            docs = store.doc_count_for_sources(weights)
+            role = (" [mine]" if persona_id == pair.mine
+                    else " [theirs]" if persona_id == pair.theirs else "")
+            print(f"  {persona_id:22} {persona.display_label:22} "
+                  f"{len(weights):>3} sources  {docs:>5} docs{role}")
+        print()
+    orphans = store.orphan_source_counts(
+        {s.id for s in registry.sources}
+    )
+    if orphans:
+        # A source dropped from the catalog leaves its documents reachable by no
+        # persona. Said out loud, because the corpus otherwise quietly shrinks.
+        total = sum(orphans.values())
+        print(f"{total} stored documents belong to {len(orphans)} source(s) no "
+              f"persona reads: {', '.join(sorted(orphans))}")
+
+
 def _print_compare(store: Datastore, registry) -> None:
     profiles = persona_profiles(store, registry)
     if not profiles:
@@ -158,7 +194,7 @@ def _podcasts(store: Datastore, settings: dict, args, progress) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingestion", description="Parallax Phase 1 pipeline")
     parser.add_argument("command",
-                        choices=["run", "backfill", "podcasts", "compare", "labels"],
+                        choices=["run", "backfill", "podcasts", "compare", "labels", "personas"],
                         help="what to do")
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
@@ -235,6 +271,8 @@ def main(argv: list[str] | None = None) -> int:
             _podcasts(store, settings, args, progress)
         elif args.command == "compare":
             _print_compare(store, load_registry(settings=settings))
+        elif args.command == "personas":
+            _print_personas(load_registry(settings=settings), store, settings)
         elif args.command == "labels":
             # Ingestion records these, so a store that has not been ingested
             # since the labels were added still names its personas by machine id.

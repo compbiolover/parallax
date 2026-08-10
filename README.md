@@ -1,24 +1,34 @@
 # Parallax
 
-> A moral-foundations mirror for two media diets.
+> A moral-foundations mirror for two modeled media diets, chosen from a documented library.
 
-**Read this first.** Parallax compares the author's own media diet against a
-*representative, documented model* of a conservative-evangelical media diet, using
-Moral Foundations Theory (MFT) as the analytical lens. It ingests news, podcasts, and
-video from two modeled information environments, scores them on moral foundations, and
-reports what each one covers that the other does not.
+**Read this first.** Parallax compares a mainstream / center-left media diet against a
+*representative, documented model* of a conservative-evangelical one, using Moral
+Foundations Theory (MFT) as the analytical lens. It ingests news, podcasts, and video from
+modeled information environments, scores them on moral foundations, and reports what each
+one covers that the other does not.
 
-**It is not a system that tracks, surveils, or profiles any specific individual.** The
-"other" diet is a versioned model of outlets and programs
-([`config/sources.yaml`](config/sources.yaml)), not any real person's consumption. No
-private family communications are ever ingested.
+Neither side is one reader, so neither is modeled as one. Each is a **persona**: a named
+weighting over a shared catalog of sources. Four ship per side — a passive cable viewer and
+a devotionally-heavy reader are measurably different information environments, and so are a
+policy wonk and an activist. Two of them are the *reference pair* every headline number is
+about, and the dashboard lets you pick a different pair.
+
+**It is not a system that tracks, surveils, or profiles any specific individual.** Every
+persona in [`config/sources.yaml`](config/sources.yaml) is a versioned model of outlets and
+programs, named by media behaviour rather than by anyone's identity. No private family
+communications are ever ingested.
+
+**Your own diet is not in this repository, and cannot end up there by accident.** The
+committed registry holds documented models only. A real diet — yours — goes in
+`config/personas.local.yaml`, which is gitignored and merged over the public file at load.
 
 Four commitments shape every part of it:
 
 | Commitment | What it requires |
 | --- | --- |
 | **Charitable understanding** | Summaries steelman each side. The binding foundations (loyalty, authority, sanctity) are sincere moral commitments in MFT's framework, not deficits. Parallax does not mock, pathologize, or "dunk on" either diet. |
-| **Symmetry** | The identical pipeline runs on both diets. The author's own blindspots and foundation skew are surfaced with equal prominence. |
+| **Symmetry** | The identical pipeline runs on every persona, and both sides carry the same number of variants. The author's own blindspots and foundation skew are surfaced with equal prominence. |
 | **Content handling** | Summarize and link, never republish. Derived metrics persist; raw article text is a transient processing artifact. `robots.txt`, rate limits, and each source's terms are honored. |
 | **Uncertainty is first-class** | Every foundation number is an estimate with a confidence band, never ground truth. See [`LIMITATIONS.md`](LIMITATIONS.md) — it is not an appendix, it is the reading instructions. |
 
@@ -141,6 +151,7 @@ no text in it. Only the first of those is fixed by exporting a key.
 | `make digest` | render the email to `data/digest-preview.html` and open it — no credentials needed |
 | `make digest-send` | render and mail the brief |
 | `make history` | print the recorded divergence series |
+| `make personas` | list the persona library: family, sources, and what each one models |
 | `make validate` | score the gold set, report agreement, apply the §5 trigger |
 | `make audit-lexicon` | check a lexicon for equality/proportionality asymmetry |
 | `make register-probe` | check the liberty rubric scores both registers evenhandedly (costs API calls) |
@@ -151,6 +162,109 @@ no text in it. Only the first of those is fixed by exporting a key.
 `make daily` is a batch job, not an interactive command — expect minutes, not seconds.
 It narrates as it goes; `-v` explains individual fetch failures and `--quiet` turns the
 narration off for cron.
+
+---
+
+## Personas
+
+A persona is a **weighting over a shared catalog of sources**, not a corpus of its own. That
+distinction is what makes the library affordable: every source is fetched, extracted, scored,
+embedded and liberty-tagged exactly once, however many personas read it, so adding a persona
+costs nothing at runtime. `ce_cable_passive` needs no source the catalog did not already
+have — it is pure arithmetic over Fox, the Daily Wire and Christianity Today at different
+weights.
+
+```bash
+make personas       # the library, with source and document counts per persona
+```
+
+| Persona | Side | Models |
+| --- | --- | --- |
+| `self` | mine | Mainstream / center-left: national dailies, public broadcasting, long-form, a light audio layer |
+| `left_wonk` | mine | Policy journals and think tanks first; no cable, no movement media |
+| `left_activist` | mine | Movement-left media that reports in service of a project and says so |
+| `left_moderate_dem` | mine | Inside-politics process coverage, plus one anti-populist conservative outlet |
+| `left_progressive` | mine | Movement media and long-form argument, heavy on audio |
+| `modeled_ce` | theirs | The blended conservative-evangelical model; the other four split what it averages |
+| `ce_cable_passive` | theirs | The television is on. Cable news hours, not the panel shows |
+| `ce_talk_radio` | theirs | Hours of commentary audio a day; the persona a text-only pipeline understates most |
+| `ce_digital_populist` | theirs | Movement-right digital rather than legacy cable |
+| `ce_devout` | theirs | Conservative news with hours of devotional and teaching content layered on top |
+
+**Two of them are the reference pair**, and every headline number is about those two: the
+divergence, the log-ratios, the agenda, the blindspots, the email, and the dated series.
+
+```yaml
+compare:
+  reference_pair:
+    mine:   self
+    theirs: modeled_ce
+```
+
+`mine` first is not cosmetic. It fixes the log-ratio sign to "positive = my diet
+over-indexes" (the convention `CLAUDE.md` §3(5) asks for, and which the previous
+alphabetical pairing silently inverted), and it lets every surface colour by role in the
+comparison rather than by position in a list. **Changing the pair changes what the recorded
+series means** while the column keeps its name, so the pair travels with every snapshot and
+the run warns when it moves.
+
+The dashboard's picker moves the pair for anything computable from the exported payload —
+the composition, the headline number, the log-ratio bars. Agenda, blindspots, fairness,
+liberty and the summaries come from the pipeline for one pair; when the picker moves off it,
+those panels say so instead of redrawing under a heading they do not belong to.
+
+<details>
+<summary><b>Adding your own diet</b> — and why it does not go in the committed registry</summary>
+
+`config/sources.yaml` is public and holds documented *models*. Your own diet is a record of
+what one real person actually reads, which is the single thing `CLAUDE.md` §0 promises this
+project does not collect. So it goes somewhere else:
+
+```bash
+cp config/sources.yaml /tmp/reference.yaml     # for the schema; do not edit the real one
+$EDITOR config/personas.local.yaml             # gitignored, merged over the public file
+```
+
+Same shape as the registry — `strata`, `catalog`, `personas` — and merged **by id**: a
+persona or source whose id already exists replaces the public one wholesale, and a new id is
+appended. Wholesale rather than field-by-field, because a persona carrying some weights from
+the public file and some from yours is not a weighting anyone could reason about. Then point
+the reference pair at it:
+
+```yaml
+compare:
+  reference_pair:
+    mine: me
+```
+
+A persona lists the sources it consumes explicitly; membership is not inherited from the
+stratum. That is deliberate. Strata are shared — `podcasts` holds both NPR's Up First and
+Relatable — so inheriting would hand every persona all the others' listening, and the
+alternative is an exclusion list that has to grow every time anyone adds a source. Listing
+membership also means reading a persona tells you its whole diet.
+
+A graphical builder for this is Phase 7 (`CLAUDE.md` §4). The export step already writes
+`dashboard/public/data/catalog.js`, which is the whole input that page needs.
+
+</details>
+
+<details>
+<summary><b>What the persona library costs</b></summary>
+
+Personas are free; sources are not. The library needs roughly four times the catalog two
+diets did, and ingestion, extraction, embedding and liberty tagging are all per *document*.
+GDELT backfill is one query per domain at roughly one request every five seconds.
+
+```yaml
+ingestion:
+  personas: all         # or a list of persona ids whose sources are the only ones fetched
+```
+
+`all` is the default and the honest one: a persona whose sources are never fetched has an
+empty profile and renders as a blank column. Narrow it after looking at the bill, not
+before.
+
+</details>
 
 ---
 
@@ -205,8 +319,12 @@ would not verify.
 ```yaml
 digest:
   enabled: true
-  own_diet: self      # your diet's id from sources.yaml — puts your blindspots first
+  own_diet: self      # defaults to compare.reference_pair.mine; puts your blindspots first
 ```
+
+The email is about the reference pair and no more, and says how many personas it left out.
+It has no picker, phone height is the scarce resource, and a brief nobody finishes is one
+where the author's own blindspots go unread.
 
 From then on `make daily` ends by mailing you the brief it just built.
 `python3 -m daily --only digest` sends one without re-running the pipeline.
@@ -421,11 +539,11 @@ dashboard. R is there for statistical exploration.
 
 | Directory | Responsibility |
 | --- | --- |
-| `config/` | The source registry (`sources.yaml`) and example settings |
+| `config/` | The source catalog and persona library (`sources.yaml`), and example settings |
 | `ingestion/` | RSS, GDELT, Media Cloud, podcast audio, YouTube |
 | `scoring/` | Moral-foundations scoring (dictionary + transformer + Claude) |
 | `cluster/` | Embeddings, UMAP + HDBSCAN, blindspot detection, theme grouping |
-| `compare/` | JSD, agenda divergence, CLR/Aitchison distance, log-ratios, dated snapshot history |
+| `compare/` | JSD, agenda divergence, CLR/Aitchison distance, log-ratios, dated snapshot history, the reference pair |
 | `summarize/` | Map-reduce LLM summarization |
 | `dashboard/` | TypeScript + D3.js static site |
 | `digest/` | The dashboard rendered into a daily email |
@@ -760,7 +878,13 @@ With the transformer running at ingestion, each foundation carries a
 dictionary-vs-transformer band — wider means more disagreement and lower confidence.
 
 Phase 4 has started: **podcast and talk-radio transcription** is in (see below). YouTube
-is registered but not yet ingested. See [`CLAUDE.md`](CLAUDE.md) for the full build spec.
+is registered but not yet ingested.
+
+Phase 6 is complete: the registry is a flat source catalog plus a **library of ten documented
+personas**, four a side, and the reference pair every headline number is about is named
+rather than taken alphabetically. Phase 7 — a static page for authoring your own persona — is
+next, and the data it needs is already exported. See [`CLAUDE.md`](CLAUDE.md) for the full
+build spec.
 
 ### Podcasts and talk radio
 

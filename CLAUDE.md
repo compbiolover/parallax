@@ -15,15 +15,33 @@ against a *representative model* of a conservative-evangelical media diet, using
 Moral Foundations Theory (MFT) as the analytical lens.
 
 **What this is not.** It does **not** track, surveil, or profile specific individuals.
-The "other" diet is a documented, versioned model of outlets and programs — not any
+The modeled diets are documented, versioned models of outlets and programs — not any
 real person's consumption. No private family communications are ingested, ever.
+
+**Personas, and the line they must not cross.** Each side is modeled by several
+*personas*: named weightings over a shared source catalog (a passive cable viewer, a
+devotionally-heavy reader, a policy wonk, an activist). This is a stronger modeling claim
+than a source list, so two rules bind it. A persona is named by **media behaviour**, never
+by demographic identity and never after anyone real; no persona models an identifiable
+household member. And nothing downstream may describe a persona as a person — no beliefs,
+motives, intelligence, or sincerity attributed to it, and no ranking of personas on a
+spectrum the numbers do not support. This is enforced in `summarize/prompts.py` and
+qualified in `LIMITATIONS.md`.
+
+**Your own diet is not committed.** `config/sources.yaml` is public and holds only
+documented models. A real person's real consumption — yours, or any user's — goes in
+`config/personas.local.yaml`, which is gitignored and merged over the public registry at
+load. The split is structural rather than a convention to remember: the default path for
+your own diet never reaches git history.
 
 **Tone requirement.** The goal is charitable understanding. Any generated summary must
 steelman each side's framing. Binding foundations (loyalty, authority, sanctity) are
 sincere moral commitments in MFT's framework, not deficits. Do not generate copy that
 mocks, pathologizes, or "dunks on" either diet.
 
-**Symmetry requirement.** The identical pipeline runs on both diets. The author's own
+**Symmetry requirement.** The identical pipeline runs on every persona, and both sides are
+modeled with the same machinery and roughly the same number of variants — one persona facing
+a spectrum is a comparison that has quietly stopped being symmetric. The author's own
 blindspots and foundation skew are surfaced with equal prominence.
 
 **Content handling.** Summarize and link; never republish. Persist derived metrics
@@ -42,9 +60,10 @@ processing artifact. Honor `robots.txt`, rate limits, and each source's terms.
 - **`LIMITATIONS.md`:** stub it on day one. MFT text-scoring validity caveats (§5) live
   here and get updated as validation results come in.
 - **Never commit:** article text, transcripts, audio, scraped bias-rating tables, model
-  weights, `.env`. See `.gitignore` below.
-- **Do commit:** the source registry (`config/sources.yaml`), methodology docs,
-  validation notebooks and results, all code.
+  weights, `.env`, and `config/personas.local.yaml` (a real person's real media diet). See
+  `.gitignore` below.
+- **Do commit:** the source registry (`config/sources.yaml`) with its catalog and persona
+  library, methodology docs, validation notebooks and results, all code.
 
 ### Suggested layout
 
@@ -292,6 +311,23 @@ materially, multimedia is essential rather than optional.
 **Phase 5 — Cadence + polish.**
 Weekly/monthly/yearly rollups, trend tracking (does the gap widen around elections?),
 richer D3 dashboard, optional personal email digest.
+
+**Phase 6 — Persona library and N-way comparison (done).**
+Split the registry into a flat source catalog and personas that weight it, so several
+personas share a source and adding one costs nothing at runtime. Name the reference pair
+explicitly instead of taking the first two ids alphabetically. Ship four documented personas
+a side. Export a divergence matrix over every persona, with a source-overlap matrix beside
+it — personas over a shared catalog are correlated by construction, and the divergence grid
+alone reads as "these are interchangeable".
+
+**Phase 7 — Persona authoring UI.**
+A static `dashboard/builder.html`: vanilla JS, no backend, no new dependencies, reading the
+`catalog.js` the export step already writes and emitting a `personas.local.yaml` for
+download. Browse the catalog, start from a shipped persona, slide stratum weights with live
+feedback on the medium mix, save locally. Nothing is uploaded anywhere — a diet you author
+is your own consumption, which is the thing §0 keeps out of this repository. A bulk-entry
+path (OPML from a podcast app or RSS reader, a YouTube subscriptions export, a list of URLs)
+is the obvious follow-on and would make the page usable without hand-picking sources.
 
 ---
 

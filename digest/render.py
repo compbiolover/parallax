@@ -926,7 +926,7 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
         f'<div style="font:700 19px -apple-system,BlinkMacSystemFont,sans-serif;'
         f'color:{INK};letter-spacing:-.01em;">Parallax</div>'
         f'<div style="font:13px -apple-system,sans-serif;color:{MUTED};">'
-        f"A moral-foundations mirror for two media diets</div></td></tr>"
+        f"A moral-foundations mirror for two modeled media diets</div></td></tr>"
         f"{panels}{footer}"
         f"</table></td></tr></table></body></html>"
     )
