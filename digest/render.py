@@ -213,7 +213,7 @@ def _colours(payload: dict) -> dict[str, str]:
 
 
 def _others_note(payload: dict) -> str:
-    """"+N more in the dashboard", or empty when the pair is all there is.
+    """The "+N more in the dashboard" note, or empty when the pair is all there is.
 
     The email must not hide that the pair is a choice. Every number in it is about
     those two, and a reader who does not know a library exists cannot know that

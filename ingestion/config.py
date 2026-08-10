@@ -283,6 +283,42 @@ def _merge_overlay(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, A
     return merged
 
 
+def _configured_path(value: str | Path) -> Path:
+    """Resolve a path out of settings: ``~`` expanded, relative anchored at the repo.
+
+    Anchored at ``REPO_ROOT`` rather than the working directory, because that is
+    where the defaults live and what ``config/sources.yaml`` in
+    ``settings.example.yaml`` plainly means. Resolving against the cwd made the
+    shipped relative path fail from every directory but the repo root — including
+    the scheduled run, which inherits no working directory at all (the README says
+    so about ``launchd`` at some length). For the overlay it was quieter and worse:
+    a missing overlay is not an error, so your own diet simply left the comparison
+    without saying anything.
+    """
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else REPO_ROOT / path
+
+
+def _registry_path(explicit: str | Path | None, settings: dict[str, Any] | None) -> Path:
+    """Which registry file to read: argument, then settings, then the committed one.
+
+    A missing configured path is an error rather than a silent fall back to the
+    default. Pointing at a registry that is not there and getting the public one
+    anyway is how you spend an afternoon wondering why your personas are absent.
+    """
+    if explicit is not None:
+        return Path(explicit).expanduser()
+    configured = ((settings or {}).get("sources") or {}).get("registry")
+    if configured:
+        path = _configured_path(configured)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"sources.registry points at {path}, which does not exist"
+            )
+        return path
+    return DEFAULT_SOURCES
+
+
 def _overlay_path(
     explicit: str | Path | None, settings: dict[str, Any] | None
 ) -> tuple[Path | None, bool]:
@@ -299,10 +335,10 @@ def _overlay_path(
     - the conventional path is used only if it happens to be there.
     """
     if explicit is not None:
-        return Path(explicit), True
+        return Path(explicit).expanduser(), True
     configured = ((settings or {}).get("sources") or {}).get("local_registry")
     if configured:
-        return Path(configured), False
+        return _configured_path(configured), False
     return (DEFAULT_OVERLAY if DEFAULT_OVERLAY.exists() else None), False
 
 
@@ -380,22 +416,29 @@ def _build_personas(raw: list[dict], sources: list[Source]) -> list[Persona]:
 
 
 def load_registry(
-    path: str | Path = DEFAULT_SOURCES,
+    path: str | Path | None = None,
     overlay: str | Path | None = None,
     settings: dict[str, Any] | None = None,
 ) -> Registry:
     """Load the registry, merging the local persona overlay when there is one.
+
+    ``path`` wins over ``settings["sources"]["registry"]``, which wins over
+    ``config/sources.yaml``. ``path`` defaults to ``None`` rather than to the
+    committed registry so that "no path given" stays distinguishable from "the
+    default path given explicitly" — otherwise the settings key can never take
+    effect, which is precisely how it sat documented and dead.
 
     ``overlay`` wins over ``settings["sources"]["local_registry"]``, which wins
     over ``config/personas.local.yaml`` if it exists. Most installations have no
     overlay at all, which is why only an explicitly-passed one is required to
     exist — see :func:`_overlay_path`.
     """
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    chosen = _registry_path(path, settings)
+    data = yaml.safe_load(Path(chosen).read_text(encoding="utf-8"))
     version = int(data.get("version", 0))
     if version < MIN_REGISTRY_VERSION:
         raise ValueError(
-            f"{path}: registry version {version} nests sources inside diets, which "
+            f"{chosen}: registry version {version} nests sources inside diets, which "
             f"cannot express a source shared by several personas. Version "
             f"{MIN_REGISTRY_VERSION} splits it into `catalog` and `personas` — see the "
             f"schema comment at the top of config/sources.yaml."

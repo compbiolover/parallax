@@ -14,11 +14,12 @@ is a comparison between `self` and `modeled_ce` under version 2's weights.
 from __future__ import annotations
 
 import logging
+import pathlib
 
 import pytest
 import yaml
 
-from ingestion.config import load_registry
+from ingestion.config import REPO_ROOT, load_registry
 
 # Every source's effective weight under registry version 2, generated from the
 # v2 file itself (`stratum_weight * source weight`) rather than retyped. Version 3
@@ -427,3 +428,78 @@ def test_the_ingest_scope_setting_defaults_to_the_whole_catalog():
     assert PipelineConfig.from_settings(
         {"ingestion": {"personas": ["self", "ce_devout"]}}
     ).ingest_personas == ["self", "ce_devout"]
+
+
+def test_the_configured_registry_path_is_actually_read(tmp_path):
+    """`sources.registry` was documented in settings.example.yaml and read by
+    nothing. Passing `settings=` everywhere for the overlay made it *look* wired,
+    which is worse than plainly dead: you can believe you are running against a
+    custom registry while running against the committed one."""
+    data = _registry_yaml()
+    data["personas"][0]["id"] = "only_in_the_custom_file"
+    custom = _write(tmp_path, data)
+
+    registry = load_registry(settings={"sources": {"registry": str(custom)}})
+    assert registry.persona_ids() == ["only_in_the_custom_file"]
+
+
+def test_an_explicit_path_still_beats_the_configured_one(tmp_path):
+    explicit = _write(tmp_path, _registry_yaml())
+    other = _registry_yaml()
+    other["personas"][0]["id"] = "from_settings"
+    configured = tmp_path / "configured.yaml"
+    configured.write_text(yaml.safe_dump(other), encoding="utf-8")
+
+    registry = load_registry(
+        explicit, settings={"sources": {"registry": str(configured)}}
+    )
+    assert registry.persona_ids() == ["reader"]
+
+
+def test_a_configured_registry_that_is_missing_is_an_error(tmp_path):
+    """Falling back to the committed registry would answer a question nobody
+    asked, and the personas would just be the shipped ones."""
+    with pytest.raises(FileNotFoundError, match="sources.registry"):
+        load_registry(settings={"sources": {"registry": str(tmp_path / "nope.yaml")}})
+
+
+def test_a_relative_configured_registry_resolves_from_any_directory(monkeypatch, tmp_path):
+    """`settings.example.yaml` ships `sources.registry: config/sources.yaml`, and it
+    is the fallback when settings.yaml is absent — so resolving it against the
+    working directory broke a fresh checkout run from anywhere but the repo root,
+    including the scheduled run, which inherits no working directory."""
+    from ingestion.config import load_settings
+
+    monkeypatch.chdir(tmp_path)
+    registry = load_registry(settings=load_settings())
+    assert "self" in registry.persona_ids()
+
+
+def test_a_relative_configured_overlay_resolves_from_any_directory(monkeypatch, tmp_path):
+    """Quieter than the registry case and worse: a missing overlay is not an error,
+    so from the wrong directory your own diet left the comparison in silence."""
+    overlay = pathlib.Path(REPO_ROOT) / "config" / "personas.local.test.yaml"
+    overlay.write_text(yaml.safe_dump({"personas": [{
+        "id": "me", "label": "Me", "family": "left", "description": "d",
+        "strata": {"national_dailies": 0.5}, "sources": {"self_nyt_home": 1.0},
+    }]}), encoding="utf-8")
+    try:
+        monkeypatch.chdir(tmp_path)
+        registry = load_registry(settings={"sources": {
+            "local_registry": "config/personas.local.test.yaml",
+        }})
+        assert "me" in registry.persona_ids()
+    finally:
+        overlay.unlink()
+
+
+def test_a_configured_path_expands_a_home_tilde(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    (home / "reg").mkdir(parents=True)
+    target = home / "reg" / "sources.yaml"
+    target.write_text(yaml.safe_dump(_registry_yaml()), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))   # Windows equivalent
+
+    registry = load_registry(settings={"sources": {"registry": "~/reg/sources.yaml"}})
+    assert registry.persona_ids() == ["reader"]
