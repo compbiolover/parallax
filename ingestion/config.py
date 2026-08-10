@@ -283,6 +283,22 @@ def _merge_overlay(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, A
     return merged
 
 
+def _configured_path(value: str | Path) -> Path:
+    """Resolve a path out of settings: ``~`` expanded, relative anchored at the repo.
+
+    Anchored at ``REPO_ROOT`` rather than the working directory, because that is
+    where the defaults live and what ``config/sources.yaml`` in
+    ``settings.example.yaml`` plainly means. Resolving against the cwd made the
+    shipped relative path fail from every directory but the repo root — including
+    the scheduled run, which inherits no working directory at all (the README says
+    so about ``launchd`` at some length). For the overlay it was quieter and worse:
+    a missing overlay is not an error, so your own diet simply left the comparison
+    without saying anything.
+    """
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else REPO_ROOT / path
+
+
 def _registry_path(explicit: str | Path | None, settings: dict[str, Any] | None) -> Path:
     """Which registry file to read: argument, then settings, then the committed one.
 
@@ -291,10 +307,10 @@ def _registry_path(explicit: str | Path | None, settings: dict[str, Any] | None)
     anyway is how you spend an afternoon wondering why your personas are absent.
     """
     if explicit is not None:
-        return Path(explicit)
+        return Path(explicit).expanduser()
     configured = ((settings or {}).get("sources") or {}).get("registry")
     if configured:
-        path = Path(configured)
+        path = _configured_path(configured)
         if not path.exists():
             raise FileNotFoundError(
                 f"sources.registry points at {path}, which does not exist"
@@ -319,10 +335,10 @@ def _overlay_path(
     - the conventional path is used only if it happens to be there.
     """
     if explicit is not None:
-        return Path(explicit), True
+        return Path(explicit).expanduser(), True
     configured = ((settings or {}).get("sources") or {}).get("local_registry")
     if configured:
-        return Path(configured), False
+        return _configured_path(configured), False
     return (DEFAULT_OVERLAY if DEFAULT_OVERLAY.exists() else None), False
 
 
