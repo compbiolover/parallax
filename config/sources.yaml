@@ -22,7 +22,7 @@
 #     `config/personas.local.yaml`, which is merged over this file at load.
 #
 # =============================================================================
-# SCHEMA (version 3)
+# SCHEMA (version 3 and later)
 # =============================================================================
 # Sources and personas are separate. A source is a fact about a publisher; a
 # persona is a fact about a reader. Keeping them apart is what lets several
@@ -111,7 +111,7 @@
 # verified live (they move) before the source is activated in ingestion.
 # =============================================================================
 
-version: 3
+version: 4
 updated: 2026-08-10
 
 # Foundations this registry's downstream scoring targets. Kept here for
@@ -167,6 +167,42 @@ strata:
     description: >
       Video programs, kept separate from podcasts because the ingest path is
       different: captions first (youtube-transcript-api), audio fallback.
+  - id: devotional
+    description: >
+      Devotional and teaching content: daily Bible exposition, sermon audio,
+      read-through-the-Bible programs, worldview briefings. Distinct from
+      `faith_media`, which reports the news from an evangelical vantage; this is
+      not news at all. It is most of what separates a devotionally-heavy reader
+      from someone who simply watches conservative television, and a text-only
+      news pipeline sees none of it.
+
+      Read its numbers with the caveat in LIMITATIONS.md: devotional language is
+      saturated with purity and authority vocabulary regardless of politics, and
+      it carries almost no news agenda. A persona weighted toward it will show
+      high sanctity and few blindspots for reasons of measurement before any
+      reason of substance.
+  - id: policy_journals
+    description: >
+      Think-tank and policy periodicals — argument at the level of legislation and
+      evidence rather than events. Deliberately spans left, right and neither
+      (Cato and Niskanen sit beside KFF and Lawfare): a wonk's diet is defined by
+      the register more than by the lean, and a stratum that admitted only
+      congenial think tanks would model a partisan rather than a wonk.
+  - id: movement_left
+    description: >
+      Advocacy and movement-left media: outlets that report in service of a
+      political project and say so. The left counterpart to `populist_digital`,
+      and included for the same reason — a diet is not only its newspapers.
+  - id: centrist_politics
+    description: >
+      Inside-politics and centrist outlets: process coverage, tactics, and the
+      Washington read. Low ideological temperature and high political salience,
+      which is a combination none of the other strata holds.
+  - id: populist_digital
+    description: >
+      Movement-right digital outlets. Separate from `digital_outlets`, which holds
+      the higher-circulation and heterodox end, because the split is what lets a
+      digitally-native persona be distinguished from a cable-first one at all.
 
 # =============================================================================
 # CATALOG — every source, once. Grouped by stratum for readability only;
@@ -560,6 +596,406 @@ catalog:
       Captions first (youtube-transcript-api), audio fallback. Summarize
       and link only — never republish transcript text.
 
+  # ---------------------------------------------------------------------------
+  # faith_media (additions)
+  # ---------------------------------------------------------------------------
+  - id: ce_christianpost
+    name: "The Christian Post"
+    medium: news
+    stratum: faith_media
+    role: "evangelical daily news"
+    ingest:
+      type: rss
+      url: "https://www.christianpost.com/rss/"   # verified 2026-08-10 (30 items)
+    rationale: "Higher-volume daily counterpart to the magazines; news rather than essays."
+  - id: ce_cbnnews
+    name: "CBN News"
+    medium: news
+    stratum: faith_media
+    role: "charismatic-evangelical broadcaster"
+    ingest:
+      type: rss
+      # verified 2026-08-10 (25 items)
+      url: "https://www1.cbn.com/rss-cbn-articles-cbnnews.xml"
+    rationale: "Broadcast-evangelical register absent from the print magazines."
+
+  # ---------------------------------------------------------------------------
+  # devotional — the stratum that makes a devotionally-heavy persona different
+  # from a cable-first one. All four audio feeds carry real enclosures, so they
+  # transcribe; the two text feeds score like any article.
+  # ---------------------------------------------------------------------------
+  - id: ce_mohler_briefing
+    name: "The Briefing (Albert Mohler)"
+    medium: podcast
+    stratum: devotional
+    role: "daily worldview analysis of the news"
+    ingest:
+      type: podcast_rss
+      # 500 episodes with audio enclosures; verified 2026-08-10.
+      url: "https://albertmohler.com/category/the-briefing/feed/"
+    # The most useful single source in this stratum, because it is the hinge: it
+    # takes the day's secular news and reads it through an explicitly theological
+    # frame. A persona built only from devotionals would have no news agenda at
+    # all and could not appear in a story cluster; this one bridges the two.
+    rationale: "Daily news read through an explicitly theological frame; the bridge to the news agenda."
+  - id: ce_renewing_your_mind
+    name: "Renewing Your Mind (Ligonier)"
+    medium: podcast
+    stratum: devotional
+    role: "reformed doctrinal teaching"
+    ingest:
+      type: podcast_rss
+      # 120 episodes with audio enclosures; verified 2026-08-10.
+      url: "https://renewingyourmind.ligonier.org/rss"
+    rationale: "Doctrinal teaching with almost no news content; the stratum's pure case."
+  - id: ce_truth_for_life
+    name: "Truth For Life Daily Devotions (Alistair Begg)"
+    medium: podcast
+    stratum: devotional
+    role: "daily devotional"
+    ingest:
+      type: podcast_rss
+      # 588 episodes with audio enclosures; verified 2026-08-10.
+      url: "https://feeds.feedburner.com/truthforlife/alistairbeggdevotionalpodcast"
+    rationale: "Short daily devotional; the format most likely to be heard every morning."
+  - id: ce_bible_recap
+    name: "The Bible Recap"
+    medium: podcast
+    stratum: devotional
+    role: "read-through-the-Bible companion"
+    ingest:
+      type: podcast_rss
+      # 999 episodes with audio enclosures; verified 2026-08-10.
+      url: "https://feed.podbean.com/thebiblerecap/feed.xml"
+    rationale: "Very high-reach daily Bible program; devotional content with no political register at all."
+  - id: ce_gospel_coalition
+    name: "The Gospel Coalition"
+    medium: news
+    stratum: devotional
+    role: "reformed-evangelical essays and teaching"
+    ingest:
+      type: rss
+      url: "https://www.thegospelcoalition.org/feed/"   # verified 2026-08-10 (100 items)
+    rationale: "Argument-forward theological writing; high explicit-morality density in text."
+  - id: ce_our_daily_bread
+    name: "Our Daily Bread"
+    medium: news
+    stratum: devotional
+    role: "daily devotional reading"
+    ingest:
+      type: rss
+      # Redirects to api.experience.odb.org; verified 2026-08-10 (30 items).
+      url: "https://odb.org/feed/"
+    rationale: "The highest-circulation devotional in English; short, daily, entirely non-political."
+
+  # ---------------------------------------------------------------------------
+  # talk_radio (additions) — all four carry full audio enclosures.
+  # ---------------------------------------------------------------------------
+  - id: ce_glenn_beck
+    name: "The Glenn Beck Program"
+    medium: talk_radio
+    stratum: talk_radio
+    role: "long-running national talk radio"
+    ingest:
+      type: podcast_rss
+      # 4731 episodes with audio enclosures; verified 2026-08-10.
+      url: "https://feeds.megaphone.fm/BMDC3567910388"
+    rationale: "Large-reach national talk radio with an explicitly religious register."
+  - id: ce_mark_levin
+    name: "Mark Levin Podcast"
+    medium: talk_radio
+    stratum: talk_radio
+    role: "constitutional-conservative talk radio"
+    ingest:
+      type: podcast_rss
+      # 2580 episodes with audio enclosures; verified 2026-08-10.
+      url: "https://feeds.megaphone.fm/mark-levin-podcast"
+    rationale: "Authority/liberty framing at the highest density in this stratum."
+  - id: ce_charlie_kirk
+    name: "The Charlie Kirk Show"
+    medium: talk_radio
+    stratum: talk_radio
+    role: "younger-audience movement talk"
+    ingest:
+      type: podcast_rss
+      # 4372 episodes with audio enclosures; verified 2026-08-10.
+      url: "https://www.omnycontent.com/d/playlist/5e27a451-e6e6-4c51-aa03-a7370003783c/c865b590-c84f-4f7e-a43e-ac64014b61d9/8978e846-cacd-4d65-b085-ac64014cd49f/podcast.rss"
+    rationale: "Campus-and-movement register; bridges talk radio and the digital outlets."
+  - id: ce_hugh_hewitt
+    name: "The Hugh Hewitt Show"
+    medium: talk_radio
+    stratum: talk_radio
+    role: "institutional-conservative talk radio"
+    ingest:
+      type: podcast_rss
+      # 100 episodes with audio enclosures; verified 2026-08-10.
+      url: "https://www.omnycontent.com/d/playlist/5e27a451-e6e6-4c51-aa03-a7370003783c/32413cd1-5c42-4309-8dd3-a8400005b231/f78a8a7c-86bf-4bdf-8b40-a8400005b231/podcast.rss"
+    # Internal diversity, deliberately: interview-led and institution-friendly
+    # rather than movement-aligned. A talk-radio stratum with only the combative
+    # shows in it would model the medium as more uniform than it is.
+    rationale: "Interview-led and institutionalist; the stratum's internal counterweight."
+
+  # ---------------------------------------------------------------------------
+  # digital_outlets (addition)
+  # ---------------------------------------------------------------------------
+  - id: ce_national_review
+    name: "National Review"
+    medium: news
+    stratum: digital_outlets
+    role: "institutional-conservative magazine"
+    ingest:
+      type: rss
+      url: "https://www.nationalreview.com/feed/"   # verified 2026-08-10 (20 items)
+    rationale: "Movement-conservative but institutionalist; argues with the populist outlets."
+
+  # ---------------------------------------------------------------------------
+  # populist_digital
+  # ---------------------------------------------------------------------------
+  - id: ce_breitbart
+    name: "Breitbart News"
+    medium: news
+    stratum: populist_digital
+    role: "high-volume populist-right digital"
+    ingest:
+      type: rss
+      url: "https://feeds.feedburner.com/breitbart"   # verified 2026-08-10 (47 items)
+    domain: breitbart.com
+    rationale: "Largest populist-right digital outlet by reach; anchors the stratum."
+  - id: ce_the_blaze
+    name: "The Blaze"
+    medium: news
+    stratum: populist_digital
+    role: "populist-right digital, faith-adjacent"
+    ingest:
+      type: rss
+      url: "https://www.theblaze.com/feeds/feed.rss"   # verified 2026-08-10 (30 items)
+    rationale: "Populist-right reporting with an explicit Christian register; the overlap case."
+  - id: ce_federalist
+    name: "The Federalist"
+    medium: news
+    stratum: populist_digital
+    role: "argument-forward movement-right"
+    ingest:
+      type: rss
+      url: "https://thefederalist.com/feed/"   # verified 2026-08-10 (20 items)
+    rationale: "Essayistic rather than reportorial; high explicit-morality density."
+  - id: ce_daily_caller
+    name: "The Daily Caller"
+    medium: news
+    stratum: populist_digital
+    role: "digital news and aggregation"
+    ingest:
+      type: rss
+      url: "https://dailycaller.com/feed/"   # verified 2026-08-10 (25 items)
+    rationale: "Aggregation-heavy news volume; closer to wire copy than to commentary."
+  - id: ce_washington_examiner
+    name: "Washington Examiner"
+    medium: news
+    stratum: populist_digital
+    role: "conservative Washington daily"
+    ingest:
+      type: rss
+      url: "https://www.washingtonexaminer.com/feed"   # verified 2026-08-10 (10 items)
+    rationale: "Process and policy coverage from the right; the stratum's least combative entry."
+
+  # ---------------------------------------------------------------------------
+  # policy_journals — deliberately not sorted by lean. A wonk's diet is defined
+  # by the register, and a stratum holding only congenial think tanks would model
+  # a partisan instead.
+  # ---------------------------------------------------------------------------
+  - id: pol_niskanen
+    name: "Niskanen Center"
+    medium: news
+    stratum: policy_journals
+    role: "cross-partisan policy think tank"
+    ingest:
+      type: rss
+      url: "https://www.niskanencenter.org/feed/"   # verified 2026-08-10 (10 items)
+    rationale: "Explicitly cross-partisan policy argument; hard to place on a single axis."
+  - id: pol_tax_foundation
+    name: "Tax Foundation"
+    medium: news
+    stratum: policy_journals
+    role: "tax policy analysis"
+    ingest:
+      type: rss
+      url: "https://taxfoundation.org/feed/"   # verified 2026-08-10 (20 items)
+    # Worth having precisely because it is dry: proportionality-framed fairness
+    # argument with almost no care/harm vocabulary, which is the combination the
+    # equality/proportionality split is supposed to be able to see.
+    rationale: "Proportionality-framed fairness at high density; a test case for the MFQ-2 split."
+  - id: pol_kff_health
+    name: "KFF Health News"
+    medium: news
+    stratum: policy_journals
+    role: "health policy newsroom"
+    ingest:
+      type: rss
+      url: "https://kffhealthnews.org/feed/"   # verified 2026-08-10 (10 items)
+    rationale: "Reported health policy; care/harm framing grounded in program detail."
+  - id: pol_lawfare
+    name: "Lawfare"
+    medium: news
+    stratum: policy_journals
+    role: "national security and rule of law"
+    ingest:
+      type: rss
+      url: "https://www.lawfaremedia.org/feeds/articles"   # verified 2026-08-10
+    rationale: "Legal-institutional analysis; authority framing argued rather than asserted."
+    terms: >
+      The feed returned a single item when checked on 2026-08-10, so most of this
+      source's volume will have to come from GDELT backfill by domain rather than
+      from the feed. Treat a low document count here as a feed limitation.
+  - id: pol_foreign_affairs
+    name: "Foreign Affairs"
+    medium: news
+    stratum: policy_journals
+    role: "international affairs journal"
+    ingest:
+      type: rss
+      url: "https://www.foreignaffairs.com/rss.xml"   # verified 2026-08-10 (20 items)
+    rationale: "Non-domestic frame at essay length; the stratum's widest vantage."
+    terms: >
+      Most Foreign Affairs articles are metered or subscriber-only, so extraction
+      will often get the abstract rather than the piece. That biases any score
+      toward the framing of an opening paragraph.
+
+  # ---------------------------------------------------------------------------
+  # movement_left
+  # ---------------------------------------------------------------------------
+  - id: left_the_nation
+    name: "The Nation"
+    medium: news
+    stratum: movement_left
+    role: "movement-left magazine"
+    ingest:
+      type: rss
+      # verified 2026-08-10 (50 items)
+      url: "https://www.thenation.com/feed/?post_type=article"
+    rationale: "Long-standing movement-left magazine; argument-forward, high moral density."
+  - id: left_mother_jones
+    name: "Mother Jones"
+    medium: news
+    stratum: movement_left
+    role: "investigative progressive reporting"
+    ingest:
+      type: rss
+      url: "https://www.motherjones.com/feed/"   # verified 2026-08-10 (10 items)
+    rationale: "Investigative rather than essayistic; care/harm framing grounded in reporting."
+  - id: left_in_these_times
+    name: "In These Times"
+    medium: news
+    stratum: movement_left
+    role: "labor and economic left"
+    ingest:
+      type: rss
+      url: "https://inthesetimes.com/rss"   # verified 2026-08-10 (20 items)
+    rationale: "Labor-centred coverage; the economic left rather than the cultural one."
+  - id: left_truthout
+    name: "Truthout"
+    medium: news
+    stratum: movement_left
+    role: "activist-aligned digital"
+    ingest:
+      type: rss
+      url: "https://truthout.org/feed/"   # verified 2026-08-10 (100 items)
+    rationale: "High-volume activist-aligned reporting; the stratum's volume anchor."
+  - id: left_intercept
+    name: "The Intercept"
+    medium: news
+    stratum: movement_left
+    role: "adversarial investigative"
+    ingest:
+      type: rss
+      url: "https://theintercept.com/feed/?rss"   # verified 2026-08-10 (20 items)
+    # The clearest case in either family of liberty framed as freedom from
+    # *private and structural* domination rather than from the state, which is the
+    # register scoring/liberty.py exists to keep visible.
+    rationale: "Surveillance and corporate power; liberty in its non-state register."
+  - id: left_democracy_now
+    name: "Democracy Now!"
+    medium: podcast
+    stratum: movement_left
+    role: "daily independent broadcast"
+    ingest:
+      type: podcast_rss
+      # 13 episodes with audio enclosures; verified 2026-08-10.
+      url: "https://www.democracynow.org/podcast.xml"
+    rationale: "Daily movement-left broadcast; the stratum's only audio, and transcribable."
+
+  # ---------------------------------------------------------------------------
+  # centrist_politics
+  # ---------------------------------------------------------------------------
+  - id: left_axios
+    name: "Axios"
+    medium: news
+    stratum: centrist_politics
+    role: "brief-format political news"
+    ingest:
+      type: rss
+      url: "https://api.axios.com/feed/"   # verified 2026-08-10 (100 items)
+    # Its house style is very short items, which matters for measurement: a
+    # dictionary rate over a 120-word brief is noisier than over an essay, and
+    # length normalization does not remove that.
+    rationale: "High-volume brief-format political news; low ideological temperature."
+    terms: >
+      Items are very short by house style. Length-normalized scores over briefs
+      are noisier than over long-form, so this source's foundation numbers carry
+      more variance than its document count suggests.
+  - id: left_the_hill
+    name: "The Hill"
+    medium: news
+    stratum: centrist_politics
+    role: "congressional trade press"
+    ingest:
+      type: rss
+      url: "https://thehill.com/news/feed/"   # verified 2026-08-10 (15 items)
+    rationale: "Process and vote-counting coverage; authority framing without a lean."
+  - id: left_semafor
+    name: "Semafor"
+    medium: news
+    stratum: centrist_politics
+    role: "analysis-forward political news"
+    ingest:
+      type: rss
+      url: "https://www.semafor.com/rss.xml"   # verified 2026-08-10 (172 items)
+    rationale: "Separates reporting from the writer's view by design; unusual framing to score."
+  - id: left_washington_monthly
+    name: "Washington Monthly"
+    medium: news
+    stratum: centrist_politics
+    role: "governance-focused liberal magazine"
+    ingest:
+      type: rss
+      url: "https://washingtonmonthly.com/feed/"   # verified 2026-08-10 (10 items)
+    rationale: "Institutional-reform liberalism; policy argument rather than movement politics."
+  - id: left_bulwark
+    name: "The Bulwark"
+    medium: newsletter
+    stratum: centrist_politics
+    role: "anti-populist right-of-centre"
+    ingest:
+      type: rss
+      url: "https://www.thebulwark.com/feed"   # verified 2026-08-10 (20 items, 10 with audio)
+    # In the `left` family and right-of-centre by its own account, which is the
+    # point: a persona is a media diet, not a political position, and a moderate
+    # Democrat plausibly reads anti-populist conservatives.
+    rationale: "Right-of-centre and anti-populist; read across the aisle by design."
+
+  # ---------------------------------------------------------------------------
+  # podcasts (addition)
+  # ---------------------------------------------------------------------------
+  - id: left_npr_politics_pod
+    name: "The NPR Politics Podcast"
+    medium: podcast
+    stratum: podcasts
+    role: "daily politics roundtable"
+    ingest:
+      type: podcast_rss
+      # 1750 episodes with audio enclosures; verified 2026-08-10.
+      url: "https://feeds.npr.org/510310/podcast.xml"
+    rationale: "Daily politics audio from a newsroom already in the catalog, in a looser register."
+
 # =============================================================================
 # PERSONAS
 # =============================================================================
@@ -670,4 +1106,248 @@ personas:
       ce_thefp: 0.7
       ce_christianitytoday: 1.0
       ce_worldnews: 0.8
+      ce_relatable_stuckey: 1.0
+
+  # ---------------------------------------------------------------------------
+  # LEFT FAMILY — variants of the author's side.
+  #
+  # These exist because "my side" is not one reader either. The symmetry
+  # requirement (CLAUDE.md §0) is about equal construction, not just equal
+  # display: if the other family gets four variants and this one gets one, the
+  # comparison has quietly become one specific reader against a spectrum.
+  #
+  # Every weight below is asserted, not measured. No survey gives the
+  # policy-journal share of a policy wonk's week. They are documented guesses,
+  # and CLAUDE.md §5 asks for conclusions to be sensitivity-tested against them —
+  # which is cheap now, because weights resolve at aggregation and re-weighting
+  # needs no re-ingest.
+  # ---------------------------------------------------------------------------
+  - id: left_wonk
+    label: "Policy-first reader"
+    short_label: "Wonk"
+    family: left
+    description: >
+      Reads for legislation and evidence rather than events: think-tank output and
+      policy journals first, national dailies for what happened, long-form for
+      argument. No cable and no movement media at all. The register, not the lean,
+      is what defines this persona — the policy stratum it leans on deliberately
+      spans left, right and neither.
+    strata:
+      policy_journals: 0.45
+      national_dailies: 0.25
+      long_form: 0.20
+      public_broadcast: 0.10
+    sources:
+      pol_niskanen: 1.0
+      pol_tax_foundation: 0.9
+      pol_kff_health: 0.9
+      pol_lawfare: 0.8
+      pol_foreign_affairs: 0.7
+      self_nyt_home: 1.0
+      self_wapo_national: 0.8
+      self_atlantic: 0.8
+      self_vox: 1.0
+      self_npr_news: 1.0
+
+  - id: left_activist
+    label: "Movement-media reader"
+    short_label: "Activist"
+    family: left
+    description: >
+      Reads outlets that report in service of a political project and say so, with
+      a national daily kept for the record and long-form for argument. Weighted
+      toward movement media rather than exclusively so: a diet with no mainstream
+      news in it would model a caricature, and this project is not for building
+      those.
+    strata:
+      movement_left: 0.50
+      long_form: 0.20
+      national_dailies: 0.15
+      podcasts: 0.15
+    sources:
+      left_truthout: 1.0
+      left_the_nation: 0.9
+      left_mother_jones: 0.9
+      left_intercept: 0.8
+      left_in_these_times: 0.7
+      left_democracy_now: 0.8
+      self_atlantic: 0.6
+      self_guardian_us: 1.0
+      self_jacobin_radio: 1.0
+
+  - id: left_moderate_dem
+    label: "Party-mainstream reader"
+    short_label: "Moderate Dem"
+    family: left
+    description: >
+      Process coverage and the Washington read: inside-politics outlets first,
+      then national dailies and public broadcasting. No movement-left media at
+      all, and one right-of-centre anti-populist outlet, because reading across
+      the aisle is characteristic of this diet rather than exceptional in it.
+    strata:
+      centrist_politics: 0.40
+      national_dailies: 0.30
+      public_broadcast: 0.25
+      podcasts: 0.05
+    sources:
+      left_axios: 1.0
+      left_the_hill: 0.9
+      left_semafor: 0.8
+      left_washington_monthly: 0.6
+      left_bulwark: 0.6
+      self_nyt_home: 1.0
+      self_wapo_national: 1.0
+      self_politico_picks: 0.9
+      self_npr_news: 1.0
+      self_pbs_newshour: 0.8
+      left_npr_politics_pod: 1.0
+
+  - id: left_progressive
+    label: "Left-of-liberal reader"
+    short_label: "Progressive"
+    family: left
+    description: >
+      Movement media and long-form argument in roughly equal measure, with a heavy
+      audio share — the part of a diet a text-only pipeline cannot see, and the
+      part where framing is least filtered. Distinguished from the activist
+      persona by register rather than by position: more essay and interview, less
+      campaign.
+    strata:
+      movement_left: 0.35
+      long_form: 0.25
+      podcasts: 0.25
+      national_dailies: 0.15
+    sources:
+      left_the_nation: 1.0
+      left_intercept: 0.9
+      left_mother_jones: 0.8
+      left_truthout: 0.6
+      self_atlantic: 1.0
+      self_vox: 0.8
+      self_jacobin_radio: 1.0
+      self_nyt_daily: 0.7
+      left_democracy_now: 0.7
+      self_guardian_us: 1.0
+
+  # ---------------------------------------------------------------------------
+  # CONSERVATIVE-EVANGELICAL FAMILY — variants of the modeled side.
+  #
+  # `modeled_ce` above stays the blended reference and the recorded series is
+  # about it. The four below split what it averages: cable-only, talk-radio-led,
+  # digital-native, and devotionally-heavy are measurably different information
+  # environments, and averaging them into one "conservative-evangelical diet" is
+  # exactly the collapse CLAUDE.md §4 warns against.
+  # ---------------------------------------------------------------------------
+  - id: ce_cable_passive
+    label: "Cable-news viewer"
+    short_label: "Cable viewer"
+    family: conservative_evangelical
+    description: >
+      The television is on. National cable dominates, with a little digital news
+      and one faith outlet, and nothing else — no talk radio, no podcasts, no
+      devotional content. The opinion desk is deliberately absent: this persona
+      models the news hours rather than the panel shows, and it is the cleanest
+      demonstration that a persona costs nothing to add, since it needs no source
+      the catalog did not already have.
+    strata:
+      national_cable: 0.80
+      digital_outlets: 0.15
+      faith_media: 0.05
+    sources:
+      ce_foxnews_latest: 1.0
+      ce_dailywire_news: 0.4
+      ce_christianitytoday: 0.5
+
+  - id: ce_talk_radio
+    label: "Talk-radio listener"
+    short_label: "Talk radio"
+    family: conservative_evangelical
+    description: >
+      Hours of commentary audio a day, with cable secondary and a little populist
+      digital. This is the persona a text-only pipeline sees least of and
+      understates most: nearly all of its weight is audio that has to be
+      transcribed before it can be scored at all.
+    strata:
+      talk_radio: 0.55
+      national_cable: 0.25
+      populist_digital: 0.15
+      faith_media: 0.05
+    sources:
+      ce_glenn_beck: 1.0
+      ce_mark_levin: 0.9
+      ce_dailywire_mattwalsh: 0.9
+      ce_charlie_kirk: 0.7
+      ce_hugh_hewitt: 0.5
+      ce_foxnews_latest: 1.0
+      ce_foxnews_opinion: 0.8
+      ce_breitbart: 0.8
+      ce_the_blaze: 0.6
+      ce_christianitytoday: 0.5
+
+  - id: ce_digital_populist
+    label: "Digital-native populist reader"
+    short_label: "Digital populist"
+    family: conservative_evangelical
+    description: >
+      Reads movement-right digital outlets rather than watching legacy cable:
+      populist digital first, cable and talk radio secondary, one evangelical
+      newsmagazine. Includes an institutionalist magazine at low weight because
+      the argument between the populist and institutional right is internal to
+      this diet rather than outside it.
+    strata:
+      populist_digital: 0.55
+      national_cable: 0.20
+      talk_radio: 0.15
+      digital_outlets: 0.15
+      faith_media: 0.10
+    sources:
+      ce_breitbart: 1.0
+      ce_the_blaze: 0.9
+      ce_federalist: 0.9
+      ce_daily_caller: 0.8
+      ce_washington_examiner: 0.6
+      ce_foxnews_opinion: 1.0
+      ce_foxnews_latest: 0.7
+      ce_charlie_kirk: 1.0
+      ce_dailywire_news: 0.8
+      ce_national_review: 0.4
+      ce_worldnews: 0.7
+
+  - id: ce_devout
+    label: "Devotionally-heavy reader"
+    short_label: "Devout"
+    family: conservative_evangelical
+    description: >
+      Conservative news with hours of devotional and teaching content layered on
+      top: daily Bible programs, sermon audio, and a worldview briefing that reads
+      the news theologically, plus evangelical newsmagazines and a little cable.
+      Most of this persona's weight is content no other persona here touches, and
+      most of it is audio.
+
+      Read its foundation profile with more suspicion than any other persona on
+      the page. Devotional language is saturated with purity, authority and
+      loyalty vocabulary regardless of anyone's politics, so a high sanctity share
+      here is substantially a fact about the genre rather than about the reader —
+      and because devotionals carry almost no news agenda, this persona will also
+      show few story clusters and therefore few blindspots for a reason of
+      measurement rather than of substance. LIMITATIONS.md has both caveats.
+    strata:
+      devotional: 0.45
+      faith_media: 0.30
+      national_cable: 0.15
+      talk_radio: 0.10
+      podcasts: 0.10
+    sources:
+      ce_mohler_briefing: 1.0
+      ce_truth_for_life: 0.9
+      ce_bible_recap: 0.8
+      ce_renewing_your_mind: 0.8
+      ce_gospel_coalition: 0.7
+      ce_our_daily_bread: 0.7
+      ce_christianitytoday: 1.0
+      ce_worldnews: 0.9
+      ce_christianpost: 0.8
+      ce_cbnnews: 0.7
+      ce_foxnews_latest: 1.0
+      ce_dailywire_mattwalsh: 0.6
       ce_relatable_stuckey: 1.0

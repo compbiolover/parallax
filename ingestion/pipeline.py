@@ -77,6 +77,12 @@ class PipelineConfig:
     liberty_model: str | None = None      # None -> scoring.liberty.DEFAULT_MODEL
     liberty_effort: str | None = None     # None -> DEFAULT_EFFORT ('low')
     liberty_batch: bool = True            # Batch API: half price, overnight-friendly
+    # Which personas' sources to actually fetch. None = the whole catalog, which
+    # is the default: a persona whose sources are never fetched has an empty
+    # profile and renders as a blank column. Narrow it only after looking at the
+    # bill — ingestion, scoring, embedding and liberty tagging are per document,
+    # so they scale with the catalog rather than with the number of personas.
+    ingest_personas: list[str] | None = None
 
     @classmethod
     def from_settings(cls, settings: dict) -> PipelineConfig:
@@ -105,7 +111,17 @@ class PipelineConfig:
             liberty_model=lib_cfg.get("model"),
             liberty_effort=lib_cfg.get("effort"),
             liberty_batch=bool(lib_cfg.get("batch", True)),
+            ingest_personas=_ingest_personas(ing),
         )
+
+
+def _ingest_personas(ingestion_cfg: dict) -> list[str] | None:
+    """``ingestion.personas``: omitted or ``all`` for the whole catalog, otherwise
+    a list of persona ids whose sources are the only ones fetched."""
+    value = ingestion_cfg.get("personas", "all")
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return None
 
 
 @dataclass
@@ -222,7 +238,11 @@ def run(
     liberty = liberty_tagger if liberty_tagger is not None else _build_liberty(cfg)
     liberty_texts: dict[str, str] | None = {} if liberty is not None else None
 
-    sources = list(registry.ingestable(("rss",)))
+    # Only ask the registry to resolve a scope when one is configured. The ingest
+    # loop is deliberately undemanding about what a registry is — the test doubles
+    # supply sources and nothing else — and an unconfigured run needs no scope.
+    scope = registry.scope(cfg.ingest_personas) if cfg.ingest_personas else None
+    sources = list(registry.ingestable(("rss",), scope))
     for position, source in enumerate(sources, start=1):
         before = (stats.stored, stats.fetched, stats.errors)
         started = time.monotonic()
@@ -344,7 +364,8 @@ def backfill(
     # numerically; it is simply the right key for a catalog personas share.
     seen_domains: set[str] = set()
 
-    for source in registry.backfillable():
+    scope = registry.scope(cfg.ingest_personas) if cfg.ingest_personas else None
+    for source in registry.backfillable(scope):
         key = source.domain or ""
         if key in seen_domains:
             continue

@@ -33,6 +33,19 @@ datastore:
 
 # --- Ingestion -------------------------------------------------------------
 ingestion:
+  # Which personas' sources to fetch: `all` (the default) or a list of persona ids.
+  #
+  # Adding a persona is free — it is a weighting over sources already in the
+  # catalog, so nothing extra is fetched, scored, embedded or tagged. Adding the
+  # *sources* a new persona needs is not free: they cost ingestion time, GDELT
+  # backfill time (one query per domain at ~1 request/5s), and liberty-tagger
+  # spend, all per document. The shipped library needs roughly four times the
+  # catalog two diets did.
+  #
+  # Narrowing this is not free either: a persona whose sources are never fetched
+  # has an empty profile and renders as a blank column. `all` is the honest
+  # default; this is here for someone who has looked at the bill.
+  personas: all
   user_agent: "parallax-research-bot/0.1 (+https://github.com/compbiolover/parallax)"
   respect_robots_txt: true
   request_timeout_seconds: 30

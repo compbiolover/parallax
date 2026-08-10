@@ -90,7 +90,7 @@ class _Registry:
     def __init__(self, sources):
         self._sources = sources
 
-    def ingestable(self, _kinds):
+    def ingestable(self, _kinds, _source_ids=None):
         return list(self._sources)
 
 

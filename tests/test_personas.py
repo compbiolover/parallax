@@ -329,3 +329,101 @@ def test_the_shipped_example_settings_load_the_registry():
 
     registry = load_registry(settings=load_settings())
     assert "self" in registry.persona_ids()
+
+
+# -- the shipped library ----------------------------------------------------
+
+
+def test_adding_a_source_to_a_stratum_does_not_touch_a_persona_that_did_not_list_it():
+    """The property that makes the library extensible. `talk_radio` gained four
+    shows and `faith_media` two outlets, and `modeled_ce` — whose weights the whole
+    recorded series depends on — weights both strata. Opt-in membership is what
+    keeps those additions from silently re-weighting it."""
+    registry = load_registry()
+    modeled = registry.weights_for("modeled_ce")
+    assert set(modeled) == set(V2_WEIGHTS["modeled_ce"])
+
+    # The additions are real, and other personas do read them.
+    talk_radio = {s.id for s in registry.sources if s.stratum_id == "talk_radio"}
+    assert len(talk_radio) > 1
+    assert talk_radio & set(registry.weights_for("ce_talk_radio"))
+
+
+def test_both_families_ship_several_personas():
+    """One persona per side would make the comparison one specific reader against
+    a spectrum, which is not the symmetry CLAUDE.md §0 asks for."""
+    families = load_registry().families()
+    assert len(families["left"]) >= 4
+    assert len(families["conservative_evangelical"]) >= 4
+
+
+def test_the_devout_persona_is_mostly_content_no_other_persona_reads():
+    """It is the persona the whole devotional stratum exists for. If most of its
+    weight came from sources the others already had, it would be a re-weighting of
+    the modeled diet rather than a different information environment."""
+    registry = load_registry()
+    devout = registry.weights_for("ce_devout")
+    others = {
+        source_id
+        for persona_id in registry.persona_ids() if persona_id != "ce_devout"
+        for source_id in registry.weights_for(persona_id)
+    }
+    exclusive_weight = sum(w for sid, w in devout.items() if sid not in others)
+    assert exclusive_weight / sum(devout.values()) > 0.5
+
+
+def test_the_cable_persona_needs_no_source_the_catalog_did_not_have():
+    """The cheapest possible persona: pure re-weighting, no new ingestion at all.
+    It is the clearest demonstration that persona count and pipeline cost are
+    independent."""
+    registry = load_registry()
+    cable = set(registry.weights_for("ce_cable_passive"))
+    modeled = set(registry.weights_for("modeled_ce"))
+    assert cable <= modeled
+
+
+def test_a_persona_may_weight_a_source_another_family_also_reads():
+    """Personas share one catalog, so overlap across families is expressible —
+    and a moderate who reads an anti-populist conservative outlet is a real diet,
+    not a modelling error."""
+    registry = load_registry()
+    shared = set(registry.weights_for("ce_talk_radio")) & set(
+        registry.weights_for("ce_digital_populist")
+    )
+    assert shared, "two personas in one family should share sources"
+
+
+def test_ingestion_can_be_scoped_to_a_subset_of_personas(tmp_path):
+    """The one cost personas genuinely add. A persona is free — it reweights
+    sources already in the catalog — but the *sources* a new persona needs cost
+    ingestion time, GDELT backfill time and liberty-tagger spend per document."""
+    data = _registry_yaml()
+    data["catalog"].append(
+        {"id": "extra", "name": "Extra", "medium": "news", "stratum": "papers",
+         "ingest": {"type": "rss", "url": "https://e.test/f"}, "rationale": "r"},
+    )
+    data["personas"].append({
+        "id": "other", "label": "Other", "family": "right", "description": "d",
+        "strata": {"papers": 1.0}, "sources": {"extra": 1.0},
+    })
+    registry = load_registry(_write(tmp_path, data))
+
+    assert registry.scope(None) is None                       # the whole catalog
+    assert registry.scope(["reader"]) == {"times", "show"}
+    assert [s.id for s in registry.ingestable(("rss",), registry.scope(["other"]))] == ["extra"]
+    # Unscoped still reaches everything.
+    assert len(registry.ingestable(("rss",))) == 2            # times, extra
+
+
+def test_the_ingest_scope_setting_defaults_to_the_whole_catalog():
+    """A persona whose sources are never fetched has an empty profile and renders
+    as a blank column, so narrowing has to be a deliberate choice."""
+    from ingestion.pipeline import PipelineConfig
+
+    assert PipelineConfig.from_settings({}).ingest_personas is None
+    assert PipelineConfig.from_settings(
+        {"ingestion": {"personas": "all"}}
+    ).ingest_personas is None
+    assert PipelineConfig.from_settings(
+        {"ingestion": {"personas": ["self", "ce_devout"]}}
+    ).ingest_personas == ["self", "ce_devout"]

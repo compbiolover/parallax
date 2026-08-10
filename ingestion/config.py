@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -118,16 +119,51 @@ class Registry:
         them, so ingestion over this list never fetches the same feed twice."""
         return list(self.sources)
 
-    def ingestable(self, ingest_types: tuple[str, ...] = ("rss",)) -> list[Source]:
-        """Sources with a non-null URL and an ingest type we can process now."""
-        return [s for s in self.sources if s.url and s.ingest_type in ingest_types]
+    def ingestable(
+        self,
+        ingest_types: tuple[str, ...] = ("rss",),
+        source_ids: Collection[str] | None = None,
+    ) -> list[Source]:
+        """Sources with a non-null URL and an ingest type we can process now.
 
-    def backfillable(self) -> list[Source]:
+        ``source_ids`` restricts the run to a subset — see :meth:`scope`. Adding a
+        persona is free, but adding the *sources* a new persona needs is not: they
+        are fetched, extracted, embedded, and liberty-tagged like any other.
+        """
+        return [
+            s for s in self.sources
+            if s.url and s.ingest_type in ingest_types
+            and (source_ids is None or s.id in source_ids)
+        ]
+
+    def backfillable(self, source_ids: Collection[str] | None = None) -> list[Source]:
         """Sources with a resolvable outlet domain for GDELT historical backfill.
 
         Includes text outlets even when their RSS url is null (e.g. AP), so long
         as an explicit domain is set — GDELT can reach them by domain."""
-        return [s for s in self.sources if s.domain]
+        return [
+            s for s in self.sources
+            if s.domain and (source_ids is None or s.id in source_ids)
+        ]
+
+    def scope(self, personas: Collection[str] | None) -> set[str] | None:
+        """The union of those personas' sources, or ``None`` for the whole catalog.
+
+        The lever for the one cost personas genuinely add. Ingestion, scoring,
+        embedding and liberty tagging are per *document*, so they scale with the
+        catalog rather than with the persona count — and a library covering four
+        variants a side needs several times the sources two diets did.
+
+        Narrowing it is not free either: a persona whose sources are never fetched
+        has an empty profile and renders as a blank column, so the default is the
+        whole catalog and this exists for someone who has looked at the bill.
+        """
+        if personas is None:
+            return None
+        wanted: set[str] = set()
+        for persona_id in personas:
+            wanted |= set(self.weights_for(persona_id))
+        return wanted
 
     def source(self, source_id: str) -> Source | None:
         return next((s for s in self.sources if s.id == source_id), None)
