@@ -11,6 +11,7 @@ from __future__ import annotations
 import http.server
 import threading
 from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 
 import pytest
 
@@ -447,10 +448,12 @@ def test_already_seen_counts_the_window_not_the_archive(feed_server):
     ledger skipping."""
     # Dated relative to now, not pinned: the point of the episode is that it is
     # inside the 7-day window below, and a literal date stops being inside it a
-    # week after someone writes the test.
-    recent = (datetime.now(UTC) - timedelta(days=1)).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    # week after someone writes the test. Formatted by `email.utils`, since a
+    # pubDate is RFC 2822 and strftime's %a/%b follow LC_TIME — which would spell
+    # the day and month in whatever locale happened to be set.
+    inside_window = format_datetime(datetime.now(UTC) - timedelta(days=1))
     feed_server["feed"] = _feed_xml(
-        _item(guid="urn:new", date=recent)
+        _item(guid="urn:new", date=inside_window)
         + _item(guid="urn:old-1", date="Mon, 03 Aug 2020 10:00:00 +0000")
         + _item(guid="urn:old-2", date="Mon, 03 Aug 2019 10:00:00 +0000"))
     store = Datastore(":memory:")
