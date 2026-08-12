@@ -32,18 +32,26 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="digest", description="Parallax daily brief")
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="write the rendered brief to a file instead of sending")
-    parser.add_argument("--out", default=DEFAULT_PREVIEW,
-                        help=f"where --dry-run writes (default {DEFAULT_PREVIEW})")
-    parser.add_argument("--text", action="store_true",
-                        help="--dry-run: write the plain-text part instead of the HTML")
-    parser.add_argument("--open", action="store_true",
-                        help="--dry-run: open the rendered file in a browser")
-    parser.add_argument("--own-diet",
-                        help="diet id that is yours — puts your own blindspots first")
-    parser.add_argument("--history-limit", type=int,
-                        help="snapshots in the sparkline (default from settings)")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="write the rendered brief to a file instead of sending",
+    )
+    parser.add_argument(
+        "--out", default=DEFAULT_PREVIEW, help=f"where --dry-run writes (default {DEFAULT_PREVIEW})"
+    )
+    parser.add_argument(
+        "--text",
+        action="store_true",
+        help="--dry-run: write the plain-text part instead of the HTML",
+    )
+    parser.add_argument(
+        "--open", action="store_true", help="--dry-run: open the rendered file in a browser"
+    )
+    parser.add_argument("--own-diet", help="diet id that is yours — puts your own blindspots first")
+    parser.add_argument(
+        "--history-limit", type=int, help="snapshots in the sparkline (default from settings)"
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--mine", help="persona id for your side of the reference pair")
     parser.add_argument("--theirs", help="persona id for the other side")
@@ -54,20 +62,25 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run and (args.text or args.open):
         parser.error("--text and --open only apply with --dry-run")
 
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
-                        format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
     settings = load_settings(args.settings)
     registry = load_registry(settings=settings)
     pair = resolve(
-        settings, args.mine, args.theirs,
-        available=registry.persona_ids(), families=registry.families(),
+        settings,
+        args.mine,
+        args.theirs,
+        available=registry.persona_ids(),
+        families=registry.families(),
     )
     db = datastore_path(settings, args.db)
     own = args.own_diet or (settings.get("digest", {}) or {}).get("own_diet")
     # Same default the daily run uses, so `make digest` and `make daily` don't
     # draw different sparklines from the same settings file.
-    snap = ((settings.get("daily", {}) or {}).get("snapshot", {}) or {})
+    snap = (settings.get("daily", {}) or {}).get("snapshot", {}) or {}
     limit = args.history_limit or snap.get("history_limit", DEFAULT_SERIES_LIMIT)
 
     store = Datastore(db)
@@ -95,8 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     reason = send(digest, MailConfig.from_env())
     if reason is None:
         return 0
-    print(f"\n{reason}\n\nRender it without sending: python -m digest --dry-run",
-          file=sys.stderr)
+    print(f"\n{reason}\n\nRender it without sending: python -m digest --dry-run", file=sys.stderr)
     return 1
 
 

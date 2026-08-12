@@ -26,8 +26,22 @@ _ROOT_READ = re.compile(r"\bd\.([a-z_][a-z0-9_]*)\b")
 # Reads that are not payload keys: locals and DOM objects also called `d`, plus
 # d3's conventional datum argument.
 _NOT_PAYLOAD = {
-    "diets", "forEach", "map", "filter", "length", "id", "then", "push",
-    "toFixed", "value", "key", "title", "label", "date", "jsd", "profile",
+    "diets",
+    "forEach",
+    "map",
+    "filter",
+    "length",
+    "id",
+    "then",
+    "push",
+    "toFixed",
+    "value",
+    "key",
+    "title",
+    "label",
+    "date",
+    "jsd",
+    "profile",
 }
 
 
@@ -36,15 +50,29 @@ def _payload() -> dict:
     for persona, care in (("self", 0.3), ("modeled_ce", 0.1)):
         doc = f"{persona}-doc"
         store.upsert_document(
-            doc_id=doc, source_id=f"src_{persona}", stratum_id=None, url=None,
-            title="t", published_utc=None, fetched_utc="2026-08-10T00:00:00+00:00",
-            word_count=90, minhash=None,
+            doc_id=doc,
+            source_id=f"src_{persona}",
+            stratum_id=None,
+            url=None,
+            title="t",
+            published_utc=None,
+            fetched_utc="2026-08-10T00:00:00+00:00",
+            word_count=90,
+            minhash=None,
         )
         store.upsert_scores(
-            document_id=doc, scorer="dictionary",
-            foundations={"care": care, "fairness": 0.1, "loyalty": 0.2,
-                         "authority": 0.1, "sanctity": 0.1},
-            sentiment=0.0, moral_word_ratio=0.2, matched_words=18,
+            document_id=doc,
+            scorer="dictionary",
+            foundations={
+                "care": care,
+                "fairness": 0.1,
+                "loyalty": 0.2,
+                "authority": 0.1,
+                "sanctity": 0.1,
+            },
+            sentiment=0.0,
+            moral_word_ratio=0.2,
+            matched_words=18,
         )
     reg = registry(self={"src_self": 1.0}, modeled_ce={"src_modeled_ce": 1.0})
     payload = build_payload(store, reg, ReferencePair("self", "modeled_ce"))

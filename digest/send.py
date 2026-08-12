@@ -21,7 +21,7 @@ from .render import Digest
 logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 587
-IMPLICIT_TLS_PORT = 465     # TLS from the first byte; no STARTTLS handshake
+IMPLICIT_TLS_PORT = 465  # TLS from the first byte; no STARTTLS handshake
 TIMEOUT_S = 30
 
 # Sending a password in the clear is defensible to a relay on this machine and
@@ -64,8 +64,7 @@ def _port(env) -> int:
     if raw.isdigit():
         return int(raw)
     if raw:
-        logger.warning("PARALLAX_SMTP_PORT=%r is not a port number; using %d",
-                       raw, DEFAULT_PORT)
+        logger.warning("PARALLAX_SMTP_PORT=%r is not a port number; using %d", raw, DEFAULT_PORT)
     return DEFAULT_PORT
 
 
@@ -137,8 +136,9 @@ def _connect(config: MailConfig):
     connects in the clear and upgrades in ``send``.
     """
     if config.port == IMPLICIT_TLS_PORT:
-        return smtplib.SMTP_SSL(config.host, config.port, timeout=TIMEOUT_S,
-                                context=ssl.create_default_context())
+        return smtplib.SMTP_SSL(
+            config.host, config.port, timeout=TIMEOUT_S, context=ssl.create_default_context()
+        )
     return smtplib.SMTP(config.host, config.port, timeout=TIMEOUT_S)
 
 
@@ -171,8 +171,7 @@ def send(digest: Digest, config: MailConfig | None = None, *, smtp_factory=None)
     # Refused before the connection opens, not warned about after the password
     # is already gone. Encryption off is a deliberate setting; sending a
     # credential across a network in the clear is a different thing entirely.
-    if not config.starttls and config.port != IMPLICIT_TLS_PORT \
-            and not _is_loopback(config.host):
+    if not config.starttls and config.port != IMPLICIT_TLS_PORT and not _is_loopback(config.host):
         reason = PLAINTEXT_REMOTE.format(host=config.host)
         logger.warning("%s", reason)
         return reason

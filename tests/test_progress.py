@@ -19,15 +19,28 @@ from ingestion.pipeline import PipelineConfig, SourceProgress, run
 
 def _source(sid="fox_news", stratum="national_cable") -> Source:
     return Source(
-        id=sid, name=sid, medium="digital", role="national", ingest_type="rss",
-        url=f"https://example.com/{sid}/feed", stratum_id=stratum,
+        id=sid,
+        name=sid,
+        medium="digital",
+        role="national",
+        ingest_type="rss",
+        url=f"https://example.com/{sid}/feed",
+        stratum_id=stratum,
         domain="example.com",
     )
 
 
 def _event(**kw) -> SourceProgress:
-    base = dict(index=1, total=16, source=_source(), stored=3, fetched=3,
-                errors=0, seconds=2.1, failed=False)
+    base = dict(
+        index=1,
+        total=16,
+        source=_source(),
+        stored=3,
+        fetched=3,
+        errors=0,
+        seconds=2.1,
+        failed=False,
+    )
     return SourceProgress(**{**base, **kw})
 
 
@@ -120,6 +133,7 @@ def test_every_source_reports_once_in_order(monkeypatch):
 def test_a_source_that_raises_is_reported_as_failed_not_skipped(monkeypatch):
     """The whole point of reporting per source: a broken feed has to be visible
     while the run continues, not swallowed into a final error count."""
+
     def parse_feed(url, *a, **k):
         if "/b/" in url:
             raise OSError("connection reset")
@@ -132,16 +146,17 @@ def test_a_source_that_raises_is_reported_as_failed_not_skipped(monkeypatch):
 def test_counts_are_per_source_deltas_not_running_totals(monkeypatch):
     """Cumulative numbers would make every later source look productive even
     when it stored nothing."""
+
     class _Item:
         title = "A headline about something"
         link = None
         published_utc = None
         summary = " ".join(["word"] * 80)
 
-    monkeypatch.setattr("ingestion.pipeline._document_text",
-                        lambda item, cfg, robots, limiter: item.summary)
-    events = _run_with(monkeypatch, [_source("a"), _source("b")],
-                       lambda *a, **k: [_Item()])
+    monkeypatch.setattr(
+        "ingestion.pipeline._document_text", lambda item, cfg, robots, limiter: item.summary
+    )
+    events = _run_with(monkeypatch, [_source("a"), _source("b")], lambda *a, **k: [_Item()])
 
     assert all(e.fetched == 1 for e in events)
 
@@ -156,7 +171,7 @@ def test_omitting_progress_keeps_the_pipeline_silent(monkeypatch):
         stats = run(store, _Registry([_source("a")]), PipelineConfig())
     finally:
         store.close()
-    assert stats.fetched == 0        # ran, reported nothing, raised nothing
+    assert stats.fetched == 0  # ran, reported nothing, raised nothing
 
 
 # -- the one genuinely long silent wait -------------------------------------
@@ -176,8 +191,7 @@ def _announce(n_docs, use_batch):
     from ingestion.pipeline import _announce_liberty
 
     said: list[str] = []
-    _announce_liberty(_Tagger(use_batch), {str(i): "text" for i in range(n_docs)},
-                      said.append)
+    _announce_liberty(_Tagger(use_batch), {str(i): "text" for i in range(n_docs)}, said.append)
     return " ".join(said)
 
 
@@ -226,6 +240,7 @@ def test_daily_announces_each_step_before_running_it(monkeypatch):
         def fn(*a, **k):
             order.append(f"ran:{name}")
             return ""
+
         return fn
 
     for name in ("ingest", "backfill", "cluster", "summarize", "snapshot", "export"):

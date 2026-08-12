@@ -132,8 +132,10 @@ class Registry:
         are fetched, extracted, embedded, and liberty-tagged like any other.
         """
         return [
-            s for s in self.sources
-            if s.url and s.ingest_type in ingest_types
+            s
+            for s in self.sources
+            if s.url
+            and s.ingest_type in ingest_types
             and (source_ids is None or s.id in source_ids)
         ]
 
@@ -142,10 +144,7 @@ class Registry:
 
         Includes text outlets even when their RSS url is null (e.g. AP), so long
         as an explicit domain is set — GDELT can reach them by domain."""
-        return [
-            s for s in self.sources
-            if s.domain and (source_ids is None or s.id in source_ids)
-        ]
+        return [s for s in self.sources if s.domain and (source_ids is None or s.id in source_ids)]
 
     def scope(self, personas: Collection[str] | None) -> set[str] | None:
         """The union of those personas' sources, or ``None`` for the whole catalog.
@@ -259,9 +258,7 @@ def _resolve_url(source_id: str, ingest: dict) -> str | None:
         secret = os.environ.get(env_name, "").strip()
         if secret:
             return secret
-        logger.info(
-            "%s: %s is not set, falling back to the public feed", source_id, env_name
-        )
+        logger.info("%s: %s is not set, falling back to the public feed", source_id, env_name)
     return ingest.get("url")
 
 
@@ -345,9 +342,7 @@ def _registry_path(explicit: str | Path | None, settings: dict[str, Any] | None)
     if configured:
         path = _configured_path(configured)
         if not path.exists():
-            raise FileNotFoundError(
-                f"sources.registry points at {path}, which does not exist"
-            )
+            raise FileNotFoundError(f"sources.registry points at {path}, which does not exist")
         return path
     return DEFAULT_SOURCES
 

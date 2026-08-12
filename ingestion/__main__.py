@@ -1,10 +1,10 @@
 """CLI: ``python -m ingestion`` runs the Phase 1 pipeline.
 
-    python -m ingestion run                # fetch, dedup, score, store
-    python -m ingestion podcasts           # transcribe new episodes (slow, hours)
-    python -m ingestion compare            # print diet profiles + JSD
-    python -m ingestion labels             # record diet labels from the registry
-    python -m ingestion run --db data/parallax.sqlite --max-items 10
+python -m ingestion run                # fetch, dedup, score, store
+python -m ingestion podcasts           # transcribe new episodes (slow, hours)
+python -m ingestion compare            # print diet profiles + JSD
+python -m ingestion labels             # record diet labels from the registry
+python -m ingestion run --db data/parallax.sqlite --max-items 10
 """
 
 from __future__ import annotations
@@ -56,8 +56,7 @@ def build_reporter(stream=None):
     out = stream if stream is not None else sys.stdout
 
     def report(event: SourceProgress | str) -> None:
-        print(event if isinstance(event, str) else format_progress(event),
-              file=out, flush=True)
+        print(event if isinstance(event, str) else format_progress(event), file=out, flush=True)
 
     return report
 
@@ -85,10 +84,11 @@ def _print_personas(registry, store: Datastore, settings: dict) -> None:
     """
     from compare.reference import resolve
 
-    pair = resolve(settings, available=registry.persona_ids(),
-                   families=registry.families())
-    print(f"Registry version {registry.version} — {len(registry.sources)} sources "
-          f"in {len(registry.strata)} strata, ingested once each.")
+    pair = resolve(settings, available=registry.persona_ids(), families=registry.families())
+    print(
+        f"Registry version {registry.version} — {len(registry.sources)} sources "
+        f"in {len(registry.strata)} strata, ingested once each."
+    )
     print(f"Reference pair: {pair.mine} (mine) vs {pair.theirs} (theirs)\n")
     for family, ids in registry.families().items():
         print(f"{family}:")
@@ -96,20 +96,27 @@ def _print_personas(registry, store: Datastore, settings: dict) -> None:
             persona = registry.persona(persona_id)
             weights = registry.weights_for(persona_id)
             docs = store.doc_count_for_sources(weights)
-            role = (" [mine]" if persona_id == pair.mine
-                    else " [theirs]" if persona_id == pair.theirs else "")
-            print(f"  {persona_id:22} {persona.display_label:22} "
-                  f"{len(weights):>3} sources  {docs:>5} docs{role}")
+            role = (
+                " [mine]"
+                if persona_id == pair.mine
+                else " [theirs]"
+                if persona_id == pair.theirs
+                else ""
+            )
+            print(
+                f"  {persona_id:22} {persona.display_label:22} "
+                f"{len(weights):>3} sources  {docs:>5} docs{role}"
+            )
         print()
-    orphans = store.orphan_source_counts(
-        {s.id for s in registry.sources}
-    )
+    orphans = store.orphan_source_counts({s.id for s in registry.sources})
     if orphans:
         # A source dropped from the catalog leaves its documents reachable by no
         # persona. Said out loud, because the corpus otherwise quietly shrinks.
         total = sum(orphans.values())
-        print(f"{total} stored documents belong to {len(orphans)} source(s) no "
-              f"persona reads: {', '.join(sorted(orphans))}")
+        print(
+            f"{total} stored documents belong to {len(orphans)} source(s) no "
+            f"persona reads: {', '.join(sorted(orphans))}"
+        )
 
 
 def _print_compare(store: Datastore, registry) -> None:
@@ -168,18 +175,19 @@ def _podcasts(store: Datastore, settings: dict, args, progress) -> None:
         cfg.transformer_enabled = args.transformer
 
     registry = load_registry(settings=settings)
-    sources = [s for s in registry.all_sources()
-               if s.ingest_type == "podcast_rss" and s.url]
+    sources = [s for s in registry.all_sources() if s.ingest_type == "podcast_rss" and s.url]
     if progress is not None:
-        print(f"Transcribing up to {pcfg.max_episodes_per_source} episode(s) each from "
-              f"{len(sources)} podcast source(s), published within {pcfg.since_days}d, "
-              f"on faster-whisper {pcfg.whisper_model} ({pcfg.compute_type}).\n"
-              f"Budget: {pcfg.time_budget_seconds // 60} min — an hour of audio takes "
-              f"roughly that long on CPU, so expect this to use it.\n", flush=True)
+        print(
+            f"Transcribing up to {pcfg.max_episodes_per_source} episode(s) each from "
+            f"{len(sources)} podcast source(s), published within {pcfg.since_days}d, "
+            f"on faster-whisper {pcfg.whisper_model} ({pcfg.compute_type}).\n"
+            f"Budget: {pcfg.time_budget_seconds // 60} min — an hour of audio takes "
+            f"roughly that long on CPU, so expect this to use it.\n",
+            flush=True,
+        )
 
     embedder, _ = build_embedder(settings)
-    stats = run_podcasts(store, registry, cfg, pcfg, embedder=embedder,
-                         progress=progress)
+    stats = run_podcasts(store, registry, cfg, pcfg, embedder=embedder, progress=progress)
     print(f"\n{stats.line()}")
     for source_id, n in sorted(stats.per_source.items()):
         print(f"  {source_id:32} {n}")
@@ -187,37 +195,67 @@ def _podcasts(store: Datastore, settings: dict, args, progress) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingestion", description="Parallax Phase 1 pipeline")
-    parser.add_argument("command",
-                        choices=["run", "backfill", "podcasts", "compare", "labels", "personas"],
-                        help="what to do")
+    parser.add_argument(
+        "command",
+        choices=["run", "backfill", "podcasts", "compare", "labels", "personas"],
+        help="what to do",
+    )
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
     parser.add_argument("--max-items", type=int, help="max items per feed (run)")
     parser.add_argument("--min-words", type=int, help="minimum document word count")
     parser.add_argument("--lexicon", help="path to an eMFD-format CSV (overrides settings)")
     parser.add_argument("--days", type=int, default=14, help="backfill window in days")
-    parser.add_argument("--max-per-source", type=int, default=250,
-                        help="backfill: max GDELT articles per outlet (<=250)")
-    parser.add_argument("--extract", action="store_true",
-                        help="backfill: fetch article bodies for full scoring (slow)")
-    parser.add_argument("--transformer", dest="transformer", action="store_true", default=None,
-                        help="run: also transformer-score every article (confidence bands)")
-    parser.add_argument("--no-transformer", dest="transformer", action="store_false",
-                        help="run: skip the transformer tagger (dictionary-only, no bands)")
-    parser.add_argument("--max-episodes", type=int,
-                        help="podcasts: episodes per source per run")
-    parser.add_argument("--since-days", type=int,
-                        help="podcasts: only episodes published this recently")
-    parser.add_argument("--time-budget-minutes", type=int,
-                        help="podcasts: stop starting new episodes after this long")
-    parser.add_argument("--whisper-model",
-                        help="podcasts: faster-whisper size, e.g. medium, large-v3")
-    parser.add_argument("--episode-status", action="store_true",
-                        help="podcasts: print the ledger and transcribe nothing")
-    parser.add_argument("-v", "--verbose", action="store_true",
-                        help="log why individual fetches failed, not just the count")
-    parser.add_argument("-q", "--quiet", action="store_true",
-                        help="suppress the per-source progress lines")
+    parser.add_argument(
+        "--max-per-source",
+        type=int,
+        default=250,
+        help="backfill: max GDELT articles per outlet (<=250)",
+    )
+    parser.add_argument(
+        "--extract",
+        action="store_true",
+        help="backfill: fetch article bodies for full scoring (slow)",
+    )
+    parser.add_argument(
+        "--transformer",
+        dest="transformer",
+        action="store_true",
+        default=None,
+        help="run: also transformer-score every article (confidence bands)",
+    )
+    parser.add_argument(
+        "--no-transformer",
+        dest="transformer",
+        action="store_false",
+        help="run: skip the transformer tagger (dictionary-only, no bands)",
+    )
+    parser.add_argument("--max-episodes", type=int, help="podcasts: episodes per source per run")
+    parser.add_argument(
+        "--since-days", type=int, help="podcasts: only episodes published this recently"
+    )
+    parser.add_argument(
+        "--time-budget-minutes",
+        type=int,
+        help="podcasts: stop starting new episodes after this long",
+    )
+    parser.add_argument(
+        "--whisper-model", help="podcasts: faster-whisper size, e.g. medium, large-v3"
+    )
+    parser.add_argument(
+        "--episode-status",
+        action="store_true",
+        help="podcasts: print the ledger and transcribe nothing",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="log why individual fetches failed, not just the count",
+    )
+    parser.add_argument(
+        "-q", "--quiet", action="store_true", help="suppress the per-source progress lines"
+    )
     args = parser.parse_args(argv)
 
     # Progress is on by default. The run walks every source sequentially behind
@@ -247,18 +285,29 @@ def main(argv: list[str] | None = None) -> int:
                 registry = load_registry(settings=settings)
                 if progress is not None:
                     n = len(list(registry.ingestable(("rss",))))
-                    print(f"Ingesting {n} RSS source(s), up to "
-                          f"{cfg.max_items_per_feed} item(s) each. Sequential, with a "
-                          f"{cfg.timeout}s fetch timeout and {cfg.per_host_rpm} "
-                          f"requests/min per host — expect a few minutes.\n", flush=True)
+                    print(
+                        f"Ingesting {n} RSS source(s), up to "
+                        f"{cfg.max_items_per_feed} item(s) each. Sequential, with a "
+                        f"{cfg.timeout}s fetch timeout and {cfg.per_host_rpm} "
+                        f"requests/min per host — expect a few minutes.\n",
+                        flush=True,
+                    )
                 stats = run(store, registry, cfg, embedder=embedder, progress=progress)
             else:
-                print(f"Backfilling {args.days}d of history from GDELT "
-                      f"(≤{args.max_per_source}/source, "
-                      f"{'bodies' if args.extract else 'titles only'})…")
-                stats = backfill(store, load_registry(settings=settings), cfg, embedder=embedder,
-                                 days=args.days, max_per_source=args.max_per_source,
-                                 extract_bodies=args.extract)
+                print(
+                    f"Backfilling {args.days}d of history from GDELT "
+                    f"(≤{args.max_per_source}/source, "
+                    f"{'bodies' if args.extract else 'titles only'})…"
+                )
+                stats = backfill(
+                    store,
+                    load_registry(settings=settings),
+                    cfg,
+                    embedder=embedder,
+                    days=args.days,
+                    max_per_source=args.max_per_source,
+                    extract_bodies=args.extract,
+                )
             _print_stats(stats)
             print(f"\nDatastore: {store.counts()}")
         elif args.command == "podcasts":
@@ -280,9 +329,11 @@ def main(argv: list[str] | None = None) -> int:
             if not recorded:
                 print("No persona labels in the registry to record.")
             for persona_id, label in sorted(recorded.items()):
-                print(f"  {persona_id}: {label}"
-                      + (f"  (short: {short[persona_id]})" if persona_id in short else "")
-                      + (f"  [{families[persona_id]}]" if persona_id in families else ""))
+                print(
+                    f"  {persona_id}: {label}"
+                    + (f"  (short: {short[persona_id]})" if persona_id in short else "")
+                    + (f"  [{families[persona_id]}]" if persona_id in families else "")
+                )
     finally:
         store.close()
     return 0

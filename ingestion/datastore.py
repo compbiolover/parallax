@@ -29,6 +29,7 @@ from pathlib import Path
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
+
 PODCAST_EPISODES_DDL = """
 -- Episodes seen, whether or not they produced a document.
 --
@@ -374,10 +375,19 @@ class Datastore:
                     duplicate_of=excluded.duplicate_of
                 """,
                 (
-                    doc_id, diet_id, source_id, stratum_id, url, title,
-                    published_utc, fetched_utc, word_count,
+                    doc_id,
+                    diet_id,
+                    source_id,
+                    stratum_id,
+                    url,
+                    title,
+                    published_utc,
+                    fetched_utc,
+                    word_count,
                     json.dumps(minhash) if minhash is not None else None,
-                    weight, int(is_duplicate), duplicate_of,
+                    weight,
+                    int(is_duplicate),
+                    duplicate_of,
                 ),
             )
 
@@ -413,12 +423,19 @@ class Datastore:
                     matched_words=excluded.matched_words
                 """,
                 (
-                    document_id, scorer,
-                    foundations.get("care"), foundations.get("fairness"),
-                    foundations.get("loyalty"), foundations.get("authority"),
-                    foundations.get("sanctity"), liberty,
-                    equality, proportionality,
-                    sentiment, moral_word_ratio, matched_words,
+                    document_id,
+                    scorer,
+                    foundations.get("care"),
+                    foundations.get("fairness"),
+                    foundations.get("loyalty"),
+                    foundations.get("authority"),
+                    foundations.get("sanctity"),
+                    liberty,
+                    equality,
+                    proportionality,
+                    sentiment,
+                    moral_word_ratio,
+                    matched_words,
                 ),
             )
 
@@ -534,7 +551,10 @@ class Datastore:
         return [r["scorer"] for r in rows]
 
     def paired_scores_for_sources(
-        self, source_ids: Iterable[str], scorer_a: str, scorer_b: str,
+        self,
+        source_ids: Iterable[str],
+        scorer_a: str,
+        scorer_b: str,
         foundations: list[str] | None = None,
     ) -> list[tuple[str, dict[str, float], dict[str, float]]]:
         """Per non-duplicate document, ``(source_id, scorer_a_map, scorer_b_map)``
@@ -556,8 +576,8 @@ class Datastore:
         rows = self.conn.execute(
             f"""
             SELECT d.source_id AS source_id,
-                   {', '.join(f'a.{c} AS a_{c}' for c in founds)},
-                   {', '.join(f'b.{c} AS b_{c}' for c in founds)}
+                   {", ".join(f"a.{c} AS a_{c}" for c in founds)},
+                   {", ".join(f"b.{c} AS b_{c}" for c in founds)}
             FROM foundation_scores a
             JOIN foundation_scores b ON a.document_id = b.document_id
             JOIN documents d ON d.id = a.document_id
@@ -594,8 +614,7 @@ class Datastore:
         where, ids = _source_filter(source_ids)
         clause, params = _date_window(since, until)
         return self.conn.execute(
-            "SELECT COUNT(*) AS n FROM documents d "
-            f"WHERE d.is_duplicate = 0{where}{clause}",
+            f"SELECT COUNT(*) AS n FROM documents d WHERE d.is_duplicate = 0{where}{clause}",
             (*ids, *params),
         ).fetchone()["n"]
 
@@ -673,8 +692,12 @@ class Datastore:
                     payload=excluded.payload
                 """,
                 (
-                    snapshot_date, generated_utc, int(window_days),
-                    jsd_cumulative, jsd_window, json.dumps(payload),
+                    snapshot_date,
+                    generated_utc,
+                    int(window_days),
+                    jsd_cumulative,
+                    jsd_window,
+                    json.dumps(payload),
                 ),
             )
 
@@ -741,8 +764,18 @@ class Datastore:
                 document_id = COALESCE(excluded.document_id, podcast_episodes.document_id),
                 processed_utc = excluded.processed_utc
             """,
-            (guid, source_id, title, published_utc, _now_iso(), status, detail,
-             document_id, duration_seconds, audio_url),
+            (
+                guid,
+                source_id,
+                title,
+                published_utc,
+                _now_iso(),
+                status,
+                detail,
+                document_id,
+                duration_seconds,
+                audio_url,
+            ),
         )
         self.conn.commit()
 
@@ -814,10 +847,8 @@ class Datastore:
         return self._labels(self.SOURCE_LABEL_PREFIX)
 
     def _labels(self, prefix: str) -> dict[str, str]:
-        rows = self.conn.execute(
-            "SELECT key, value FROM meta WHERE key LIKE ?", (f"{prefix}%",)
-        )
-        return {r["key"][len(prefix):]: r["value"] for r in rows if r["value"]}
+        rows = self.conn.execute("SELECT key, value FROM meta WHERE key LIKE ?", (f"{prefix}%",))
+        return {r["key"][len(prefix) :]: r["value"] for r in rows if r["value"]}
 
     # -- embeddings ------------------------------------------------------
     def upsert_embedding(self, *, document_id: str, vector: list[float], embedder: str) -> None:
@@ -869,8 +900,8 @@ class Datastore:
     # -- clusters --------------------------------------------------------
     def replace_clustering(
         self,
-        clusters: list[tuple[int, str | None, int]],       # (cluster_id, label, size)
-        assignments: list[tuple[str, int]],                 # (document_id, cluster_id)
+        clusters: list[tuple[int, str | None, int]],  # (cluster_id, label, size)
+        assignments: list[tuple[str, int]],  # (document_id, cluster_id)
     ) -> None:
         with self._tx() as conn:
             conn.execute("DELETE FROM clusters")
@@ -888,7 +919,8 @@ class Datastore:
             )
 
     def replace_blindspot_themes(
-        self, themes: list[tuple[str, str, str, str]]   # (document_id, key, title, method)
+        self,
+        themes: list[tuple[str, str, str, str]],  # (document_id, key, title, method)
     ) -> None:
         with self._tx() as conn:
             conn.execute("DELETE FROM blindspot_themes")
@@ -1028,9 +1060,7 @@ class Datastore:
         persona list from the corpus would drop it and silently reshape every
         comparison.
         """
-        rows = self.conn.execute(
-            "SELECT DISTINCT source_id FROM documents ORDER BY source_id"
-        )
+        rows = self.conn.execute("SELECT DISTINCT source_id FROM documents ORDER BY source_id")
         return [r["source_id"] for r in rows]
 
     def counts(self) -> dict[str, int]:

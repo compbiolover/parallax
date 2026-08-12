@@ -37,26 +37,37 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
     parser.add_argument("--min-cluster-size", type=int, default=2)
-    parser.add_argument("--dominance", type=float, default=0.75,
-                        help="min share of one diet for a cluster to be a blindspot")
+    parser.add_argument(
+        "--dominance",
+        type=float,
+        default=0.75,
+        help="min share of one diet for a cluster to be a blindspot",
+    )
     parser.add_argument("--min-blindspot-size", type=int, default=2)
-    parser.add_argument("--no-claude-themes", action="store_true",
-                        help="name blindspot themes from the built-in taxonomy "
-                             "only, without an API call")
+    parser.add_argument(
+        "--no-claude-themes",
+        action="store_true",
+        help="name blindspot themes from the built-in taxonomy only, without an API call",
+    )
     parser.add_argument("--theme-model", help="model for theme naming")
-    parser.add_argument("--theme-effort",
-                        choices=["low", "medium", "high", "xhigh", "max"],
-                        help="thinking depth for theme naming (default: low)")
+    parser.add_argument(
+        "--theme-effort",
+        choices=["low", "medium", "high", "xhigh", "max"],
+        help="thinking depth for theme naming (default: low)",
+    )
     parser.add_argument("--mine", help="persona id for your side of the reference pair")
     parser.add_argument("--theirs", help="persona id for the other side")
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
-    themes_cfg = ((settings.get("cluster", {}) or {}).get("themes", {}) or {})
+    themes_cfg = (settings.get("cluster", {}) or {}).get("themes", {}) or {}
     registry = load_registry(settings=settings)
     pair = resolve(
-        settings, args.mine, args.theirs,
-        available=registry.persona_ids(), families=registry.families(),
+        settings,
+        args.mine,
+        args.theirs,
+        available=registry.persona_ids(),
+        families=registry.families(),
     )
     store = Datastore(datastore_path(settings, args.db))
     try:
@@ -71,8 +82,7 @@ def main(argv: list[str] | None = None) -> int:
             min_blindspot_size=args.min_blindspot_size,
             theme_model=args.theme_model or themes_cfg.get("model"),
             theme_effort=args.theme_effort or _configured_effort(themes_cfg),
-            claude_themes=(not args.no_claude_themes)
-                          and bool(themes_cfg.get("claude", True)),
+            claude_themes=(not args.no_claude_themes) and bool(themes_cfg.get("claude", True)),
         )
         print(
             f"Clustered {outcome.n_docs} docs -> {outcome.n_clusters} clusters "
@@ -80,9 +90,11 @@ def main(argv: list[str] | None = None) -> int:
             f"in {len(outcome.themes)} themes:\n"
         )
         for t in outcome.themes:
-            print(f"  [{t.dominant_diet} covers, {t.other_diet} misses] "
-                  f"{t.title}  ({t.story_count} stories in {t.cluster_count} "
-                  f"clusters; {t.one_sided:.0%} one-sided; named by {t.method})")
+            print(
+                f"  [{t.dominant_diet} covers, {t.other_diet} misses] "
+                f"{t.title}  ({t.story_count} stories in {t.cluster_count} "
+                f"clusters; {t.one_sided:.0%} one-sided; named by {t.method})"
+            )
             for story in t.stories[:5]:
                 print(f"      - {story}")
     finally:

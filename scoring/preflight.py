@@ -88,7 +88,7 @@ class Result:
     # for the table — a paragraph per row makes a three-row table unreadable.
     detail: str = ""
     millis: int = 0
-    shared: bool = False   # answered by another step's call, not its own
+    shared: bool = False  # answered by another step's call, not its own
 
     @property
     def short(self) -> str:
@@ -108,10 +108,10 @@ def planned_steps(settings: dict) -> list[Step]:
     from summarize.summarizer import DEFAULT_EFFORT as SUMMARY_EFFORT
     from summarize.summarizer import DEFAULT_MODEL as SUMMARY_MODEL
 
-    summarize = (settings.get("summarize", {}) or {})
-    taggers = ((settings.get("scoring", {}) or {}).get("taggers", {}) or {})
-    liberty = (taggers.get("liberty", {}) or {})
-    themes = ((settings.get("cluster", {}) or {}).get("themes", {}) or {})
+    summarize = settings.get("summarize", {}) or {}
+    taggers = (settings.get("scoring", {}) or {}).get("taggers", {}) or {}
+    liberty = taggers.get("liberty", {}) or {}
+    themes = (settings.get("cluster", {}) or {}).get("themes", {}) or {}
 
     return [
         Step(
@@ -150,8 +150,7 @@ def probe(client, step: Step) -> Result:
     kwargs = {
         "model": step.model,
         "max_tokens": _SCHEMA_MAX_TOKENS if step.structured else _MAX_TOKENS,
-        "system": ([{"type": "text", "text": _SYSTEM}] if step.system_blocks
-                   else _SYSTEM),
+        "system": ([{"type": "text", "text": _SYSTEM}] if step.system_blocks else _SYSTEM),
         "messages": [{"role": "user", "content": _PROMPT}],
     }
     output_config = {}
@@ -170,11 +169,15 @@ def probe(client, step: Step) -> Result:
         # An SDK that doesn't know a parameter the pipeline sends. Worth its own
         # sentence: it reads as a model problem, it is fixed by an upgrade, and
         # it will fail identically every morning until someone runs one.
-        return Result(step, False, Reason(
-            "the installed `anthropic` SDK is too old",
-            f"the installed `anthropic` SDK rejected a parameter this step "
-            f"sends ({exc}) — upgrade it with `pip install -U anthropic`.",
-        ))
+        return Result(
+            step,
+            False,
+            Reason(
+                "the installed `anthropic` SDK is too old",
+                f"the installed `anthropic` SDK rejected a parameter this step "
+                f"sends ({exc}) — upgrade it with `pip install -U anthropic`.",
+            ),
+        )
     except Exception as exc:
         return Result(step, False, call_failed(exc))
     return Result(step, True, millis=int((time.monotonic() - started) * 1000))
@@ -199,8 +202,7 @@ def run(settings: dict, client=None, steps: list[Step] | None = None) -> list[Re
             # a key that is *most* of what this prints, and calling a deliberate
             # `enabled: false` a failure sends someone to fix a setting they
             # chose on purpose.
-            return [_skipped(s) if s.disabled else Result(s, False, reason)
-                    for s in steps]
+            return [_skipped(s) if s.disabled else Result(s, False, reason) for s in steps]
 
     seen: dict[tuple, Result] = {}
     results: list[Result] = []
@@ -247,14 +249,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--settings", help="path to settings.yaml")
     parser.add_argument(
-        "--model", action="append", dest="models", metavar="ID",
+        "--model",
+        action="append",
+        dest="models",
+        metavar="ID",
         help="probe this model instead of the configured set (repeatable)",
     )
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
-    steps = ([Step(f"--model {m}", m) for m in args.models] if args.models
-             else planned_steps(settings))
+    steps = (
+        [Step(f"--model {m}", m) for m in args.models] if args.models else planned_steps(settings)
+    )
     distinct = len({s.key for s in steps if not s.disabled})
     print(f"Checking {len(steps)} step(s), {distinct} distinct model call(s)...\n")
 
@@ -263,9 +269,11 @@ def main(argv: list[str] | None = None) -> int:
 
     failed = [r for r in results if not r.ok]
     if not failed:
-        print("\nEvery configured model is reachable. That is the plumbing, not "
-              "the judgment —\n`python3 -m scoring.liberty` scores a real probe "
-              "through the rubric and the parser.")
+        print(
+            "\nEvery configured model is reachable. That is the plumbing, not "
+            "the judgment —\n`python3 -m scoring.liberty` scores a real probe "
+            "through the rubric and the parser."
+        )
         return 0
     # One line per distinct cause: three steps failing on one missing key is one
     # problem, and printing it three times reads like three.

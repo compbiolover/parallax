@@ -23,8 +23,15 @@ def _registry(mine_strata: dict[str, float], theirs_strata: dict[str, float]) ->
     """Two personas, each reading one source per stratum it weights."""
     strata = sorted(set(mine_strata) | set(theirs_strata))
     sources = [
-        Source(id=f"src_{s}", name=s, medium="news", role="", ingest_type="rss",
-               url=f"https://example.test/{s}", stratum_id=s)
+        Source(
+            id=f"src_{s}",
+            name=s,
+            medium="news",
+            role="",
+            ingest_type="rss",
+            url=f"https://example.test/{s}",
+            stratum_id=s,
+        )
         for s in strata
     ]
     return Registry(
@@ -32,12 +39,20 @@ def _registry(mine_strata: dict[str, float], theirs_strata: dict[str, float]) ->
         strata=[Stratum(id=s) for s in strata],
         sources=sources,
         personas=[
-            Persona(id="self", label="Mine", family="left",
-                    stratum_weights=dict(mine_strata),
-                    source_weights={f"src_{s}": 1.0 for s in mine_strata}),
-            Persona(id="modeled_ce", label="Theirs", family="right",
-                    stratum_weights=dict(theirs_strata),
-                    source_weights={f"src_{s}": 1.0 for s in theirs_strata}),
+            Persona(
+                id="self",
+                label="Mine",
+                family="left",
+                stratum_weights=dict(mine_strata),
+                source_weights={f"src_{s}": 1.0 for s in mine_strata},
+            ),
+            Persona(
+                id="modeled_ce",
+                label="Theirs",
+                family="right",
+                stratum_weights=dict(theirs_strata),
+                source_weights={f"src_{s}": 1.0 for s in theirs_strata},
+            ),
         ],
     )
 
@@ -48,13 +63,23 @@ def _store(docs: list[tuple[str, dict[str, float]]]) -> Datastore:
     for i, (source_id, foundations) in enumerate(docs):
         doc_id = f"{source_id}-{i}"
         store.upsert_document(
-            doc_id=doc_id, source_id=source_id, stratum_id=None, url=None, title="t",
-            published_utc=None, fetched_utc="2026-08-10T00:00:00+00:00",
-            word_count=400, minhash=None,
+            doc_id=doc_id,
+            source_id=source_id,
+            stratum_id=None,
+            url=None,
+            title="t",
+            published_utc=None,
+            fetched_utc="2026-08-10T00:00:00+00:00",
+            word_count=400,
+            minhash=None,
         )
         store.upsert_scores(
-            document_id=doc_id, scorer="dictionary", foundations=foundations,
-            sentiment=0.0, moral_word_ratio=0.2, matched_words=30,
+            document_id=doc_id,
+            scorer="dictionary",
+            foundations=foundations,
+            sentiment=0.0,
+            moral_word_ratio=0.2,
+            matched_words=30,
         )
     return store
 
@@ -79,13 +104,23 @@ def test_a_sign_flip_is_surfaced_as_the_finding_not_surviving():
     which of the two you decide it reads more of. That is a claim about the
     weighting, not about the corpus, and the report has to say so."""
     registry = _registry({"a": 1.0, "b": 1.0}, {"c": 1.0})
-    store = _store([
-        ("src_a", CARE),
-        ("src_b", BINDING),
-        # The other side sits between them, so `self` can land on either side of it.
-        ("src_c", {"care": 0.35, "fairness": 0.1, "loyalty": 0.3,
-                   "authority": 0.125, "sanctity": 0.125}),
-    ])
+    store = _store(
+        [
+            ("src_a", CARE),
+            ("src_b", BINDING),
+            # The other side sits between them, so `self` can land on either side of it.
+            (
+                "src_c",
+                {
+                    "care": 0.35,
+                    "fairness": 0.1,
+                    "loyalty": 0.3,
+                    "authority": 0.125,
+                    "sanctity": 0.125,
+                },
+            ),
+        ]
+    )
 
     report = analyze(store, registry, ReferencePair("self", "modeled_ce"), factor=0.5)
     assert report is not None
@@ -117,9 +152,12 @@ def test_every_stratum_is_moved_in_both_directions():
     report = analyze(store, registry, ReferencePair("self", "modeled_ce"), factor=0.5)
     seen = {(p.persona, p.stratum, p.factor > 1) for p in report.perturbations}
     assert seen == {
-        ("self", "a", True), ("self", "a", False),
-        ("self", "b", True), ("self", "b", False),
-        ("modeled_ce", "c", True), ("modeled_ce", "c", False),
+        ("self", "a", True),
+        ("self", "a", False),
+        ("self", "b", True),
+        ("self", "b", False),
+        ("modeled_ce", "c", True),
+        ("modeled_ce", "c", False),
     }
     store.close()
 
@@ -172,8 +210,14 @@ def test_the_report_serializes_flat():
     d = analyze(store, registry, ReferencePair("self", "modeled_ce")).to_dict()
     assert d["pair"] == ["self", "modeled_ce"]
     assert set(d) == {
-        "pair", "factor", "baseline_jsd", "jsd_range", "docs", "stable",
-        "flipped", "perturbations",
+        "pair",
+        "factor",
+        "baseline_jsd",
+        "jsd_range",
+        "docs",
+        "stable",
+        "flipped",
+        "perturbations",
     }
     store.close()
 

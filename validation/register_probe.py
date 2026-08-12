@@ -79,53 +79,62 @@ PAIRS: tuple[ProbePair, ...] = (
     ProbePair(
         "compulsion",
         "{actor} left residents no choice but to comply with the new rule.",
-        "State officials", "Company executives",
+        "State officials",
+        "Company executives",
     ),
     ProbePair(
         "surveillance",
         "{actor} now tracks where residents go and how long they stay there.",
-        "The police department", "The employer",
+        "The police department",
+        "The employer",
     ),
     ProbePair(
         "speech",
         "{actor} removed the posts and warned that further speech would be penalized.",
-        "The agency", "The platform",
+        "The agency",
+        "The platform",
     ),
     ProbePair(
         "medical disclosure",
         "{actor} required workers to disclose personal medical records before returning.",
-        "The health department", "The employer",
+        "The health department",
+        "The employer",
     ),
     ProbePair(
         "livelihood",
         "{actor} can revoke the permit at will, leaving drivers unable to work.",
-        "The licensing board", "The platform operator",
+        "The licensing board",
+        "The platform operator",
     ),
     ProbePair(
         "property",
         "{actor} seized the equipment without notice and refused to return it.",
-        "Federal agents", "The landlord",
+        "Federal agents",
+        "The landlord",
     ),
     ProbePair(
         "exit",
         "{actor} made it impossible to leave without paying a penalty few can afford.",
-        "The new statute", "The service agreement",
+        "The new statute",
+        "The service agreement",
     ),
     ProbePair(
         "conscience",
         "{actor} punished staff who objected to the policy on grounds of conscience.",
-        "The state board", "The corporation",
+        "The state board",
+        "The corporation",
     ),
     ProbePair(
         "assembly",
         "{actor} broke up the gathering and told organizers they could not meet again.",
-        "City police", "Mall security",
+        "City police",
+        "Mall security",
     ),
     ProbePair(
         "data",
-        "{actor} collected the messages without consent and would not say how they "
-        "would be used.",
-        "The intelligence service", "The data broker",
+        "{actor} collected the messages without consent and would not say how they would be used.",
+        "The intelligence service",
+        "The data broker",
     ),
 )
 
@@ -152,7 +161,7 @@ class Cell:
 class ProbeResult:
     model: str
     repeats: int
-    state: dict[str, Cell] = field(default_factory=dict)     # topic -> cell
+    state: dict[str, Cell] = field(default_factory=dict)  # topic -> cell
     private: dict[str, Cell] = field(default_factory=dict)
 
     def _all(self, side: dict[str, Cell]) -> list[float]:
@@ -181,8 +190,9 @@ class ProbeResult:
         the model's own sampling variance, which cannot be reduced because
         ``temperature`` is rejected on current models.
         """
-        spreads = [c.spread for c in (*self.state.values(), *self.private.values())
-                   if len(c.presences) > 1]
+        spreads = [
+            c.spread for c in (*self.state.values(), *self.private.values()) if len(c.presences) > 1
+        ]
         return statistics.mean(spreads) if spreads else 0.0
 
     def concentration(self, factor: float = 2.0) -> tuple[list[str], list[str]]:
@@ -242,8 +252,10 @@ def run_probe(tagger, pairs=PAIRS, repeats: int = 3, progress=None) -> ProbeResu
     for pair in pairs:
         state_cell, private_cell = Cell(), Cell()
         for _ in range(repeats):
-            for text, cell in ((pair.state_text(), state_cell),
-                               (pair.private_text(), private_cell)):
+            for text, cell in (
+                (pair.state_text(), state_cell),
+                (pair.private_text(), private_cell),
+            ):
                 score = tagger.score(text)
                 if score is None:
                     cell.failures += 1
@@ -263,8 +275,9 @@ def _wrap(text: str) -> list[str]:
     The interpretive notes are the part most likely to be skimmed, and an
     unwrapped 300-character line is the easiest thing in a report to skip.
     """
-    return textwrap.wrap(" ".join(text.split()), width=78,
-                         initial_indent="  ", subsequent_indent="  ")
+    return textwrap.wrap(
+        " ".join(text.split()), width=78, initial_indent="  ", subsequent_indent="  "
+    )
 
 
 def format_report(result: ProbeResult) -> str:
@@ -360,14 +373,20 @@ def main(argv: list[str] | None = None) -> int:
         description="Check whether the liberty rubric scores both registers evenhandedly",
     )
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Claude model id")
-    parser.add_argument("--repeats", type=int, default=3,
-                        help="samples per condition (default 3; 1 disables the noise floor)")
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=3,
+        help="samples per condition (default 3; 1 disables the noise floor)",
+    )
     parser.add_argument("--yes", action="store_true", help="skip the cost confirmation")
     args = parser.parse_args(argv)
 
     calls = len(PAIRS) * 2 * max(1, args.repeats)
-    print(f"{len(PAIRS)} pairs x 2 registers x {args.repeats} repeats = {calls} calls "
-          f"to {args.model}.")
+    print(
+        f"{len(PAIRS)} pairs x 2 registers x {args.repeats} repeats = {calls} calls "
+        f"to {args.model}."
+    )
     if not args.yes:
         reply = input("Proceed? [y/N] ").strip().lower()
         if reply not in ("y", "yes"):
@@ -376,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
 
     tagger = build_tagger(model=args.model, use_batch=False)
     if tagger is None:
-        return 1        # build_tagger already warned with the reason
+        return 1  # build_tagger already warned with the reason
 
     done = [0]
 

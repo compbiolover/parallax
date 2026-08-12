@@ -83,7 +83,7 @@ class Basis:
     number the dashboard can derive.
     """
 
-    jsd: float | None                                    # None: fewer than two scored diets
+    jsd: float | None  # None: fewer than two scored diets
     pair: list[str] | None
     diets: dict[str, dict] = field(default_factory=dict)  # id -> composition + doc_count
     log_ratios: dict[str, float] | None = None
@@ -91,10 +91,10 @@ class Basis:
 
 @dataclass
 class Snapshot:
-    snapshot_date: str        # 'YYYY-MM-DD' (UTC)
+    snapshot_date: str  # 'YYYY-MM-DD' (UTC)
     generated_utc: str
     window_days: int
-    source: str               # LIVE | RECONSTRUCTED
+    source: str  # LIVE | RECONSTRUCTED
     cumulative: Basis
     window: Basis
 
@@ -144,7 +144,8 @@ def _basis(store, registry, pair, scorer: str, since: str | None, until: str) ->
         persona_id: {
             "composition": (
                 _round({f: profiles[persona_id].get(f, 0.0) for f in CLASSIC_FOUNDATIONS})
-                if persona_id in profiles else None
+                if persona_id in profiles
+                else None
             ),
             "doc_count": store.doc_count_for_sources(
                 registry.weights_for(persona_id), since=since, until=until
@@ -187,8 +188,12 @@ def build_snapshot(
         source=source,
         cumulative=_basis(store, registry, pair, scorer, since=None, until=until),
         window=_basis(
-            store, registry, pair, scorer,
-            since=_window_start(day, window_days), until=until,
+            store,
+            registry,
+            pair,
+            scorer,
+            since=_window_start(day, window_days),
+            until=until,
         ),
     )
 
@@ -239,7 +244,10 @@ def _warn_on_pair_change(store, pair) -> None:
             "reference pair changed from %s vs %s to %s vs %s — earlier points in "
             "the divergence series describe the previous comparison and are not "
             "continuous with the ones from here on",
-            recorded[0], recorded[1], pair.mine, pair.theirs,
+            recorded[0],
+            recorded[1],
+            pair.mine,
+            pair.theirs,
         )
 
 
@@ -272,8 +280,7 @@ def backfill_series(
             break
         if day in existing:
             continue
-        record_snapshot(store, registry, pair, day, window_days, scorer,
-                        source=RECONSTRUCTED)
+        record_snapshot(store, registry, pair, day, window_days, scorer, source=RECONSTRUCTED)
         written.append(day)
     return sorted(written)
 
@@ -324,14 +331,26 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", help="SQLite path (default from settings)")
     p.add_argument("--settings", help="path to settings.yaml")
     p.add_argument("--record", action="store_true", help="record today's snapshot now")
-    p.add_argument("--backfill", type=int, metavar="DAYS",
-                   help="reconstruct DAYS of past snapshots from stored publication dates")
-    p.add_argument("--overwrite", action="store_true",
-                   help="let --backfill replace existing rows (including live ones)")
-    p.add_argument("--window-days", type=int, default=DEFAULT_WINDOW_DAYS,
-                   help=f"trailing window for the windowed basis (default {DEFAULT_WINDOW_DAYS})")
-    p.add_argument("--limit", type=int, default=DEFAULT_SERIES_LIMIT,
-                   help="how many recent snapshots to list")
+    p.add_argument(
+        "--backfill",
+        type=int,
+        metavar="DAYS",
+        help="reconstruct DAYS of past snapshots from stored publication dates",
+    )
+    p.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="let --backfill replace existing rows (including live ones)",
+    )
+    p.add_argument(
+        "--window-days",
+        type=int,
+        default=DEFAULT_WINDOW_DAYS,
+        help=f"trailing window for the windowed basis (default {DEFAULT_WINDOW_DAYS})",
+    )
+    p.add_argument(
+        "--limit", type=int, default=DEFAULT_SERIES_LIMIT, help="how many recent snapshots to list"
+    )
     args = p.parse_args(argv)
 
     settings = load_settings(args.settings)

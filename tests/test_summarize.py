@@ -28,23 +28,37 @@ def _seed_store():
     for i, diet in enumerate(["self", "modeled_ce"]):
         doc_id = f"{diet}-{i}"
         store.upsert_document(
-            doc_id=doc_id, source_id=f"src_{diet}", stratum_id=None,
-            url="http://x", title=f"{diet} headline", published_utc=None,
-            fetched_utc="2026-07-23T00:00:00+00:00", word_count=100, minhash=None,
+            doc_id=doc_id,
+            source_id=f"src_{diet}",
+            stratum_id=None,
+            url="http://x",
+            title=f"{diet} headline",
+            published_utc=None,
+            fetched_utc="2026-07-23T00:00:00+00:00",
+            word_count=100,
+            minhash=None,
         )
         store.upsert_scores(
-            document_id=doc_id, scorer="dictionary",
-            foundations={"care": 0.3 if diet == "self" else 0.1,
-                         "fairness": 0.1, "loyalty": 0.1 if diet == "self" else 0.4,
-                         "authority": 0.2, "sanctity": 0.1},
-            sentiment=0.0, moral_word_ratio=0.2, matched_words=20,
+            document_id=doc_id,
+            scorer="dictionary",
+            foundations={
+                "care": 0.3 if diet == "self" else 0.1,
+                "fairness": 0.1,
+                "loyalty": 0.1 if diet == "self" else 0.4,
+                "authority": 0.2,
+                "sanctity": 0.1,
+            },
+            sentiment=0.0,
+            moral_word_ratio=0.2,
+            matched_words=20,
         )
     return store
 
 
 def test_prompt_contains_rules_data_and_headlines():
-    ctx = [DietContext("self", "self", 3, {"care": 0.5, "loyalty": 0.5},
-                       ["a headline", "b headline"])]
+    ctx = [
+        DietContext("self", "self", 3, {"care": 0.5, "loyalty": 0.5}, ["a headline", "b headline"])
+    ]
     cmp = ComparisonContext("self", "modeled_ce", 0.12, {"care": 0.4, "loyalty": -0.4})
     prompt = build_user_prompt(ctx, cmp)
     assert "## <label>" in prompt
@@ -60,8 +74,10 @@ def test_max_headlines_respected():
 
 
 def test_parse_sections_splits_by_headers():
-    contexts = [DietContext("self", "self", 1, {}, []),
-                DietContext("modeled_ce", "modeled_ce", 1, {}, [])]
+    contexts = [
+        DietContext("self", "self", 1, {}, []),
+        DietContext("modeled_ce", "modeled_ce", 1, {}, []),
+    ]
     text = "## self\nSelf paragraph.\n## modeled_ce\nOther paragraph.\n## Executive\nThe exec."
     per_diet, executive = _parse_sections(text, contexts)
     assert per_diet["self"] == "Self paragraph."
@@ -150,7 +166,8 @@ def test_missing_package_is_not_reported_as_a_missing_key(monkeypatch):
 
 
 class _FakeBlock:
-    def __init__(self, text): self.text = text
+    def __init__(self, text):
+        self.text = text
 
 
 class _FakeMessages:
@@ -194,8 +211,7 @@ class _ThinkingBlock:
 
 def _seed_labels(store):
     store.set_diet_label("self", "My diet", "My diet")
-    store.set_diet_label("modeled_ce", "Modeled conservative-evangelical diet",
-                         "The modeled diet")
+    store.set_diet_label("modeled_ce", "Modeled conservative-evangelical diet", "The modeled diet")
 
 
 def test_the_summarizer_is_given_the_diets_human_labels():
@@ -204,8 +220,7 @@ def test_the_summarizer_is_given_the_diets_human_labels():
     store = _seed_store()
     _seed_labels(store)
     contexts, _ = gather(store, _reg(), pair())
-    assert {c.label for c in contexts} == {
-        "My diet", "Modeled conservative-evangelical diet"}
+    assert {c.label for c in contexts} == {"My diet", "Modeled conservative-evangelical diet"}
     store.close()
 
 
@@ -215,9 +230,16 @@ def test_the_prompt_carries_labels_and_forbids_the_ids_in_the_prose():
     raises the chance of an id leaking into the prose, so the rule against it is
     explicit rather than implied by absence — and the comparison line, the
     sentence most likely to be paraphrased directly, still carries labels only."""
-    ctx = [DietContext("self", "My diet", 3, {"care": 1.0}, ["a headline"]),
-           DietContext("modeled_ce", "Modeled conservative-evangelical diet", 2,
-                       {"loyalty": 1.0}, ["b headline"])]
+    ctx = [
+        DietContext("self", "My diet", 3, {"care": 1.0}, ["a headline"]),
+        DietContext(
+            "modeled_ce",
+            "Modeled conservative-evangelical diet",
+            2,
+            {"loyalty": 1.0},
+            ["b headline"],
+        ),
+    ]
     cmp = ComparisonContext("self", "modeled_ce", 0.12, {"care": 0.4})
     prompt = build_user_prompt(ctx, cmp)
     assert "Modeled conservative-evangelical diet" in prompt
@@ -230,22 +252,36 @@ def test_the_prompt_carries_labels_and_forbids_the_ids_in_the_prose():
 def test_the_style_rules_are_in_the_system_prompt():
     """The executive summary is read on a phone before anything else. These are
     the tells that make a paragraph unreadable there, not stylistic taste."""
-    for rule in ("em dashes", "Short paragraphs", "groups of three",
-                 "Lead with the finding", "Vary sentence length"):
+    for rule in (
+        "em dashes",
+        "Short paragraphs",
+        "groups of three",
+        "Lead with the finding",
+        "Vary sentence length",
+    ):
         assert rule in SYSTEM_PROMPT
 
 
 def _labelled_contexts():
-    return [DietContext("self", "My diet", 1, {}, [], short_label="My diet"),
-            DietContext("modeled_ce", "Modeled conservative-evangelical diet", 1, {}, [],
-                        short_label="The modeled diet")]
+    return [
+        DietContext("self", "My diet", 1, {}, [], short_label="My diet"),
+        DietContext(
+            "modeled_ce",
+            "Modeled conservative-evangelical diet",
+            1,
+            {},
+            [],
+            short_label="The modeled diet",
+        ),
+    ]
 
 
 def test_a_heading_that_does_not_match_the_label_exactly_still_lands():
     """Labels are sentences now. A model that title-cases one or drops the
     trailing noun has still named the right diet."""
-    text = ("## My Diet\nMine.\n## Modeled Conservative-Evangelical\nTheirs.\n"
-            "## Executive\nThe exec.")
+    text = (
+        "## My Diet\nMine.\n## Modeled Conservative-Evangelical\nTheirs.\n## Executive\nThe exec."
+    )
     per_diet, executive = _parse_sections(text, _labelled_contexts())
     assert per_diet["self"] == "Mine."
     assert per_diet["modeled_ce"] == "Theirs."
@@ -258,7 +294,8 @@ def test_a_heading_in_the_short_form_lands_on_the_right_diet():
     and a section about the modeled diet was filed under `self`. That inverts
     the one guarantee the tool makes."""
     per_diet, _ = _parse_sections(
-        "## The modeled diet\nTheirs.\n## Executive\nE.", _labelled_contexts())
+        "## The modeled diet\nTheirs.\n## Executive\nE.", _labelled_contexts()
+    )
     assert per_diet["modeled_ce"] == "Theirs."
     assert per_diet["self"] == ""
 
@@ -271,8 +308,7 @@ def test_a_heading_that_fits_both_diets_is_not_guessed_at():
 
 
 def test_a_heading_carrying_extra_words_still_lands():
-    per_diet, _ = _parse_sections(
-        "## My diet today\nMine.\n", _labelled_contexts())
+    per_diet, _ = _parse_sections("## My diet today\nMine.\n", _labelled_contexts())
     assert per_diet["self"] == "Mine."
 
 
@@ -297,7 +333,7 @@ def test_the_daily_run_honours_the_configured_summary_model():
 
     cfg = DailyConfig.from_settings({"summarize": {"model": "claude-sonnet-5"}})
     assert cfg.model == "claude-sonnet-5"
-    assert DailyConfig.from_settings({}).model is None   # -> the summarizer default
+    assert DailyConfig.from_settings({}).model is None  # -> the summarizer default
 
 
 def test_the_labels_command_records_them_without_re_ingesting():
@@ -310,15 +346,19 @@ def test_the_labels_command_records_them_without_re_ingesting():
     from ingestion.pipeline import _store_persona_labels
 
     store = Datastore(":memory:")
-    sources = [SimpleNamespace(id="christianity_today", name="Christianity Today"),
-               SimpleNamespace(id="unnamed", name="")]
+    sources = [
+        SimpleNamespace(id="christianity_today", name="Christianity Today"),
+        SimpleNamespace(id="unnamed", name=""),
+    ]
     registry = SimpleNamespace(
         personas=[
-            SimpleNamespace(id="self", label="My diet", short_label="My diet",
-                            family="left"),
-            SimpleNamespace(id="modeled_ce", label="Modeled conservative-evangelical diet",
-                            short_label="The modeled diet",
-                            family="conservative_evangelical"),
+            SimpleNamespace(id="self", label="My diet", short_label="My diet", family="left"),
+            SimpleNamespace(
+                id="modeled_ce",
+                label="Modeled conservative-evangelical diet",
+                short_label="The modeled diet",
+                family="conservative_evangelical",
+            ),
         ],
         all_sources=lambda: sources,
     )
@@ -388,7 +428,7 @@ def test_a_reply_with_no_prose_is_asked_again_before_giving_up():
     identical input, so the retry is the fix and the fallback is the floor
     under it — without the retry one such reply cost the whole day's brief."""
     store = _seed_store()
-    client = _FakeClient(queue=[[_ThinkingBlock()], None])   # then the usual reply
+    client = _FakeClient(queue=[[_ThinkingBlock()], None])  # then the usual reply
 
     result = Summarizer(client=client).summarize(store, _reg(), pair())
 
@@ -431,8 +471,7 @@ class _TypedBlock:
 
 def test_only_prose_blocks_reach_the_summary():
     store = _seed_store()
-    client = _FakeClient(blocks=[_TypedBlock("NOT PROSE"),
-                                 _FakeBlock("## Executive\nE.")])
+    client = _FakeClient(blocks=[_TypedBlock("NOT PROSE"), _FakeBlock("## Executive\nE.")])
     result = Summarizer(client=client).summarize(store, _reg(), pair())
     assert result.executive == "E."
     assert "NOT PROSE" not in result.executive
@@ -462,14 +501,15 @@ def test_a_partial_result_is_persisted_and_the_report_names_the_shortfall(monkey
 
     partial = SummaryResult({"self": "Mine.", "modeled_ce": ""}, "E.", "m", "claude", "t")
     monkeypatch.setattr(
-        Summarizer, "summarize",
+        Summarizer,
+        "summarize",
         lambda self, store, registry, pair, personas=None: partial,
     )
 
     store = _seed_store()
     detail = _step_summarize_detail(store)
     assert "1 diets of 2" in detail
-    assert store.all_summaries()["modeled_ce"]["text"] == ""   # written, not skipped
+    assert store.all_summaries()["modeled_ce"]["text"] == ""  # written, not skipped
     assert store.all_summaries()["executive"]["text"] == "E."
     store.close()
 
@@ -479,7 +519,8 @@ def test_an_executive_only_result_says_so(monkeypatch):
 
     only_diets = SummaryResult({"self": "Mine."}, "", "m", "claude", "t")
     monkeypatch.setattr(
-        Summarizer, "summarize",
+        Summarizer,
+        "summarize",
         lambda self, store, registry, pair, personas=None: only_diets,
     )
 
@@ -492,8 +533,7 @@ def test_a_truncated_but_usable_summary_is_kept():
     """Partial prose beats none — the brief degrades to a summary that stops
     early rather than to silence."""
     store = _seed_store()
-    client = _FakeClient(blocks=[_FakeBlock("## Executive\nHalf a sen")],
-                         stop_reason="max_tokens")
+    client = _FakeClient(blocks=[_FakeBlock("## Executive\nHalf a sen")], stop_reason="max_tokens")
     result = Summarizer(client=client).summarize(store, _reg(), pair())
     assert result.method == "claude"
     assert result.executive == "Half a sen"
@@ -509,7 +549,8 @@ def test_the_daily_step_does_not_report_success_on_empty_summaries(monkeypatch):
 
     empty = SummaryResult({"self": "", "modeled_ce": ""}, "", "m", "claude", "t")
     monkeypatch.setattr(
-        Summarizer, "summarize",
+        Summarizer,
+        "summarize",
         lambda self, store, registry, pair, personas=None: empty,
     )
 

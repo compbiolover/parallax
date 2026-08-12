@@ -29,19 +29,22 @@ MEMBERS = {"self": {"src_self"}, "modeled_ce": {"src_modeled_ce"}}
 
 
 def test_gdelt_tokenization_is_put_back_together():
-    assert clean_title("U . S . Senate rejects the measure") == (
-        "U.S. Senate rejects the measure")
+    assert clean_title("U . S . Senate rejects the measure") == ("U.S. Senate rejects the measure")
     assert clean_title("Soft exosuit cuts walking energy use by 14 %") == (
-        "Soft exosuit cuts walking energy use by 14%")
+        "Soft exosuit cuts walking energy use by 14%"
+    )
     assert clean_title("Where Do Mission Hospitals Fit in the 21st Century ?") == (
-        "Where Do Mission Hospitals Fit in the 21st Century?")
+        "Where Do Mission Hospitals Fit in the 21st Century?"
+    )
     assert clean_title("California mom welcomes baby after little girl couldn ' t wait") == (
-        "California mom welcomes baby after little girl couldn't wait")
+        "California mom welcomes baby after little girl couldn't wait"
+    )
 
 
 def test_the_outlet_stamp_comes_off():
     assert clean_title("Iran Shutters Country Last Presbyterian Church - Christianity Today") == (
-        "Iran Shutters Country Last Presbyterian Church")
+        "Iran Shutters Country Last Presbyterian Church"
+    )
 
 
 def test_only_one_stamp_comes_off_and_the_compound_survives():
@@ -49,18 +52,20 @@ def test_only_one_stamp_comes_off_and_the_compound_survives():
     offers a second false stamp, and taking it leaves a headline about nothing.
     """
     assert clean_title("How to Revitalize a 400 - Year - Old Church - Christianity Today") == (
-        "How to Revitalize a 400-Year-Old Church")
+        "How to Revitalize a 400-Year-Old Church"
+    )
 
 
 def test_a_headline_is_not_mistaken_for_an_outlet():
     """The head has to stand on its own before the tail can be called a stamp."""
     assert clean_title("Trump - Harris") == "Trump - Harris"
     assert clean_title("Manhunt ends - the sheriff said so.") == (
-        "Manhunt ends - the sheriff said so.")
+        "Manhunt ends - the sheriff said so."
+    )
 
 
 def test_index_pages_are_recognized_through_their_outlet_stamp():
-    """"U.S. Senate Articles" is too short to be a headline the stamp hangs off,
+    """ "U.S. Senate Articles" is too short to be a headline the stamp hangs off,
     so the stamp stays and the whole string is long enough to look like a story.
     """
     assert is_boilerplate("U.S. Senate Articles - Christianity Today")
@@ -69,29 +74,34 @@ def test_index_pages_are_recognized_through_their_outlet_stamp():
 
 
 def test_cleaning_drops_index_pages_but_never_empties_a_cluster():
-    titles = ["Palestine Articles - Christianity Today",
-              "Iran Shutters Country Last Presbyterian Church - Christianity Today"]
+    titles = [
+        "Palestine Articles - Christianity Today",
+        "Iran Shutters Country Last Presbyterian Church - Christianity Today",
+    ]
     assert clean_titles(titles) == ["Iran Shutters Country Last Presbyterian Church"]
     # every title boilerplate -> the cleaned titles come back rather than nothing
-    assert clean_titles(["Palestine Articles", "Opinion"]) == [
-        "Palestine Articles", "Opinion"]
+    assert clean_titles(["Palestine Articles", "Opinion"]) == ["Palestine Articles", "Opinion"]
 
 
 def test_the_same_wire_story_under_two_outlets_is_listed_once():
-    assert clean_titles([
-        "Senate advances the funding bill - The Dispatch",
-        "Senate advances the funding bill - Christianity Today",
-    ]) == ["Senate advances the funding bill"]
+    assert clean_titles(
+        [
+            "Senate advances the funding bill - The Dispatch",
+            "Senate advances the funding bill - Christianity Today",
+        ]
+    ) == ["Senate advances the funding bill"]
 
 
 # -- taxonomy ---------------------------------------------------------------
 
 
 def test_taxonomy_names_a_subject_in_words_a_person_uses():
-    assignment = taxonomy_theme([
-        "Iran Shutters Country Last Presbyterian Church",
-        "How to Revitalize a 400-Year-Old Church",
-    ])
+    assignment = taxonomy_theme(
+        [
+            "Iran Shutters Country Last Presbyterian Church",
+            "How to Revitalize a 400-Year-Old Church",
+        ]
+    )
     assert assignment.key == "faith"
     assert assignment.title == "Faith & the church"
     assert assignment.method == "taxonomy"
@@ -105,10 +115,12 @@ def test_an_unrecognized_subject_says_so_instead_of_guessing():
 def test_specific_subjects_win_over_the_catch_all_ones():
     """Nearly every political story mentions a chamber or a party; the taxonomy
     order is what keeps "Politics & government" from swallowing the day."""
-    assignment = taxonomy_theme([
-        "Senate Republicans weigh an abortion bill",
-        "Lawmakers press the administration on abortion policy",
-    ])
+    assignment = taxonomy_theme(
+        [
+            "Senate Republicans weigh an abortion bill",
+            "Lawmakers press the administration on abortion policy",
+        ]
+    )
     assert assignment.key == "life"
 
 
@@ -130,13 +142,15 @@ def _spot(cluster_id, dominant, other, titles, size=4, dominant_size=None):
 
 
 def test_clusters_on_one_subject_become_one_card():
-    themes = group_blindspots([
-        _spot(0, "modeled_ce", "self", ["Church plants a congregation downtown"]),
-        _spot(1, "modeled_ce", "self", ["Pastor resigns after a long ministry"]),
-    ])
+    themes = group_blindspots(
+        [
+            _spot(0, "modeled_ce", "self", ["Church plants a congregation downtown"]),
+            _spot(1, "modeled_ce", "self", ["Pastor resigns after a long ministry"]),
+        ]
+    )
     assert len(themes) == 1
     assert themes[0].title == "Faith & the church"
-    assert themes[0].story_count == 2          # one story per cluster
+    assert themes[0].story_count == 2  # one story per cluster
     assert themes[0].article_count == 2
 
 
@@ -144,13 +158,14 @@ def test_an_impure_cluster_splits_across_the_themes_it_actually_holds():
     """The bug this replaces: the theme was decided for the whole cluster, so
     the plurality won and every headline inherited it — which put "Cam
     Skattebo's backflipping at Fanatics Fest" under "Faith & the church"."""
-    articles = {0: [
-        Article("a", "Church plants a congregation downtown"),
-        Article("b", "Pastor resigns after a long ministry at the church"),
-        Article("c", "Giants quarterback earns a talking-to after a Fanatics Fest backflip"),
-    ]}
-    themes = group_blindspots(
-        [_spot(0, "modeled_ce", "self", [])], articles=articles)
+    articles = {
+        0: [
+            Article("a", "Church plants a congregation downtown"),
+            Article("b", "Pastor resigns after a long ministry at the church"),
+            Article("c", "Giants quarterback earns a talking-to after a Fanatics Fest backflip"),
+        ]
+    }
+    themes = group_blindspots([_spot(0, "modeled_ce", "self", [])], articles=articles)
     by_key = {t.key: t for t in themes}
     assert set(by_key) == {"faith", "sports"}
     assert by_key["faith"].article_count == 2
@@ -158,16 +173,19 @@ def test_an_impure_cluster_splits_across_the_themes_it_actually_holds():
 
 
 def test_a_headline_the_taxonomy_cannot_name_is_not_absorbed_by_its_neighbours():
-    """"Other coverage" is the honest answer for a headline with no keyword the
+    """ "Other coverage" is the honest answer for a headline with no keyword the
     taxonomy knows. What it must not do is inherit the subject of the headlines
     filed beside it, which is what cluster-level assignment did."""
-    articles = {0: [
-        Article("a", "Church plants a congregation downtown"),
-        Article("b", "Pastor resigns after a long ministry at the church"),
-        Article("c", "Skattebo backflipping at Fanatics Fest earned a talking-to"),
-    ]}
-    by_key = {t.key: t for t in group_blindspots(
-        [_spot(0, "modeled_ce", "self", [])], articles=articles)}
+    articles = {
+        0: [
+            Article("a", "Church plants a congregation downtown"),
+            Article("b", "Pastor resigns after a long ministry at the church"),
+            Article("c", "Skattebo backflipping at Fanatics Fest earned a talking-to"),
+        ]
+    }
+    by_key = {
+        t.key: t for t in group_blindspots([_spot(0, "modeled_ce", "self", [])], articles=articles)
+    }
     assert by_key[OTHER_KEY].stories[0].title.startswith("Skattebo")
     assert all("Skattebo" not in s.title for s in by_key["faith"].stories)
 
@@ -175,42 +193,61 @@ def test_a_headline_the_taxonomy_cannot_name_is_not_absorbed_by_its_neighbours()
 def test_direction_is_never_averaged_away():
     """One subject, both diets, is two findings — a card merging them reports
     neither, and the symmetry requirement is exactly about keeping them apart."""
-    themes = group_blindspots([
-        _spot(0, "modeled_ce", "self", ["Church plants a congregation downtown"]),
-        _spot(1, "self", "modeled_ce", ["Pastor resigns after a long ministry"]),
-    ])
+    themes = group_blindspots(
+        [
+            _spot(0, "modeled_ce", "self", ["Church plants a congregation downtown"]),
+            _spot(1, "self", "modeled_ce", ["Pastor resigns after a long ministry"]),
+        ]
+    )
     assert {t.dominant_diet for t in themes} == {"modeled_ce", "self"}
     assert all(t.key == "faith" for t in themes)
 
 
 def test_a_story_carries_the_outlets_that_ran_it():
-    """"Three mastheads carried this and none of yours did" is the concrete
+    """ "Three mastheads carried this and none of yours did" is the concrete
     form of the finding; three loose headlines are not."""
-    articles = {0: [
-        Article("a", "Iran shutters the country's last Presbyterian church",
-                url="https://christianitytoday.com/a", outlet="Christianity Today"),
-        Article("b", "Iran closes last Presbyterian church in the country",
-                url="https://christianpost.com/b", outlet="The Christian Post"),
-        Article("c", "Iran's last Presbyterian church closes its doors",
-                url="https://christianitytoday.com/c", outlet="Christianity Today"),
-    ]}
+    articles = {
+        0: [
+            Article(
+                "a",
+                "Iran shutters the country's last Presbyterian church",
+                url="https://christianitytoday.com/a",
+                outlet="Christianity Today",
+            ),
+            Article(
+                "b",
+                "Iran closes last Presbyterian church in the country",
+                url="https://christianpost.com/b",
+                outlet="The Christian Post",
+            ),
+            Article(
+                "c",
+                "Iran's last Presbyterian church closes its doors",
+                url="https://christianitytoday.com/c",
+                outlet="Christianity Today",
+            ),
+        ]
+    }
     story = group_blindspots(
         [_spot(0, "modeled_ce", "self", [], size=10, dominant_size=9)],
         articles=articles,
     )[0].stories[0]
     assert story.articles == 3
     # de-duplicated by masthead: two pieces from one outlet is one outlet
-    assert [label for label, _ in story.outlets] == [
-        "Christianity Today", "The Christian Post"]
+    assert [label for label, _ in story.outlets] == ["Christianity Today", "The Christian Post"]
     assert story.outlets[0][1] == "https://christianitytoday.com/a"
     assert round(story.one_sided, 2) == 0.9
 
 
 def test_an_outlet_with_no_recorded_name_falls_back_to_its_host():
-    articles = {0: [Article("a", "Pastor resigns after a long ministry",
-                            url="https://www.example.org/story")]}
-    story = group_blindspots(
-        [_spot(0, "self", "modeled_ce", [])], articles=articles)[0].stories[0]
+    articles = {
+        0: [
+            Article(
+                "a", "Pastor resigns after a long ministry", url="https://www.example.org/story"
+            )
+        ]
+    }
+    story = group_blindspots([_spot(0, "self", "modeled_ce", [])], articles=articles)[0].stories[0]
     assert story.outlets == [("example.org", "https://www.example.org/story")]
 
 
@@ -218,23 +255,30 @@ def test_an_outlet_with_neither_a_name_nor_a_link_falls_back_to_its_key():
     """A store ingested before outlet names were recorded still has the
     registry key. De-slugged it is a recognizable masthead, and dropping it
     would cost the reader the one thing that makes a story checkable."""
-    articles = {0: [Article("a", "Pastor resigns after a long ministry",
-                            source_id="christianity_today"),
-                    Article("b", "Congregation votes on the pastor's successor",
-                            source_id="npr")]}
-    story = group_blindspots(
-        [_spot(0, "self", "modeled_ce", [])], articles=articles)[0].stories[0]
+    articles = {
+        0: [
+            Article("a", "Pastor resigns after a long ministry", source_id="christianity_today"),
+            Article("b", "Congregation votes on the pastor's successor", source_id="npr"),
+        ]
+    }
+    story = group_blindspots([_spot(0, "self", "modeled_ce", [])], articles=articles)[0].stories[0]
     # Initialisms stay upper-case, since the registry's ids use them.
     assert story.outlets == [("Christianity Today", None), ("NPR", None)]
 
 
 def test_a_recorded_name_beats_the_key_and_the_host():
-    articles = {0: [Article("a", "Pastor resigns after a long ministry",
-                            url="https://www.example.org/s",
-                            outlet="Christianity Today",
-                            source_id="christianity_today")]}
-    story = group_blindspots(
-        [_spot(0, "self", "modeled_ce", [])], articles=articles)[0].stories[0]
+    articles = {
+        0: [
+            Article(
+                "a",
+                "Pastor resigns after a long ministry",
+                url="https://www.example.org/s",
+                outlet="Christianity Today",
+                source_id="christianity_today",
+            )
+        ]
+    }
+    story = group_blindspots([_spot(0, "self", "modeled_ce", [])], articles=articles)[0].stories[0]
     assert story.outlets == [("Christianity Today", "https://www.example.org/s")]
 
 
@@ -254,15 +298,17 @@ def test_a_theme_credits_claude_when_claude_named_it():
         articles=articles,
     )[0]
     assert theme.method == "claude"
-    assert theme.title == "Church life"      # Claude's wording, not the taxonomy's
+    assert theme.title == "Church life"  # Claude's wording, not the taxonomy's
     assert theme.story_count == 2
 
 
 def test_unnamed_coverage_sorts_last():
-    themes = group_blindspots([
-        _spot(0, "modeled_ce", "self", ["A cutout goes missing from a truck"], size=9),
-        _spot(1, "modeled_ce", "self", ["Pastor resigns after a long ministry"], size=2),
-    ])
+    themes = group_blindspots(
+        [
+            _spot(0, "modeled_ce", "self", ["A cutout goes missing from a truck"], size=9),
+            _spot(1, "modeled_ce", "self", ["Pastor resigns after a long ministry"], size=2),
+        ]
+    )
     assert [t.key for t in themes] == ["faith", OTHER_KEY]
 
 
@@ -270,13 +316,18 @@ def test_grouping_reads_exported_dicts_as_well_as_objects():
     """The digest groups the dicts out of a payload; the cluster run groups
     ``Blindspot`` objects. One implementation, so the two cannot drift."""
     as_dict = {
-        "cluster_id": 0, "dominant_diet": "self", "other_diet": "modeled_ce",
-        "size": 4, "dominant_share": 1.0, "counts": {"self": 4},
+        "cluster_id": 0,
+        "dominant_diet": "self",
+        "other_diet": "modeled_ce",
+        "size": 4,
+        "dominant_share": 1.0,
+        "counts": {"self": 4},
         "representative_titles": ["Pastor resigns after a long ministry"],
     }
     from_dict = group_blindspots([as_dict])
     from_object = group_blindspots(
-        [_spot(0, "self", "modeled_ce", ["Pastor resigns after a long ministry"])])
+        [_spot(0, "self", "modeled_ce", ["Pastor resigns after a long ministry"])]
+    )
     assert from_dict[0].to_dict() == from_object[0].to_dict()
     # a payload that predates stories still yields a card, minus the outlets
     assert from_dict[0].stories[0].title == "Pastor resigns after a long ministry"
@@ -302,8 +353,10 @@ class _FakeClient:
 
 
 # Keyed by document id; the prompt refers to them by position.
-ENTRIES = [("doc-a", ["Pastor resigns after a long ministry"]),
-           ("doc-b", ["Senate advances the funding bill"])]
+ENTRIES = [
+    ("doc-a", ["Pastor resigns after a long ministry"]),
+    ("doc-b", ["Senate advances the funding bill"]),
+]
 
 
 def test_claude_names_the_themes_when_it_answers():
@@ -332,10 +385,14 @@ def test_a_key_claude_used_keeps_claudes_wording_everywhere():
     client = _FakeClient(
         '{"themes": [{"key": "faith", "title": "Life of the church", "stories": [0]}]}'
     )
-    out = assign_themes([("doc-a", ["Pastor resigns after a long ministry"]),
-                         ("doc-b", ["Church plants a congregation downtown"])],
-                        client=client)
-    assert out["doc-b"].title == "Life of the church"   # not the taxonomy's wording
+    out = assign_themes(
+        [
+            ("doc-a", ["Pastor resigns after a long ministry"]),
+            ("doc-b", ["Church plants a congregation downtown"]),
+        ],
+        client=client,
+    )
+    assert out["doc-b"].title == "Life of the church"  # not the taxonomy's wording
 
 
 def test_a_theme_missing_its_stories_is_dropped_whole():
@@ -366,8 +423,8 @@ def test_a_big_days_answer_fits_the_budget():
     call = client.calls[0]
 
     prompt = call["messages"][0]["content"]
-    assert '"stories": [0, 3, 7]' in prompt      # grouped, not one object per story
-    assert '"story": 0' not in prompt            # the shape that could not fit
+    assert '"stories": [0, 3, 7]' in prompt  # grouped, not one object per story
+    assert '"story": 0' not in prompt  # the shape that could not fit
 
     # A story number and its separator run ~2 tokens; leave the same again for
     # the theme objects around them, and thinking shares this budget too.
@@ -377,9 +434,9 @@ def test_a_big_days_answer_fits_the_budget():
 def test_unusable_answers_are_dropped_per_cluster():
     client = _FakeClient(
         '{"themes": ['
-        '{"key": "faith", "title": "<b>Church</b>", "stories": [0]},'          # markup
+        '{"key": "faith", "title": "<b>Church</b>", "stories": [0]},'  # markup
         '{"key": "Politics!", "title": "Congress this week", "stories": [1]},'  # bad key
-        '{"key": "faith", "title": "Not in the batch", "stories": [9]}]}'       # index out of range
+        '{"key": "faith", "title": "Not in the batch", "stories": [9]}]}'  # index out of range
     )
     assert claude_assignments(ENTRIES, client=client) == {}
 
@@ -391,11 +448,11 @@ def test_the_prompts_own_examples_pass_the_validator():
     from cluster.themes import _MAX_TITLE_CHARS, _SYSTEM, _TITLE_OK
 
     for example in ("Israel-Hamas war", "Faith, family & work", "Faith & the church"):
-        assert example in _SYSTEM               # the prompt holds it out as good
-        assert _TITLE_OK.match(example)         # so the validator has to accept it
+        assert example in _SYSTEM  # the prompt holds it out as good
+        assert _TITLE_OK.match(example)  # so the validator has to accept it
         assert len(example) <= _MAX_TITLE_CHARS
     assert not _TITLE_OK.match('"><b>x</b>')
-    assert str(_MAX_TITLE_CHARS) in _SYSTEM   # the length limit is stated, not implied
+    assert str(_MAX_TITLE_CHARS) in _SYSTEM  # the length limit is stated, not implied
 
 
 def test_a_title_too_long_for_a_card_is_not_used():
@@ -446,8 +503,7 @@ def test_the_reply_is_constrained_to_a_schema():
     fmt = client.calls[0]["output_config"]["format"]
     assert fmt["type"] == "json_schema"
     item = fmt["schema"]["properties"]["themes"]["items"]
-    assert item["properties"]["stories"] == {"type": "array",
-                                             "items": {"type": "integer"}}
+    assert item["properties"]["stories"] == {"type": "array", "items": {"type": "integer"}}
     assert sorted(item["required"]) == ["key", "stories", "title"]
 
 
@@ -458,12 +514,14 @@ def test_settings_effort_reaches_the_call(monkeypatch):
 
     seen: dict = {}
     monkeypatch.setattr(bs, "articles_from_store", lambda store, spots, members: {})
-    monkeypatch.setattr(bs, "assign_themes",
-                        lambda entries, client=None, **kw: seen.update(kw) or {})
+    monkeypatch.setattr(
+        bs, "assign_themes", lambda entries, client=None, **kw: seen.update(kw) or {}
+    )
     monkeypatch.setattr(bs, "group_blindspots", lambda *a, **k: [])
 
     class _Store:
-        def replace_blindspot_themes(self, rows): pass
+        def replace_blindspot_themes(self, rows):
+            pass
 
     bs._theme_blindspots(_Store(), [object()], MEMBERS, None, None, True, "medium")
     assert seen["effort"] == "medium"
@@ -518,26 +576,50 @@ def _seed(store):
 
     emb = HashingEmbedder(dim=256)
     rows = [
-        ("modeled_ce", "Pastor resigns after a long ministry at the church",
-         "church pastor congregation ministry faith worship scripture"),
-        ("modeled_ce", "Church plants a congregation downtown - Christianity Today",
-         "church pastor congregation ministry faith worship scripture"),
-        ("modeled_ce", "Seminary trains a new generation of pastors",
-         "church pastor congregation ministry faith worship scripture"),
-        ("self", "Climate scientists report record ocean warming",
-         "climate emissions carbon warming renewable solar energy"),
-        ("self", "Solar and wind now supply a third of the grid",
-         "climate emissions carbon warming renewable solar energy"),
-        ("self", "Carbon targets slip further out of reach",
-         "climate emissions carbon warming renewable solar energy"),
+        (
+            "modeled_ce",
+            "Pastor resigns after a long ministry at the church",
+            "church pastor congregation ministry faith worship scripture",
+        ),
+        (
+            "modeled_ce",
+            "Church plants a congregation downtown - Christianity Today",
+            "church pastor congregation ministry faith worship scripture",
+        ),
+        (
+            "modeled_ce",
+            "Seminary trains a new generation of pastors",
+            "church pastor congregation ministry faith worship scripture",
+        ),
+        (
+            "self",
+            "Climate scientists report record ocean warming",
+            "climate emissions carbon warming renewable solar energy",
+        ),
+        (
+            "self",
+            "Solar and wind now supply a third of the grid",
+            "climate emissions carbon warming renewable solar energy",
+        ),
+        (
+            "self",
+            "Carbon targets slip further out of reach",
+            "climate emissions carbon warming renewable solar energy",
+        ),
     ]
     for i, (diet, title, text) in enumerate(rows):
         store.upsert_document(
-            doc_id=f"d{i}", source_id=f"src_{diet}", stratum_id=None, url=None,
-            title=title, published_utc=None, fetched_utc="2026-07-31T00:00:00+00:00",
-            word_count=40, minhash=None)
-        store.upsert_embedding(document_id=f"d{i}", vector=emb.embed(text),
-                               embedder=emb.name)
+            doc_id=f"d{i}",
+            source_id=f"src_{diet}",
+            stratum_id=None,
+            url=None,
+            title=title,
+            published_utc=None,
+            fetched_utc="2026-07-31T00:00:00+00:00",
+            word_count=40,
+            minhash=None,
+        )
+        store.upsert_embedding(document_id=f"d{i}", vector=emb.embed(text), embedder=emb.name)
 
 
 def test_a_cluster_run_persists_themes_for_the_surfaces_to_read(monkeypatch):
@@ -546,11 +628,11 @@ def test_a_cluster_run_persists_themes_for_the_surfaces_to_read(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     store = Datastore(":memory:")
     _seed(store)
-    outcome = run_clustering(store, MEMBERS, min_cluster_size=3, dominance=0.8,
-                             min_blindspot_size=3)
+    outcome = run_clustering(
+        store, MEMBERS, min_cluster_size=3, dominance=0.8, min_blindspot_size=3
+    )
     assert outcome.themes
-    assert {t.title for t in outcome.themes} == {
-        t.title for t in themes_from_store(store, MEMBERS)}
+    assert {t.title for t in outcome.themes} == {t.title for t in themes_from_store(store, MEMBERS)}
     assert {row["theme_key"] for row in store.blindspot_theme_rows()}
     store.close()
 
@@ -586,7 +668,8 @@ def test_persisted_names_are_the_ones_that_get_read():
     run_clustering(store, MEMBERS, min_cluster_size=3, claude_themes=False)
     rows = store.blindspot_theme_rows()
     store.replace_blindspot_themes(
-        [(r["document_id"], "renamed", "A Name From The Run", "claude") for r in rows])
+        [(r["document_id"], "renamed", "A Name From The Run", "claude") for r in rows]
+    )
     assert {t.title for t in themes_from_store(store, MEMBERS)} == {"A Name From The Run"}
     store.close()
 

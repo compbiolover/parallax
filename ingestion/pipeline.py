@@ -56,7 +56,7 @@ class PipelineConfig:
     per_host_rpm: int = 20
     respect_robots: bool = True
     lexicon_path: str | None = None  # eMFD CSV; None -> built-in demo seed
-    assignment: str = "argmax"       # 'argmax' | 'probability' (see DictionaryScorer)
+    assignment: str = "argmax"  # 'argmax' | 'probability' (see DictionaryScorer)
     # Partition fairness into equality vs proportionality (MFQ-2). Cheap — it is
     # a second pass over tokens already in memory — but unvalidated, so it is
     # opt-out rather than load-bearing: the classic five are unaffected either way.
@@ -67,16 +67,16 @@ class PipelineConfig:
     # dictionary-vs-transformer confidence band. Requires parallax[scoring]; when
     # the deps are missing the pipeline logs once and continues dictionary-only.
     transformer_enabled: bool = True
-    transformer_model: str | None = None    # 'mformer' alias or a HF prefix
+    transformer_model: str | None = None  # 'mformer' alias or a HF prefix
     transformer_revision: str | None = None  # pin the HF revision (recommended)
     transformer_max_length: int = 256
     # Liberty/oppression via Claude — the sixth foundation, which no dictionary
     # and no available transformer covers. Costs money per document, so it is
     # off unless a key is present; the run completes without it either way.
     liberty_enabled: bool = True
-    liberty_model: str | None = None      # None -> scoring.liberty.DEFAULT_MODEL
-    liberty_effort: str | None = None     # None -> DEFAULT_EFFORT ('low')
-    liberty_batch: bool = True            # Batch API: half price, overnight-friendly
+    liberty_model: str | None = None  # None -> scoring.liberty.DEFAULT_MODEL
+    liberty_effort: str | None = None  # None -> DEFAULT_EFFORT ('low')
+    liberty_batch: bool = True  # Batch API: half price, overnight-friendly
     # Which personas' sources to actually fetch. None = the whole catalog, which
     # is the default: a persona whose sources are never fetched has an empty
     # profile and renders as a blank column. Narrow it only after looking at the
@@ -88,8 +88,8 @@ class PipelineConfig:
     def from_settings(cls, settings: dict) -> PipelineConfig:
         ing = settings.get("ingestion", {}) or {}
         dedup = (settings.get("dedup", {}) or {}).get("near_duplicate", {}) or {}
-        rate = (ing.get("rate_limit", {}) or {})
-        taggers = ((settings.get("scoring", {}) or {}).get("taggers", {}) or {})
+        rate = ing.get("rate_limit", {}) or {}
+        taggers = (settings.get("scoring", {}) or {}).get("taggers", {}) or {}
         dict_cfg = taggers.get("dictionary", {}) or {}
         tr_cfg = taggers.get("transformer", {}) or {}
         lib_cfg = taggers.get("liberty", {}) or {}
@@ -146,14 +146,14 @@ class SourceProgress:
     first thing that went wrong on the first real run of this pipeline.
     """
 
-    index: int              # 1-based position in the run
+    index: int  # 1-based position in the run
     total: int
     source: Source
-    stored: int             # documents new to the datastore
-    fetched: int            # feed items seen
+    stored: int  # documents new to the datastore
+    fetched: int  # feed items seen
     errors: int
     seconds: float
-    failed: bool = False    # the feed itself could not be parsed
+    failed: bool = False  # the feed itself could not be parsed
 
 
 def _now_iso() -> str:
@@ -215,8 +215,7 @@ def run(
     cfg = config or PipelineConfig()
     if scorer is None:
         lexicon, lexicon_name = build_lexicon(cfg.lexicon_path)
-        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment,
-                                  splitter=_build_splitter(cfg))
+        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment, splitter=_build_splitter(cfg))
     else:
         lexicon_name = "injected"
     if embedder is None:
@@ -247,16 +246,31 @@ def run(
         before = (stats.stored, stats.fetched, stats.errors)
         started = time.monotonic()
         failed = _ingest_source(
-            source, store, cfg, scorer, embedder, robots, limiter, index, stats,
-            transformer, liberty_texts,
+            source,
+            store,
+            cfg,
+            scorer,
+            embedder,
+            robots,
+            limiter,
+            index,
+            stats,
+            transformer,
+            liberty_texts,
         )
         if progress is not None:
-            progress(SourceProgress(
-                index=position, total=len(sources), source=source,
-                stored=stats.stored - before[0], fetched=stats.fetched - before[1],
-                errors=stats.errors - before[2],
-                seconds=time.monotonic() - started, failed=failed,
-            ))
+            progress(
+                SourceProgress(
+                    index=position,
+                    total=len(sources),
+                    source=source,
+                    stored=stats.stored - before[0],
+                    fetched=stats.fetched - before[1],
+                    errors=stats.errors - before[2],
+                    seconds=time.monotonic() - started,
+                    failed=failed,
+                )
+            )
 
     if liberty is not None and liberty_texts:
         if progress is not None:
@@ -278,9 +292,11 @@ def _announce_liberty(tagger, texts: dict[str, str], progress) -> None:
     batched = getattr(tagger, "use_batch", False) and len(texts) >= BATCH_MIN_ITEMS
     progress(f"\nLiberty tagging {len(texts)} document(s) via {tagger.name}…")
     if batched:
-        progress("  Submitted as a Batch API job (half price). This polls every "
-                 "20s and usually lands in a few minutes; it can take longer. "
-                 "Nothing is wrong if this line sits alone for a while.")
+        progress(
+            "  Submitted as a Batch API job (half price). This polls every "
+            "20s and usually lands in a few minutes; it can take longer. "
+            "Nothing is wrong if this line sits alone for a while."
+        )
 
 
 def _score_liberty(store: Datastore, tagger, texts: dict[str, str], stats: RunStats) -> None:
@@ -293,20 +309,22 @@ def _score_liberty(store: Datastore, tagger, texts: dict[str, str], stats: RunSt
     try:
         scores = tagger.score_many(texts)
     except Exception as exc:
-        logger.warning("liberty scoring failed for the whole run (%s: %s)",
-                       type(exc).__name__, exc)
+        logger.warning("liberty scoring failed for the whole run (%s: %s)", type(exc).__name__, exc)
         return
     for doc_id, score in scores.items():
         store.upsert_scores(
-            document_id=doc_id, scorer=tagger.name, foundations={},
-            sentiment=0.0, moral_word_ratio=0.0, matched_words=0,
+            document_id=doc_id,
+            scorer=tagger.name,
+            foundations={},
+            sentiment=0.0,
+            moral_word_ratio=0.0,
+            matched_words=0,
             liberty=score.presence,
         )
     store.set_meta("liberty_scorer", tagger.name)
     stats.liberty_scored = len(scores)
     if len(scores) < len(texts):
-        logger.info("liberty: scored %d of %d documents this run",
-                    len(scores), len(texts))
+        logger.info("liberty: scored %d of %d documents this run", len(scores), len(texts))
 
 
 def backfill(
@@ -339,8 +357,7 @@ def backfill(
     cfg = config or PipelineConfig()
     if scorer is None:
         lexicon, lexicon_name = build_lexicon(cfg.lexicon_path)
-        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment,
-                                  splitter=_build_splitter(cfg))
+        scorer = DictionaryScorer(lexicon, assignment=cfg.assignment, splitter=_build_splitter(cfg))
     else:
         lexicon_name = "injected"
     if embedder is None:
@@ -352,7 +369,8 @@ def backfill(
     _store_persona_labels(store, registry)
     robots = (
         RobotsCache(cfg.user_agent, cfg.timeout)
-        if (extract_bodies and cfg.respect_robots) else None
+        if (extract_bodies and cfg.respect_robots)
+        else None
     )
     limiter = RateLimiter(cfg.per_host_rpm)
     index = _seed_index(store, cfg.near_dup_threshold)
@@ -381,8 +399,11 @@ def backfill(
             stats.fetched += 1
             if extract_bodies:
                 body = extract_article(
-                    art.url, user_agent=cfg.user_agent, timeout=cfg.timeout,
-                    robots=robots, rate_limiter=limiter,
+                    art.url,
+                    user_agent=cfg.user_agent,
+                    timeout=cfg.timeout,
+                    robots=robots,
+                    rate_limiter=limiter,
                 )
                 text = f"{art.title}\n\n{body}".strip() if body else art.title
                 min_words = cfg.min_words
@@ -390,9 +411,18 @@ def backfill(
                 text = art.title
                 min_words = 3  # title-only: don't skip on the short-doc guard
             _ingest_one(
-                store, source, scorer, embedder, index, stats,
-                title=art.title, link=art.url, published_utc=art.published_utc,
-                text=text, cluster_text=art.title, min_words=min_words,
+                store,
+                source,
+                scorer,
+                embedder,
+                index,
+                stats,
+                title=art.title,
+                link=art.url,
+                published_utc=art.published_utc,
+                text=text,
+                cluster_text=art.title,
+                min_words=min_words,
                 transformer=transformer,
             )
     return stats
@@ -444,7 +474,8 @@ def _build_transformer(cfg: PipelineConfig):
         logger.warning(
             "transformer tagger unavailable (%s: %s) — scoring dictionary-only, "
             'no confidence bands. Enable it with: pip install -e ".[scoring]"',
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
         )
         return None
 
@@ -471,7 +502,8 @@ def _check_lexicon_change(store: Datastore, lexicon_name: str) -> None:
             "Existing documents are NOT re-scored (raw text is never persisted), so "
             "aggregates will mix both instruments while reporting only the new name. "
             "Start a fresh datastore for a clean comparison.",
-            previous, lexicon_name,
+            previous,
+            lexicon_name,
         )
 
 
@@ -553,10 +585,20 @@ def _ingest_source(
             stats.errors += 1
             continue
         _ingest_one(
-            store, source, scorer, embedder, index, stats,
-            title=item.title, link=item.link, published_utc=item.published_utc,
-            text=text, cluster_text=_cluster_text(item, text), min_words=cfg.min_words,
-            transformer=transformer, liberty_texts=liberty_texts,
+            store,
+            source,
+            scorer,
+            embedder,
+            index,
+            stats,
+            title=item.title,
+            link=item.link,
+            published_utc=item.published_utc,
+            text=text,
+            cluster_text=_cluster_text(item, text),
+            min_words=cfg.min_words,
+            transformer=transformer,
+            liberty_texts=liberty_texts,
         )
     return False
 
@@ -601,17 +643,28 @@ def _ingest_one(
     is_dup = dup_of is not None
 
     store.upsert_document(
-        doc_id=doc_id, source_id=source.id,
-        stratum_id=source.stratum_id, url=link, title=title,
-        published_utc=published_utc, fetched_utc=_now_iso(),
-        word_count=score.word_count, minhash=signature_list(mh),
-        is_duplicate=is_dup, duplicate_of=dup_of,
+        doc_id=doc_id,
+        source_id=source.id,
+        stratum_id=source.stratum_id,
+        url=link,
+        title=title,
+        published_utc=published_utc,
+        fetched_utc=_now_iso(),
+        word_count=score.word_count,
+        minhash=signature_list(mh),
+        is_duplicate=is_dup,
+        duplicate_of=dup_of,
     )
     store.upsert_scores(
-        document_id=doc_id, scorer=score.scorer, foundations=score.foundations,
-        sentiment=score.sentiment, moral_word_ratio=score.moral_word_ratio,
-        matched_words=score.matched_words, liberty=score.liberty,
-        equality=score.equality, proportionality=score.proportionality,
+        document_id=doc_id,
+        scorer=score.scorer,
+        foundations=score.foundations,
+        sentiment=score.sentiment,
+        moral_word_ratio=score.moral_word_ratio,
+        matched_words=score.matched_words,
+        liberty=score.liberty,
+        equality=score.equality,
+        proportionality=score.proportionality,
     )
     if transformer is not None:
         # A single flaky document (encoding, length edge, transient model error)
@@ -620,12 +673,20 @@ def _ingest_one(
         try:
             probs = transformer.score(text)
             store.upsert_scores(
-                document_id=doc_id, scorer=transformer.name, foundations=probs,
-                sentiment=0.0, moral_word_ratio=0.0, matched_words=0,
+                document_id=doc_id,
+                scorer=transformer.name,
+                foundations=probs,
+                sentiment=0.0,
+                moral_word_ratio=0.0,
+                matched_words=0,
             )
         except Exception as exc:
-            logger.warning("transformer scoring failed for %s (%s: %s) — dictionary-only",
-                           doc_id, type(exc).__name__, exc)
+            logger.warning(
+                "transformer scoring failed for %s (%s: %s) — dictionary-only",
+                doc_id,
+                type(exc).__name__,
+                exc,
+            )
     store.upsert_embedding(
         document_id=doc_id,
         vector=embedder.embed(cluster_text),
@@ -670,9 +731,7 @@ def persona_profiles(
     profiles: dict[str, dict[str, float]] = {}
     for persona_id in registry.persona_ids():
         weights_by_source = registry.weights_for(persona_id)
-        rows = store.scores_for_sources(
-            weights_by_source, scorer_name, since=since, until=until
-        )
+        rows = store.scores_for_sources(weights_by_source, scorer_name, since=since, until=until)
         scores = [
             DocumentScore(
                 foundations={f: (row[f] or 0.0) for f in CLASSIC_FOUNDATIONS},

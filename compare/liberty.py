@@ -37,8 +37,8 @@ SALIENT = 0.5
 class LibertyProfile:
     """One diet's liberty engagement over the documents that were tagged."""
 
-    mean: float               # reach-weighted mean presence, [0, 1]
-    salient_share: float      # fraction of tagged docs scoring above SALIENT
+    mean: float  # reach-weighted mean presence, [0, 1]
+    salient_share: float  # fraction of tagged docs scoring above SALIENT
     docs_scored: int
     docs_total: int
 

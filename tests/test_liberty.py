@@ -83,6 +83,7 @@ def _client(response=None, batches=None):
 
 # -- the rubric ------------------------------------------------------------
 
+
 def _rubric() -> str:
     """The rubric with wrapping collapsed — line breaks are formatting, not content."""
     return " ".join(SYSTEM_PROMPT.lower().split())
@@ -108,6 +109,7 @@ def test_rubric_excludes_the_neighbouring_foundations():
 
 
 # -- parsing ---------------------------------------------------------------
+
 
 def test_parses_a_well_formed_verdict():
     score = _parse(json.dumps(VERDICT), "m")
@@ -141,6 +143,7 @@ def test_a_verdict_without_a_quote_is_flagged_ungrounded():
 
 
 # -- single-document scoring ----------------------------------------------
+
 
 def test_score_sends_the_cached_rubric_and_json_schema():
     client = _client()
@@ -179,12 +182,13 @@ def test_scorer_name_carries_the_model():
 
 # -- batching --------------------------------------------------------------
 
+
 def test_small_sets_skip_the_batch_api():
     client = _client()
     texts = {f"d{i}": "text" for i in range(BATCH_MIN_ITEMS - 1)}
     scored = LibertyTagger(client).score_many(texts)
     assert len(scored) == len(texts)
-    assert len(client.messages.calls) == len(texts)   # all synchronous
+    assert len(client.messages.calls) == len(texts)  # all synchronous
 
 
 def test_batch_results_are_keyed_by_custom_id_not_position():
@@ -217,8 +221,8 @@ def test_documents_the_batch_drops_are_retried_inline():
     client.messages.batches = batches
 
     scored = LibertyTagger(client, poll_interval_s=0).score_many(texts)
-    assert set(scored) == set(texts)          # the errored + missing ones were retried
-    assert len(client.messages.calls) == 2    # exactly the two the batch didn't return
+    assert set(scored) == set(texts)  # the errored + missing ones were retried
+    assert len(client.messages.calls) == 2  # exactly the two the batch didn't return
 
 
 def test_batch_timeout_falls_back_rather_than_losing_the_run():
@@ -239,6 +243,7 @@ def test_blank_texts_are_dropped_before_submission():
 
 
 # -- build guard -----------------------------------------------------------
+
 
 def test_build_tagger_needs_a_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -266,20 +271,37 @@ def _store_with_liberty(values: dict[str, list[float]], untagged: int = 0):
         for i, value in enumerate(scores):
             did = f"{diet}-{i}"
             store.upsert_document(
-                doc_id=did, source_id=f"src_{diet}", stratum_id=None, url=None,
-                title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
-                word_count=300, minhash=None,
+                doc_id=did,
+                source_id=f"src_{diet}",
+                stratum_id=None,
+                url=None,
+                title="t",
+                published_utc=None,
+                fetched_utc="2026-07-25T00:00:00+00:00",
+                word_count=300,
+                minhash=None,
             )
             store.upsert_scores(
-                document_id=did, scorer=SCORER, foundations={},
-                sentiment=0.0, moral_word_ratio=0.0, matched_words=0, liberty=value,
+                document_id=did,
+                scorer=SCORER,
+                foundations={},
+                sentiment=0.0,
+                moral_word_ratio=0.0,
+                matched_words=0,
+                liberty=value,
             )
         for j in range(untagged):
             did = f"{diet}-untagged-{j}"
             store.upsert_document(
-                doc_id=did, source_id=f"src_{diet}", stratum_id=None, url=None,
-                title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
-                word_count=300, minhash=None,
+                doc_id=did,
+                source_id=f"src_{diet}",
+                stratum_id=None,
+                url=None,
+                title="t",
+                published_utc=None,
+                fetched_utc="2026-07-25T00:00:00+00:00",
+                word_count=300,
+                minhash=None,
             )
     return store
 
@@ -289,7 +311,7 @@ def test_untagged_documents_are_excluded_not_zeroed():
     rows, total = store.liberty_for_sources(["src_self"], SCORER)
     assert len(rows) == 2 and total == 10
     profile = persona_liberty_profile(store, {"src_self": 1.0}, SCORER)
-    assert abs(profile.mean - 0.7) < 1e-9      # not 0.14, which zero-filling would give
+    assert abs(profile.mean - 0.7) < 1e-9  # not 0.14, which zero-filling would give
     assert profile.coverage == 0.2
     store.close()
 
@@ -297,7 +319,7 @@ def test_untagged_documents_are_excluded_not_zeroed():
 def test_salient_share_counts_only_live_framing():
     store = _store_with_liberty({"self": [0.9, 0.6, 0.2, 0.0]})
     profile = persona_liberty_profile(store, {"src_self": 1.0}, SCORER)
-    assert profile.salient_share == 0.5        # 0.9 and 0.6 clear the 0.5 line
+    assert profile.salient_share == 0.5  # 0.9 and 0.6 clear the 0.5 line
     store.close()
 
 
@@ -338,5 +360,5 @@ def test_liberty_rows_do_not_pollute_the_five_way_profile():
     from ingestion.pipeline import persona_profiles
 
     store = _store_with_liberty({"self": [0.9]})
-    assert persona_profiles(store, _reg()) == {}   # no dictionary rows exist
+    assert persona_profiles(store, _reg()) == {}  # no dictionary rows exist
     store.close()

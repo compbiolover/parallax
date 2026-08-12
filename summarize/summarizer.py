@@ -166,16 +166,18 @@ class Summarizer:
                 text = self._call_claude(client, contexts, comparison, lexicon)
         except Exception as exc:
             # Never let an API hiccup leave the dashboard empty.
-            logger.warning("Claude summaries failed (%s: %s) — using the "
-                           "deterministic fallback", type(exc).__name__, exc)
+            logger.warning(
+                "Claude summaries failed (%s: %s) — using the deterministic fallback",
+                type(exc).__name__,
+                exc,
+            )
             return self._deterministic(contexts, comparison, lexicon, call_failed(exc))
         if not text.strip():
             # A response with no usable text is a failure, whatever the HTTP
             # status said. Persisting it wrote empty summaries over the day's
             # brief and reported success; the fallback is what "never leave the
             # dashboard empty" meant.
-            logger.warning("Claude returned no summary text — using the "
-                           "deterministic fallback")
+            logger.warning("Claude returned no summary text — using the deterministic fallback")
             return self._deterministic(contexts, comparison, lexicon, NO_TEXT)
         per_diet, executive = _parse_sections(text, contexts)
         missing = [c.diet_id for c in contexts if not per_diet.get(c.diet_id, "").strip()]
@@ -187,7 +189,9 @@ class Summarizer:
             # from a brief that lost a panel.
             logger.warning(
                 "No summary section parsed for %s — the model may have used "
-                "headings that do not name those diets", ", ".join(missing))
+                "headings that do not name those diets",
+                ", ".join(missing),
+            )
         return SummaryResult(per_diet, executive, self.model, "claude", _now_iso())
 
     def _call_claude(self, client, contexts, comparison, lexicon) -> str:
@@ -212,12 +216,18 @@ class Summarizer:
     def persist(self, store: Datastore, result: SummaryResult) -> None:
         for diet_id, text in result.per_diet.items():
             store.upsert_summary(
-                scope=diet_id, generated_utc=result.generated_utc,
-                model=result.model, method=result.method, text=text,
+                scope=diet_id,
+                generated_utc=result.generated_utc,
+                model=result.model,
+                method=result.method,
+                text=text,
             )
         store.upsert_summary(
-            scope="executive", generated_utc=result.generated_utc,
-            model=result.model, method=result.method, text=result.executive,
+            scope="executive",
+            generated_utc=result.generated_utc,
+            model=result.model,
+            method=result.method,
+            text=result.executive,
         )
 
 
@@ -254,9 +264,11 @@ def _response_text(resp) -> str:
         # Truncated. Partial prose still beats no prose — the brief degrades to
         # a summary that stops early rather than to silence — but the cap is
         # the thing to fix, so say so.
-        logger.warning("Claude hit max_tokens (%d) — the summary may stop "
-                       "mid-sentence; raise MAX_TOKENS or lower the effort",
-                       MAX_TOKENS)
+        logger.warning(
+            "Claude hit max_tokens (%d) — the summary may stop "
+            "mid-sentence; raise MAX_TOKENS or lower the effort",
+            MAX_TOKENS,
+        )
     return text
 
 
@@ -272,8 +284,7 @@ def _build_client():
     """
     client, reason = build_client()
     if client is None:
-        logger.warning("Claude summaries disabled, using the deterministic "
-                       "fallback: %s", reason)
+        logger.warning("Claude summaries disabled, using the deterministic fallback: %s", reason)
     return client, reason
 
 
@@ -380,7 +391,8 @@ def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
             buf = []
             head = m.group(1).strip().lower()
             current = (
-                "executive" if head.startswith("exec")
+                "executive"
+                if head.startswith("exec")
                 else _bracketed_id(head, known) or _match_heading(head, table) or head
             )
         else:
@@ -395,6 +407,7 @@ def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
 
 
 # -- deterministic fallback -------------------------------------------------
+
 
 def _fallback_note(reason: str) -> str:
     """The line on the dashboard that says why there is no LLM prose today.
@@ -444,8 +457,7 @@ def _deterministic_executive(contexts, comparison, lexicon=None, note: str = "")
         provenance = "Differences at this scale are provisional given the demo lexicon."
     else:
         provenance = (
-            f"Scores were produced by the {lexicon} lexicon; "
-            "treat differences as estimates."
+            f"Scores were produced by the {lexicon} lexicon; treat differences as estimates."
         )
     return (
         f"{note}\n\n"

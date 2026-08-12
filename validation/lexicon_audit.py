@@ -50,7 +50,7 @@ class SideAudit:
 
     side: str
     words: list[str] = field(default_factory=list)
-    to_fairness: int = 0            # words whose dominant foundation is fairness
+    to_fairness: int = 0  # words whose dominant foundation is fairness
     yields: list[float] = field(default_factory=list)  # fairness added per occurrence
 
     @property
@@ -152,8 +152,7 @@ def format_report(audit: FairnessAudit) -> str:
             f"{a.zero_yield} yielding nothing"
         )
         lines.append(
-            f"    fairness per occurrence: mean {a.mean_yield:.4f}, "
-            f"median {a.median_yield:.4f}"
+            f"    fairness per occurrence: mean {a.mean_yield:.4f}, median {a.median_yield:.4f}"
         )
         lines.append(f"    terms: {', '.join(sorted(a.words))}")
     lines.append("")
@@ -196,10 +195,18 @@ def main(argv: list[str] | None = None) -> int:
         description="Audit a lexicon for equality/proportionality asymmetry",
     )
     p.add_argument("--lexicon", help="eMFD-format CSV; omit for the built-in demo seed")
-    p.add_argument("--assignment", default="argmax", choices=["argmax", "probability"],
-                   help="must match the scorer's configuration (default argmax)")
-    p.add_argument("--min-evidence", type=int, default=2,
-                   help="splitter min_evidence (does not affect this audit's counts)")
+    p.add_argument(
+        "--assignment",
+        default="argmax",
+        choices=["argmax", "probability"],
+        help="must match the scorer's configuration (default argmax)",
+    )
+    p.add_argument(
+        "--min-evidence",
+        type=int,
+        default=2,
+        help="splitter min_evidence (does not affect this audit's counts)",
+    )
     args = p.parse_args(argv)
 
     lexicon, name = build_lexicon(args.lexicon)

@@ -94,8 +94,10 @@ def test_two_steps_on_one_model_share_a_call():
     results = run(SETTINGS, client=client)
     # Liberty and themes share a model but not a shape, so they are distinct
     # calls; what must not happen is paying twice for the identical one.
-    shapes = {(c["model"], str(c.get("output_config")), str(type(c["system"])))
-              for c in client.messages.calls}
+    shapes = {
+        (c["model"], str(c.get("output_config")), str(type(c["system"])))
+        for c in client.messages.calls
+    }
     assert len(client.messages.calls) == len(shapes)
     assert all(r.ok for r in results)
 

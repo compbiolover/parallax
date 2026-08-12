@@ -73,7 +73,7 @@ class DietContext:
     diet_id: str
     label: str
     doc_count: int
-    profile: dict[str, float]        # composition, sums to 1
+    profile: dict[str, float]  # composition, sums to 1
     headlines: list[str]
     # The registry's short form, if it has one. Not shown to the model — it is
     # given the full label to write with — but a heading that comes back in the
@@ -143,10 +143,6 @@ def build_user_prompt(
             f"Jensen-Shannon divergence: {comparison.jsd:.3f} "
             "(0 = identical emphasis, 1 = disjoint)"
         )
-        lr = ", ".join(
-            f"{f}={v:+.2f}" for f, v in sorted(comparison.log_ratios.items())
-        )
-        parts.append(
-            f"per-foundation log-ratio (positive = {a} over-indexes vs {b}): {lr}"
-        )
+        lr = ", ".join(f"{f}={v:+.2f}" for f, v in sorted(comparison.log_ratios.items()))
+        parts.append(f"per-foundation log-ratio (positive = {a} over-indexes vs {b}): {lr}")
     return "\n".join(parts)

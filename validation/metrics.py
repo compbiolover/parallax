@@ -49,9 +49,7 @@ def foundation_agreement(
         "precision": precision_score(gold, preds, zero_division=0),
         "recall": recall_score(gold, preds, zero_division=0),
         "kappa": (
-            cohen_kappa_score(gold, preds)
-            if len(set(gold)) > 1 and len(set(preds)) > 1
-            else None
+            cohen_kappa_score(gold, preds) if len(set(gold)) > 1 and len(set(preds)) > 1 else None
         ),
     }
 
@@ -90,10 +88,7 @@ def krippendorff_alpha(coder_values: Sequence[Sequence]) -> float | None:
 
     observed = sum(c for (v, w), c in coincidence.items() if v != w)
     expected = sum(
-        marginals[v] * marginals[w] / (n - 1)
-        for v in marginals
-        for w in marginals
-        if v != w
+        marginals[v] * marginals[w] / (n - 1) for v in marginals for w in marginals if v != w
     )
     if expected == 0:
         return 1.0

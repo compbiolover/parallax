@@ -34,8 +34,13 @@ def registry(**personas: dict[str, float]) -> Registry:
         strata=[Stratum(id=STRATUM, description="test stratum")],
         sources=[
             Source(
-                id=sid, name=sid.replace("_", " ").title(), medium="news", role="",
-                ingest_type="rss", url=f"https://example.test/{sid}", stratum_id=STRATUM,
+                id=sid,
+                name=sid.replace("_", " ").title(),
+                medium="news",
+                role="",
+                ingest_type="rss",
+                url=f"https://example.test/{sid}",
+                stratum_id=STRATUM,
             )
             for sid in source_ids
         ],

@@ -42,6 +42,7 @@ NO_EVIDENCE_TEXT = "The council approved the zoning variance after a short heari
 
 # -- vocabulary ------------------------------------------------------------
 
+
 def test_mfq2_replaces_fairness_with_its_two_halves():
     assert "fairness" not in MFQ2_FOUNDATIONS
     assert set(FAIRNESS_SUBFOUNDATIONS) <= set(MFQ2_FOUNDATIONS)
@@ -67,6 +68,7 @@ def test_seed_lexicon_fairness_terms_are_not_all_equality_flavoured():
 
 # -- the splitter ----------------------------------------------------------
 
+
 def test_splitter_reads_the_framing():
     splitter = FairnessSplitter()
     eq = splitter.split(EQUALITY_TEXT.lower().split())
@@ -89,7 +91,7 @@ def test_thin_evidence_yields_no_split_rather_than_a_guess():
 
 
 def test_min_evidence_is_enforced():
-    tokens = ["the", "equal", "treatment", "clause"]   # exactly one split-term
+    tokens = ["the", "equal", "treatment", "clause"]  # exactly one split-term
     assert FairnessSplitter(min_evidence=1).split(tokens) is not None
     assert FairnessSplitter(min_evidence=2).split(tokens) is None
 
@@ -112,6 +114,7 @@ def test_term_lists_do_not_overlap():
 
 
 # -- scorer integration ----------------------------------------------------
+
 
 def test_splitter_never_changes_the_classic_five():
     plain = DictionaryScorer().score(EQUALITY_TEXT)
@@ -141,6 +144,7 @@ def test_both_framings_register_comparable_fairness():
 
 # -- persistence -----------------------------------------------------------
 
+
 def _reg():
     """Both personas, each reading its own source."""
     return registry(self={"src_self": 1.0}, modeled_ce={"src_modeled_ce": 1.0})
@@ -154,15 +158,25 @@ def _store_with_split():
             did = f"{diet}-{i}"
             score = scorer.score(text)
             store.upsert_document(
-                doc_id=did, source_id=f"src_{diet}", stratum_id=None, url=None,
-                title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
-                word_count=score.word_count, minhash=None,
+                doc_id=did,
+                source_id=f"src_{diet}",
+                stratum_id=None,
+                url=None,
+                title="t",
+                published_utc=None,
+                fetched_utc="2026-07-25T00:00:00+00:00",
+                word_count=score.word_count,
+                minhash=None,
             )
             store.upsert_scores(
-                document_id=did, scorer="dictionary", foundations=score.foundations,
-                sentiment=score.sentiment, moral_word_ratio=score.moral_word_ratio,
+                document_id=did,
+                scorer="dictionary",
+                foundations=score.foundations,
+                sentiment=score.sentiment,
+                moral_word_ratio=score.moral_word_ratio,
                 matched_words=score.matched_words,
-                equality=score.equality, proportionality=score.proportionality,
+                equality=score.equality,
+                proportionality=score.proportionality,
             )
     return store
 
@@ -178,16 +192,26 @@ def test_split_round_trips_through_the_datastore():
 def test_unsplit_rows_are_excluded_not_zeroed():
     store = Datastore(":memory:")
     store.upsert_document(
-        doc_id="d", source_id="src_self", stratum_id=None, url=None,
-        title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
-        word_count=50, minhash=None,
+        doc_id="d",
+        source_id="src_self",
+        stratum_id=None,
+        url=None,
+        title="t",
+        published_utc=None,
+        fetched_utc="2026-07-25T00:00:00+00:00",
+        word_count=50,
+        minhash=None,
     )
     store.upsert_scores(
-        document_id="d", scorer="dictionary", foundations={"fairness": 0.4},
-        sentiment=0.0, moral_word_ratio=0.1, matched_words=5,
+        document_id="d",
+        scorer="dictionary",
+        foundations={"fairness": 0.4},
+        sentiment=0.0,
+        moral_word_ratio=0.1,
+        matched_words=5,
     )
     rows, total = store.fairness_split_for_sources(["src_self"])
-    assert total == 1 and rows == []       # counted, but not treated as 0/0
+    assert total == 1 and rows == []  # counted, but not treated as 0/0
     store.close()
 
 
@@ -216,14 +240,25 @@ def test_migration_adds_columns_to_a_pre_split_database(tmp_path):
     cols = {r["name"] for r in store.conn.execute("PRAGMA table_info(foundation_scores)")}
     assert {"equality", "proportionality"} <= cols
     store.upsert_document(
-        doc_id="d", source_id="src_self", stratum_id=None, url=None,
-        title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
-        word_count=50, minhash=None,
+        doc_id="d",
+        source_id="src_self",
+        stratum_id=None,
+        url=None,
+        title="t",
+        published_utc=None,
+        fetched_utc="2026-07-25T00:00:00+00:00",
+        word_count=50,
+        minhash=None,
     )
     store.upsert_scores(
-        document_id="d", scorer="dictionary", foundations={"fairness": 0.4},
-        sentiment=0.0, moral_word_ratio=0.1, matched_words=5,
-        equality=0.3, proportionality=0.1,
+        document_id="d",
+        scorer="dictionary",
+        foundations={"fairness": 0.4},
+        sentiment=0.0,
+        moral_word_ratio=0.1,
+        matched_words=5,
+        equality=0.3,
+        proportionality=0.1,
     )
     rows, _ = store.fairness_split_for_sources(["src_self"])
     assert len(rows) == 1
@@ -233,13 +268,14 @@ def test_migration_adds_columns_to_a_pre_split_database(tmp_path):
 def test_migration_is_idempotent(tmp_path):
     path = tmp_path / "s.sqlite"
     Datastore(path).close()
-    store = Datastore(path)          # second open must not re-ALTER
+    store = Datastore(path)  # second open must not re-ALTER
     cols = [r["name"] for r in store.conn.execute("PRAGMA table_info(foundation_scores)")]
     assert cols.count("equality") == 1
     store.close()
 
 
 # -- aggregation -----------------------------------------------------------
+
 
 def test_diets_lean_opposite_ways():
     store = _store_with_split()
@@ -264,13 +300,23 @@ def test_thin_coverage_is_flagged():
     for i in range(60):
         did = f"self-pad-{i}"
         store.upsert_document(
-            doc_id=did, source_id="src_self", stratum_id=None, url=None,
-            title="t", published_utc=None, fetched_utc="2026-07-25T00:00:00+00:00",
-            word_count=50, minhash=None,
+            doc_id=did,
+            source_id="src_self",
+            stratum_id=None,
+            url=None,
+            title="t",
+            published_utc=None,
+            fetched_utc="2026-07-25T00:00:00+00:00",
+            word_count=50,
+            minhash=None,
         )
         store.upsert_scores(
-            document_id=did, scorer="dictionary", foundations={"fairness": 0.1},
-            sentiment=0.0, moral_word_ratio=0.1, matched_words=2,
+            document_id=did,
+            scorer="dictionary",
+            foundations={"fairness": 0.1},
+            sentiment=0.0,
+            moral_word_ratio=0.1,
+            matched_words=2,
         )
     profile = persona_fairness_profile(store, {"src_self": 1.0})
     assert profile.coverage < LOW_COVERAGE

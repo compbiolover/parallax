@@ -33,9 +33,7 @@ pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash
 
 # `nobody` where it exists, else any non-root uid — only used by the one test that
 # needs the wrapper to run as a user who does not own the config.
-UNPRIVILEGED_UID = next(
-    (uid for uid in (65534, 1, 2) if _uid_exists(uid)), None
-)
+UNPRIVILEGED_UID = next((uid for uid in (65534, 1, 2) if _uid_exists(uid)), None)
 
 SMTP_ID = "aaaa0000-0000-0000-0000-000000000000"
 KEY_ID = "bbbb0000-0000-0000-0000-000000000000"
@@ -92,7 +90,10 @@ def env(tmp_path):
             environ["PARALLAX_PYTHON"] = str(script)
         return subprocess.run(
             ["bash", str(WRAPPER), *args],
-            capture_output=True, text=True, env=environ, cwd=ROOT,
+            capture_output=True,
+            text=True,
+            env=environ,
+            cwd=ROOT,
         )
 
     return run
@@ -123,7 +124,7 @@ def test_both_bws_response_shapes_parse(env):
     handles both, and this is the part most likely to drift between versions."""
     r = env(CONF, "--check")
     assert r.returncode == 0
-    assert r.stdout.count("bitwarden") == 2      # both fetched values resolved
+    assert r.stdout.count("bitwarden") == 2  # both fetched values resolved
 
 
 def test_check_runs_nothing(env):
@@ -159,24 +160,25 @@ def test_a_hash_inside_a_value_is_kept(env):
     """The regression: stripping from the first `#` anywhere cut
     `hunter#2` to `hunter`, exported the wrong password, and reported it as
     resolved. Generated passwords and subscriber feed URLs both carry `#`."""
-    conf = ("BWS_ACCESS_TOKEN=0.t\n"
-            "PARALLAX_SMTP_PASSWORD=hunter#2\n"
-            "PARALLAX_FEED_MAKINGSENSE=https://example.com/rss?id=a#b\n")
+    conf = (
+        "BWS_ACCESS_TOKEN=0.t\n"
+        "PARALLAX_SMTP_PASSWORD=hunter#2\n"
+        "PARALLAX_FEED_MAKINGSENSE=https://example.com/rss?id=a#b\n"
+    )
     r = env(conf, "--check")
     assert r.returncode == 0, r.stderr
     # Lengths, not values — the whole value survived, so the counts are the
     # full ones rather than the truncated `hunter` (6) and `...?id=a` (28).
-    assert "8 chars" in r.stdout           # len("hunter#2")
-    assert "30 chars" in r.stdout          # len("https://example.com/rss?id=a#b")
+    assert "8 chars" in r.stdout  # len("hunter#2")
+    assert "30 chars" in r.stdout  # len("https://example.com/rss?id=a#b")
 
 
 def test_a_comment_after_a_value_is_still_stripped(env):
     """Whitespace then `#` is an ordinary trailing comment and has to go, or it
     ends up inside the exported value."""
-    r = env("BWS_ACCESS_TOKEN=0.t\nPARALLAX_SMTP_HOST=smtp.example.com  # prod\n",
-            "--check")
+    r = env("BWS_ACCESS_TOKEN=0.t\nPARALLAX_SMTP_HOST=smtp.example.com  # prod\n", "--check")
     assert r.returncode == 0, r.stderr
-    assert "16 chars" in r.stdout          # len("smtp.example.com")
+    assert "16 chars" in r.stdout  # len("smtp.example.com")
 
 
 def test_a_value_that_is_only_a_hash_survives(env):
@@ -211,8 +213,8 @@ def test_a_world_readable_config_is_refused_before_fetching(env):
     r = env(CONF, "--check", mode=0o644)
     assert r.returncode == 1
     assert "mode 644" in r.stderr
-    assert "600 or" in r.stderr and "400" in r.stderr   # message matches the check
-    assert "resolved" not in r.stdout                   # nothing was fetched
+    assert "600 or" in r.stderr and "400" in r.stderr  # message matches the check
+    assert "resolved" not in r.stdout  # nothing was fetched
 
 
 def test_read_only_owner_mode_is_accepted(env):
@@ -235,7 +237,9 @@ def test_a_bws_value_with_no_token_is_caught_up_front(env):
 
 def test_a_missing_config_says_where_it_looked(tmp_path):
     r = subprocess.run(
-        ["bash", str(WRAPPER), "--check"], capture_output=True, text=True,
+        ["bash", str(WRAPPER), "--check"],
+        capture_output=True,
+        text=True,
         env={**os.environ, "PARALLAX_BITWARDEN_CONF": str(tmp_path / "nope.conf")},
         cwd=ROOT,
     )
@@ -278,17 +282,22 @@ def test_no_bws_needed_when_nothing_is_fetched(tmp_path):
     script.write_text(ECHO_ENV)
     script.chmod(0o755)
     r = subprocess.run(
-        ["bash", str(WRAPPER), "--check"], capture_output=True, text=True,
-        env={**os.environ, "PARALLAX_BITWARDEN_CONF": str(conf),
-             "BWS_BIN": "/nonexistent/bws", "PARALLAX_PYTHON": str(script)},
+        ["bash", str(WRAPPER), "--check"],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "PARALLAX_BITWARDEN_CONF": str(conf),
+            "BWS_BIN": "/nonexistent/bws",
+            "PARALLAX_PYTHON": str(script),
+        },
         cwd=ROOT,
     )
     assert r.returncode == 0, r.stderr
     assert "1 variable(s) resolved" in r.stdout
 
 
-@pytest.mark.skipif(os.geteuid() != 0,
-                    reason="needs root to create a file owned by another user")
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to create a file owned by another user")
 def test_an_unreadable_config_names_the_sudo_cause():
     """0600 owned by someone else passes the mode check and then fails the read.
 
@@ -306,21 +315,25 @@ def test_an_unreadable_config_names_the_sudo_cause():
     home.chmod(0o755)
     conf = home / "bitwarden.conf"
     conf.write_text("PARALLAX_SMTP_HOST=smtp.example.com\n")
-    conf.chmod(0o600)                       # owned by root, owner-only
+    conf.chmod(0o600)  # owned by root, owner-only
 
     try:
         r = subprocess.run(
-            ["bash", str(WRAPPER), "--check"], capture_output=True, text=True,
-            env={**os.environ, "PARALLAX_BITWARDEN_CONF": str(conf)}, cwd=ROOT,
-            user=UNPRIVILEGED_UID, group=UNPRIVILEGED_UID,
+            ["bash", str(WRAPPER), "--check"],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PARALLAX_BITWARDEN_CONF": str(conf)},
+            cwd=ROOT,
+            user=UNPRIVILEGED_UID,
+            group=UNPRIVILEGED_UID,
         )
     finally:
         shutil.rmtree(home, ignore_errors=True)
     assert r.returncode == 1
     assert "not readable by" in r.stderr
     assert "sudo chown" in r.stderr
-    assert "created with sudo" in r.stderr      # the likely cause, named as likely
-    assert "ACL" in r.stderr                    # but not the only one
+    assert "created with sudo" in r.stderr  # the likely cause, named as likely
+    assert "ACL" in r.stderr  # but not the only one
 
 
 def test_a_tilde_in_bws_bin_is_expanded(tmp_path, monkeypatch):
@@ -334,13 +347,15 @@ def test_a_tilde_in_bws_bin_is_expanded(tmp_path, monkeypatch):
     bws.chmod(0o755)
 
     conf = tmp_path / "bitwarden.conf"
-    conf.write_text(f"BWS_BIN=~/.local/bin/bws\n"
-                    f"BWS_ACCESS_TOKEN=0.t\n"
-                    f"PARALLAX_SMTP_PASSWORD=bws:{SMTP_ID}\n")
+    conf.write_text(
+        f"BWS_BIN=~/.local/bin/bws\nBWS_ACCESS_TOKEN=0.t\nPARALLAX_SMTP_PASSWORD=bws:{SMTP_ID}\n"
+    )
     conf.chmod(0o600)
 
     r = subprocess.run(
-        ["bash", str(WRAPPER), "--check"], capture_output=True, text=True,
+        ["bash", str(WRAPPER), "--check"],
+        capture_output=True,
+        text=True,
         env={**os.environ, "HOME": str(home), "PARALLAX_BITWARDEN_CONF": str(conf)},
         cwd=ROOT,
     )

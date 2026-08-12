@@ -5,13 +5,9 @@
 # key (CLAUDE.md §1), only protected contributors who had installed the hook.
 # That is the wrong default for a public repository.
 #
-# The lint job runs `ruff check` and gitleaks rather than `pre-commit run
-# --all-files`. The difference is ruff-format: pre-commit only ever sees the
-# files a commit touches, so the repository has never been formatted wholesale
-# and `ruff format --check .` currently wants to reformat most of it. Gating on
-# that here would fail every build until someone lands a repo-wide reformat,
-# which is a decision to take deliberately rather than a side effect of adding
-# CI. `ruff check` is clean repo-wide today, so it gates from the start.
+# The lint job checks lint and formatting separately rather than running
+# `pre-commit run --all-files`, so a formatting failure names itself instead of
+# arriving as one opaque hook result.
 name: CI
 
 on:
@@ -43,6 +39,10 @@ jobs:
       # extra pins it.
       - run: pip install "ruff==0.15.8"
       - run: ruff check .
+      # The repository was formatted wholesale so this could gate. Before that
+      # the hook only ever saw the files a commit touched, which is how most of
+      # the tree went years without being formatted at all.
+      - run: ruff format --check .
 
   secrets:
     # The guardrail against committing an API key or a .env (CLAUDE.md §1).

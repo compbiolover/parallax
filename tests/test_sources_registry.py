@@ -116,9 +116,16 @@ def test_url_env_takes_precedence_when_the_variable_is_set(monkeypatch, tmp_path
 
     monkeypatch.setenv("PARALLAX_TEST_FEED", "https://example.com/private?id=tok")
     path = tmp_path / "sources.yaml"
-    path.write_text(_registry_with_ingest(
-        {"type": "podcast_rss", "url_env": "PARALLAX_TEST_FEED",
-         "url": "https://example.com/public.xml"}), encoding="utf-8")
+    path.write_text(
+        _registry_with_ingest(
+            {
+                "type": "podcast_rss",
+                "url_env": "PARALLAX_TEST_FEED",
+                "url": "https://example.com/public.xml",
+            }
+        ),
+        encoding="utf-8",
+    )
     assert load_registry(path).all_sources()[0].url == "https://example.com/private?id=tok"
 
 
@@ -129,9 +136,16 @@ def test_url_is_the_fallback_when_the_variable_is_unset(monkeypatch, tmp_path):
 
     monkeypatch.delenv("PARALLAX_TEST_FEED", raising=False)
     path = tmp_path / "sources.yaml"
-    path.write_text(_registry_with_ingest(
-        {"type": "podcast_rss", "url_env": "PARALLAX_TEST_FEED",
-         "url": "https://example.com/public.xml"}), encoding="utf-8")
+    path.write_text(
+        _registry_with_ingest(
+            {
+                "type": "podcast_rss",
+                "url_env": "PARALLAX_TEST_FEED",
+                "url": "https://example.com/public.xml",
+            }
+        ),
+        encoding="utf-8",
+    )
     assert load_registry(path).all_sources()[0].url == "https://example.com/public.xml"
 
 
@@ -142,9 +156,16 @@ def test_an_empty_variable_is_treated_as_unset(monkeypatch, tmp_path):
 
     monkeypatch.setenv("PARALLAX_TEST_FEED", "   ")
     path = tmp_path / "sources.yaml"
-    path.write_text(_registry_with_ingest(
-        {"type": "podcast_rss", "url_env": "PARALLAX_TEST_FEED",
-         "url": "https://example.com/public.xml"}), encoding="utf-8")
+    path.write_text(
+        _registry_with_ingest(
+            {
+                "type": "podcast_rss",
+                "url_env": "PARALLAX_TEST_FEED",
+                "url": "https://example.com/public.xml",
+            }
+        ),
+        encoding="utf-8",
+    )
     assert load_registry(path).all_sources()[0].url == "https://example.com/public.xml"
 
 
@@ -157,8 +178,10 @@ def test_a_secret_url_is_never_logged(monkeypatch, tmp_path, caplog):
     secret = "https://example.com/private?id=SECRETTOKEN"
     monkeypatch.setenv("PARALLAX_TEST_FEED", secret)
     path = tmp_path / "sources.yaml"
-    path.write_text(_registry_with_ingest(
-        {"type": "podcast_rss", "url_env": "PARALLAX_TEST_FEED"}), encoding="utf-8")
+    path.write_text(
+        _registry_with_ingest({"type": "podcast_rss", "url_env": "PARALLAX_TEST_FEED"}),
+        encoding="utf-8",
+    )
     with caplog.at_level(logging.DEBUG):
         load_registry(path)
     assert "SECRETTOKEN" not in caplog.text
@@ -173,17 +196,29 @@ def test_the_registry_never_hardcodes_a_subscriber_url():
 
 
 def _registry_with_ingest(ingest: dict) -> str:
-    return yaml.safe_dump({
-        "version": 3,
-        "strata": [{"id": "s", "description": "test"}],
-        "catalog": [{
-            "id": "src", "name": "Src", "medium": "podcast", "stratum": "s",
-            "ingest": ingest, "rationale": "test",
-        }],
-        "personas": [{
-            "id": "self", "label": "My diet", "family": "left",
-            "description": "test persona",
-            "strata": {"s": 1.0},
-            "sources": {"src": 1.0},
-        }],
-    })
+    return yaml.safe_dump(
+        {
+            "version": 3,
+            "strata": [{"id": "s", "description": "test"}],
+            "catalog": [
+                {
+                    "id": "src",
+                    "name": "Src",
+                    "medium": "podcast",
+                    "stratum": "s",
+                    "ingest": ingest,
+                    "rationale": "test",
+                }
+            ],
+            "personas": [
+                {
+                    "id": "self",
+                    "label": "My diet",
+                    "family": "left",
+                    "description": "test persona",
+                    "strata": {"s": 1.0},
+                    "sources": {"src": 1.0},
+                }
+            ],
+        }
+    )

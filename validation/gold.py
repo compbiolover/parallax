@@ -39,7 +39,7 @@ GOLD_DIR = Path(__file__).resolve().parent / "gold"
 class GoldItem:
     id: str
     text: str
-    labels: dict[str, int]                      # foundation -> 0/1
+    labels: dict[str, int]  # foundation -> 0/1
     source: str = "hand"
     labels_by_coder: dict[str, dict[str, int]] = field(default_factory=dict)
 

@@ -37,8 +37,8 @@ class DocumentScore:
     """A single document's length-normalized foundation scores."""
 
     foundations: dict[str, float]  # classic foundation -> per-token rate
-    sentiment: float               # net (virtue-vice) signal, length-normalized
-    moral_word_ratio: float        # matched moral tokens / total tokens
+    sentiment: float  # net (virtue-vice) signal, length-normalized
+    moral_word_ratio: float  # matched moral tokens / total tokens
     word_count: int
     matched_words: int
     scorer: str = "dictionary"

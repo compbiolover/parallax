@@ -47,8 +47,7 @@ from ingestion.datastore import Datastore
 
 # Step names, in execution order. ``snapshot`` runs before ``export`` so the
 # payload carries today's point rather than lagging a day behind.
-STEPS = ("ingest", "backfill", "podcasts", "cluster", "summarize", "snapshot",
-         "export", "digest")
+STEPS = ("ingest", "backfill", "podcasts", "cluster", "summarize", "snapshot", "export", "digest")
 
 # What a run does unless told otherwise. ``digest`` is the one step that is not
 # in here: it needs SMTP credentials nobody has on a first run, and a step that
@@ -67,34 +66,34 @@ DEFAULT_STEPS = tuple(s for s in STEPS if s not in ("digest", "podcasts"))
 class DailyConfig:
     """What the daily run does. Defaults are the full snapshot."""
 
-    db: str | None = None                 # None -> from settings
+    db: str | None = None  # None -> from settings
     settings_path: str | None = None
-    out: str | None = None                # dashboard payload path; None -> default
+    out: str | None = None  # dashboard payload path; None -> default
     steps: tuple[str, ...] = DEFAULT_STEPS
 
     # ingest
     max_items_per_feed: int | None = None
     lexicon_path: str | None = None
-    transformer: bool | None = None       # None -> whatever settings say
+    transformer: bool | None = None  # None -> whatever settings say
 
     # backfill (GDELT)
     backfill_days: int = 14
     backfill_max_per_source: int = 250
     backfill_extract_bodies: bool = False
-    backfill_transformer: bool = False    # title-only bulk; bands come from feeds
+    backfill_transformer: bool = False  # title-only bulk; bands come from feeds
 
     # cluster
     min_cluster_size: int = 2
     dominance: float = 0.75
     min_blindspot_size: int = 2
-    claude_themes: bool = True            # name blindspot themes with Claude
-    theme_model: str | None = None        # None -> cluster.themes default
+    claude_themes: bool = True  # name blindspot themes with Claude
+    theme_model: str | None = None  # None -> cluster.themes default
     # UNSET -> cluster.themes default; None -> send no effort at all
     theme_effort: object = THEME_EFFORT_UNSET
 
     # summarize
-    model: str | None = None              # None -> summarizer default
-    summary_effort: str | None = None     # None -> summarizer default
+    model: str | None = None  # None -> summarizer default
+    summary_effort: str | None = None  # None -> summarizer default
 
     # snapshot
     window_days: int = DEFAULT_WINDOW_DAYS
@@ -104,14 +103,14 @@ class DailyConfig:
     podcast_config: object = None
 
     # comparison — which two personas every headline number is about
-    reference_mine: str | None = None      # None -> settings, then `self`
-    reference_theirs: str | None = None    # None -> settings, then `modeled_ce`
+    reference_mine: str | None = None  # None -> settings, then `self`
+    reference_theirs: str | None = None  # None -> settings, then `modeled_ce`
     # Which personas get written prose. None -> the reference pair only; one call
     # carries every context, so this is a prompt-size and reliability knob.
     summary_personas: list[str] | None = None
 
     # digest
-    own_diet: str | None = None           # whose blindspots lead the email
+    own_diet: str | None = None  # whose blindspots lead the email
 
     # Built once per run by `_payload`, shared by export and digest so the two
     # cannot describe different dicts. Not configuration — excluded from repr
@@ -125,12 +124,12 @@ class DailyConfig:
     def from_settings(cls, settings: dict) -> DailyConfig:
         """Defaults from the ``daily:`` block of settings.yaml. CLI flags layer
         on top of this (see ``daily.__main__``)."""
-        daily = (settings.get("daily", {}) or {})
-        bf = (daily.get("backfill", {}) or {})
-        snap = (daily.get("snapshot", {}) or {})
-        dig = (settings.get("digest", {}) or {})
-        themes = ((settings.get("cluster", {}) or {}).get("themes", {}) or {})
-        ref = ((settings.get("compare", {}) or {}).get("reference_pair", {}) or {})
+        daily = settings.get("daily", {}) or {}
+        bf = daily.get("backfill", {}) or {}
+        snap = daily.get("snapshot", {}) or {}
+        dig = settings.get("digest", {}) or {}
+        themes = (settings.get("cluster", {}) or {}).get("themes", {}) or {}
+        ref = (settings.get("compare", {}) or {}).get("reference_pair", {}) or {}
         cfg = cls(
             backfill_days=int(bf.get("days", 14)),
             backfill_max_per_source=int(bf.get("max_per_source", 250)),
@@ -168,7 +167,7 @@ class DailyConfig:
 @dataclass
 class StepResult:
     name: str
-    status: str                # "ok" | "failed" | "skipped"
+    status: str  # "ok" | "failed" | "skipped"
     seconds: float = 0.0
     detail: str = ""
     error: str = ""
@@ -209,7 +208,7 @@ def _summary_personas(settings: dict) -> list[str] | None:
     if isinstance(value, list):
         return [str(v) for v in value]
     if str(value).lower() == "all":
-        return []          # empty list = every persona; see `gather`
+        return []  # empty list = every persona; see `gather`
     return None
 
 
@@ -222,12 +221,14 @@ def _now_iso() -> str:
 # isolation wrapper in run_daily, which records them as a failed step.
 
 
-def _step_ingest(store, cfg: DailyConfig, pcfg, registry, embedder, transformer,
-                 progress=None) -> str:
+def _step_ingest(
+    store, cfg: DailyConfig, pcfg, registry, embedder, transformer, progress=None
+) -> str:
     from ingestion.pipeline import run
 
-    stats = run(store, registry, pcfg, embedder=embedder, transformer=transformer,
-                progress=progress)
+    stats = run(
+        store, registry, pcfg, embedder=embedder, transformer=transformer, progress=progress
+    )
     return (
         f"{stats.stored} stored, {stats.exact_duplicates} exact-dup, "
         f"{stats.near_duplicates} near-dup, {stats.errors} errors"
@@ -238,8 +239,12 @@ def _step_backfill(store, cfg: DailyConfig, pcfg, registry, embedder, transforme
     from ingestion.pipeline import backfill
 
     stats = backfill(
-        store, registry, pcfg, embedder=embedder,
-        days=cfg.backfill_days, max_per_source=cfg.backfill_max_per_source,
+        store,
+        registry,
+        pcfg,
+        embedder=embedder,
+        days=cfg.backfill_days,
+        max_per_source=cfg.backfill_max_per_source,
         extract_bodies=cfg.backfill_extract_bodies,
         transformer=transformer if cfg.backfill_transformer else None,
     )
@@ -249,8 +254,9 @@ def _step_backfill(store, cfg: DailyConfig, pcfg, registry, embedder, transforme
     )
 
 
-def _step_podcasts(store, cfg: DailyConfig, pcfg, registry, embedder, transformer,
-                   progress=None) -> str:
+def _step_podcasts(
+    store, cfg: DailyConfig, pcfg, registry, embedder, transformer, progress=None
+) -> str:
     """Transcribe new episodes. The one step measured in hours, not minutes.
 
     It carries its own budgets rather than borrowing the run's, because the
@@ -261,8 +267,13 @@ def _step_podcasts(store, cfg: DailyConfig, pcfg, registry, embedder, transforme
     from ingestion.podcast import run as run_podcasts
 
     stats = run_podcasts(
-        store, registry, pcfg, cfg.podcast_config,
-        embedder=embedder, transformer=transformer, progress=progress,
+        store,
+        registry,
+        pcfg,
+        cfg.podcast_config,
+        embedder=embedder,
+        transformer=transformer,
+        progress=progress,
     )
     return stats.line()
 
@@ -322,7 +333,8 @@ def _step_snapshot(store, cfg: DailyConfig, registry, pair) -> str:
     snap = record_snapshot(store, registry, pair, window_days=cfg.window_days)
     jsd = snap.window.jsd
     moved = (
-        f"window JSD {jsd:.3f}" if jsd is not None
+        f"window JSD {jsd:.3f}"
+        if jsd is not None
         else "window JSD n/a (the pair is not both scored)"
     )
     return f"recorded {snap.snapshot_date} ({moved}), {store.snapshot_count()} in history"
@@ -375,9 +387,7 @@ def _step_digest(store, cfg: DailyConfig, registry, pair) -> str:
     from digest.render import build_digest
     from digest.send import send
 
-    digest = build_digest(
-        _payload(store, cfg, registry, pair), own_diet=cfg.own_diet or pair.mine
-    )
+    digest = build_digest(_payload(store, cfg, registry, pair), own_diet=cfg.own_diet or pair.mine)
     reason = send(digest)
     if reason is None:
         return f"sent — {digest.subject}"
@@ -387,8 +397,9 @@ def _step_digest(store, cfg: DailyConfig, registry, pair) -> str:
     raise RuntimeError(reason)
 
 
-def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
-              progress=None) -> DailyReport:
+def run_daily(
+    cfg: DailyConfig | None = None, store: Datastore | None = None, progress=None
+) -> DailyReport:
     """Run the daily snapshot. Never raises for a step failure — see the report.
 
     ``progress`` is an optional callback that receives step announcements and
@@ -418,8 +429,11 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
 
         registry = load_registry(settings=settings)
         pair = resolve(
-            settings, cfg.reference_mine, cfg.reference_theirs,
-            available=registry.persona_ids(), families=registry.families(),
+            settings,
+            cfg.reference_mine,
+            cfg.reference_theirs,
+            available=registry.persona_ids(),
+            families=registry.families(),
         )
         embedder = _build_embedder(settings)
         # Load Mformer once and share it — it is five RoBERTa models.
@@ -431,11 +445,13 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
             pcfg.transformer_enabled = False
 
         step_args = {
-            "ingest": lambda: _step_ingest(store, cfg, pcfg, registry, embedder,
-                                           transformer, progress),
+            "ingest": lambda: _step_ingest(
+                store, cfg, pcfg, registry, embedder, transformer, progress
+            ),
             "backfill": lambda: _step_backfill(store, cfg, pcfg, registry, embedder, transformer),
-            "podcasts": lambda: _step_podcasts(store, cfg, pcfg, registry, embedder,
-                                               transformer, progress),
+            "podcasts": lambda: _step_podcasts(
+                store, cfg, pcfg, registry, embedder, transformer, progress
+            ),
             "cluster": lambda: _step_cluster(store, cfg, registry, pair),
             "summarize": lambda: _step_summarize(store, cfg, registry, pair),
             "snapshot": lambda: _step_snapshot(store, cfg, registry, pair),
@@ -454,8 +470,11 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
 
 def _needs_transformer(cfg: DailyConfig) -> bool:
     """Only pay the model-load cost if a step that uses it will actually run."""
-    return (cfg.enabled("ingest") or cfg.enabled("podcasts")
-            or (cfg.enabled("backfill") and cfg.backfill_transformer))
+    return (
+        cfg.enabled("ingest")
+        or cfg.enabled("podcasts")
+        or (cfg.enabled("backfill") and cfg.backfill_transformer)
+    )
 
 
 def _build_embedder(settings: dict):
@@ -488,13 +507,14 @@ def _run_step(name: str, fn, enabled: bool, progress=None) -> StepResult:
         result = StepResult(name, "ok", time.monotonic() - started, detail=detail)
     except Exception as exc:
         result = StepResult(
-            name, "failed", time.monotonic() - started,
+            name,
+            "failed",
+            time.monotonic() - started,
             error=f"{type(exc).__name__}: {exc}",
         )
     if progress is not None:
         note = result.error or result.detail
-        progress(f"  {name} {result.status} in {result.seconds:.1f}s"
-                 f"{' — ' + note if note else ''}")
+        progress(f"  {name} {result.status} in {result.seconds:.1f}s{' — ' + note if note else ''}")
     return result
 
 

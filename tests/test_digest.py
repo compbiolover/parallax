@@ -34,6 +34,7 @@ def _reg():
     """Both personas, each reading its own source."""
     return registry(self={"src_self": 1.0}, modeled_ce={"src_modeled_ce": 1.0})
 
+
 FOUNDATIONS = ["care", "fairness", "loyalty", "authority", "sanctity"]
 
 
@@ -42,22 +43,39 @@ def _payload(**over) -> dict:
         "generated_utc": "2026-07-28T11:02:00+00:00",
         "foundations": FOUNDATIONS,
         "diets": [
-            {"id": "self", "doc_count": 128,
-             "profile": {"care": .31, "fairness": .27, "loyalty": .14,
-                         "authority": .16, "sanctity": .12},
-             "summary": "Harm and procedural fairness."},
-            {"id": "modeled_ce", "doc_count": 96,
-             "profile": {"care": .19, "fairness": .18, "loyalty": .24,
-                         "authority": .21, "sanctity": .18},
-             "summary": "Institutional trust and obligation."},
+            {
+                "id": "self",
+                "doc_count": 128,
+                "profile": {
+                    "care": 0.31,
+                    "fairness": 0.27,
+                    "loyalty": 0.14,
+                    "authority": 0.16,
+                    "sanctity": 0.12,
+                },
+                "summary": "Harm and procedural fairness.",
+            },
+            {
+                "id": "modeled_ce",
+                "doc_count": 96,
+                "profile": {
+                    "care": 0.19,
+                    "fairness": 0.18,
+                    "loyalty": 0.24,
+                    "authority": 0.21,
+                    "sanctity": 0.18,
+                },
+                "summary": "Institutional trust and obligation.",
+            },
         ],
-        "comparison": {"pair": ["self", "modeled_ce"], "jsd": 0.0841,
-                       "log_ratios": {"care": .49, "loyalty": -.54}},
+        "comparison": {
+            "pair": ["self", "modeled_ce"],
+            "jsd": 0.0841,
+            "log_ratios": {"care": 0.49, "loyalty": -0.54},
+        },
         "history": [
-            {"date": "2026-07-27", "jsd_cumulative": 0.078, "jsd_window": 0.061,
-             "window_days": 7},
-            {"date": "2026-07-28", "jsd_cumulative": 0.0841, "jsd_window": 0.095,
-             "window_days": 7},
+            {"date": "2026-07-27", "jsd_cumulative": 0.078, "jsd_window": 0.061, "window_days": 7},
+            {"date": "2026-07-28", "jsd_cumulative": 0.0841, "jsd_window": 0.095, "window_days": 7},
         ],
         "history_window_days": 7,
         "blindspots": [],
@@ -68,18 +86,30 @@ def _payload(**over) -> dict:
     return {**base, **over}
 
 
-def _spot(dominant, other, label="a cluster", titles=("A headline about something",),
-          cluster_id=0, size=12):
+def _spot(
+    dominant,
+    other,
+    label="a cluster",
+    titles=("A headline about something",),
+    cluster_id=0,
+    size=12,
+):
     """One blindspot cluster as the exporter serializes it.
 
     ``label`` is the c-TF-IDF readout the email no longer prints; it stays in
     the fixture because the payload still carries it and because a test that it
     is *not* printed needs it to be there.
     """
-    return {"cluster_id": cluster_id, "label": label, "dominant_diet": dominant,
-            "other_diet": other, "size": size, "dominant_share": 0.9,
-            "counts": {dominant: size - 1, other: 1},
-            "representative_titles": list(titles)}
+    return {
+        "cluster_id": cluster_id,
+        "label": label,
+        "dominant_diet": dominant,
+        "other_diet": other,
+        "size": size,
+        "dominant_share": 0.9,
+        "counts": {dominant: size - 1, other: 1},
+        "representative_titles": list(titles),
+    }
 
 
 # -- unscored is not zero ---------------------------------------------------
@@ -109,10 +139,12 @@ def test_delta_reads_the_same_series_as_the_headline():
     movement under it has to be the cumulative series. Reading jsd_window put a
     delta from a different basis under the number — a figure that could even
     move the opposite way, since the cumulative basis is damped by design."""
-    history = [{"date": "2026-07-27", "jsd_cumulative": 0.070, "jsd_window": 0.200},
-               {"date": "2026-07-28", "jsd_cumulative": 0.078, "jsd_window": 0.100}]
+    history = [
+        {"date": "2026-07-27", "jsd_cumulative": 0.070, "jsd_window": 0.200},
+        {"date": "2026-07-28", "jsd_cumulative": 0.078, "jsd_window": 0.100},
+    ]
     delta, _, since = _delta(history)
-    assert delta == pytest.approx(0.008)      # not -0.100
+    assert delta == pytest.approx(0.008)  # not -0.100
     assert since == "2026-07-27"
 
 
@@ -126,8 +158,7 @@ def test_the_delta_names_the_date_it_compares_against():
 
 
 def test_points_without_a_windowed_value_are_skipped_not_counted_as_zero():
-    history = [{"jsd_cumulative": 0.07}, {"jsd_cumulative": None},
-               {"jsd_cumulative": 0.09}]
+    history = [{"jsd_cumulative": 0.07}, {"jsd_cumulative": None}, {"jsd_cumulative": 0.09}]
     delta, _, _ = _delta(history)
     assert delta == pytest.approx(0.02)
 
@@ -151,8 +182,7 @@ def test_subject_carries_the_headline_and_its_movement():
 def test_subject_omits_movement_when_there_is_none_to_report():
     """Asserted exactly: `"+" not in ...` would still pass if a negative delta
     leaked through."""
-    assert build_digest(_payload(history=[])).subject == (
-        "Parallax 2026-07-28 — divergence 0.084")
+    assert build_digest(_payload(history=[])).subject == ("Parallax 2026-07-28 — divergence 0.084")
 
 
 def test_subject_says_so_when_there_is_nothing_to_compare():
@@ -171,8 +201,10 @@ def test_the_authors_own_blindspots_come_first():
 
 
 def test_both_directions_are_rendered():
-    spots = [_spot("self", "modeled_ce", titles=["A story they missed"]),
-             _spot("modeled_ce", "self", titles=["A story I missed"])]
+    spots = [
+        _spot("self", "modeled_ce", titles=["A story they missed"]),
+        _spot("modeled_ce", "self", titles=["A story I missed"]),
+    ]
     html = render_html(_payload(blindspots=spots), own_diet="self")
     assert "A story they missed" in html
     assert "A story I missed" in html
@@ -182,9 +214,16 @@ def test_both_directions_are_rendered():
 def test_the_cluster_label_is_not_what_the_reader_is_shown():
     """c-TF-IDF labels are a technical readout — "kidney stone · bret ·
     institutional" over three unrelated headlines. The card is titled by theme."""
-    payload = _payload(blindspots=[
-        _spot("modeled_ce", "self", "kidney stone · bret · institutional",
-              titles=["Bret Michaels shares a health update after a procedure"])])
+    payload = _payload(
+        blindspots=[
+            _spot(
+                "modeled_ce",
+                "self",
+                "kidney stone · bret · institutional",
+                titles=["Bret Michaels shares a health update after a procedure"],
+            )
+        ]
+    )
     html = render_html(payload, own_diet="self")
     assert "kidney stone · bret" not in html
     assert "Health &amp; medicine" in html
@@ -194,13 +233,32 @@ def test_each_direction_keeps_its_own_room_on_the_page():
     """Caps are per direction, not per section. A day when one diet clusters
     noisily must not push the other diet's blindspots off the email — that is
     the half the confirmation-bias guard exists to protect."""
-    subjects = ["church congregation", "election ballot voters", "hurricane evacuation",
-                "cancer treatment patients", "tariffs and wages"]
-    spots = [_spot("modeled_ce", "self", cluster_id=i, size=20 - i,
-                   titles=[f"A story about {words} and several more words"])
-             for i, words in enumerate(subjects)]
-    spots += [_spot("self", "modeled_ce", cluster_id=99, size=2,
-                    titles=["A story about carbon emissions and ocean warming"])]
+    subjects = [
+        "church congregation",
+        "election ballot voters",
+        "hurricane evacuation",
+        "cancer treatment patients",
+        "tariffs and wages",
+    ]
+    spots = [
+        _spot(
+            "modeled_ce",
+            "self",
+            cluster_id=i,
+            size=20 - i,
+            titles=[f"A story about {words} and several more words"],
+        )
+        for i, words in enumerate(subjects)
+    ]
+    spots += [
+        _spot(
+            "self",
+            "modeled_ce",
+            cluster_id=99,
+            size=2,
+            titles=["A story about carbon emissions and ocean warming"],
+        )
+    ]
     html = render_html(_payload(blindspots=spots), own_diet="self")
     # five themes on one side, the smallest theme on the other — the author's
     # own blindspot still gets its heading and its card
@@ -212,13 +270,22 @@ def test_each_direction_keeps_its_own_room_on_the_page():
 def test_themes_the_email_leaves_out_are_named_not_merely_counted():
     """A theme the reader is not shown is otherwise indistinguishable from one
     that was never found — the failure the whole idea exists to avoid."""
-    subjects = [("church congregation", "Faith &amp; the church"),
-                ("election ballot voters", "Elections"),
-                ("hurricane evacuation", "Disasters"),
-                ("cancer treatment patients", "Health &amp; medicine")]
-    spots = [_spot("modeled_ce", "self", cluster_id=i, size=10 - i,
-                   titles=[f"A story about {words} and more words here"])
-             for i, (words, _) in enumerate(subjects)]
+    subjects = [
+        ("church congregation", "Faith &amp; the church"),
+        ("election ballot voters", "Elections"),
+        ("hurricane evacuation", "Disasters"),
+        ("cancer treatment patients", "Health &amp; medicine"),
+    ]
+    spots = [
+        _spot(
+            "modeled_ce",
+            "self",
+            cluster_id=i,
+            size=10 - i,
+            titles=[f"A story about {words} and more words here"],
+        )
+        for i, (words, _) in enumerate(subjects)
+    ]
     html = render_html(_payload(blindspots=spots), own_diet="self")
     assert "1 more theme here: Health &amp; medicine" in html
     text = render_text(_payload(blindspots=spots), own_diet="self")
@@ -245,8 +312,8 @@ def test_the_agenda_number_is_printed_next_to_the_foundation_one():
     a finding, and not what the reader experiences — so printing it alone reads
     as "these diets are nearly identical" when the agenda says otherwise."""
     html = render_html(_payload(agenda=AGENDA))
-    assert "0.842" in html                      # the agenda number
-    assert "0.084" in html                      # and the foundation one, in the note
+    assert "0.842" in html  # the agenda number
+    assert "0.084" in html  # and the foundation one, in the note
     assert "36 stories" in html
     assert "67% of" in html and "71% of" in html
     assert "Both covered 5 stories" in html
@@ -265,7 +332,7 @@ def test_no_agenda_panel_before_anything_is_clustered():
     """An absent metric renders as silence, not as a zero."""
     html = render_html(_payload(agenda=None))
     assert "different agenda" not in html.lower()
-    assert render_html(_payload()) == html      # and a payload predating it is fine
+    assert render_html(_payload()) == html  # and a payload predating it is fine
 
 
 def test_thin_agenda_coverage_says_so():
@@ -287,25 +354,40 @@ def test_themes_already_in_the_payload_are_the_ones_rendered():
     model was reachable for one of them."""
     payload = _payload(
         blindspots=[_spot("modeled_ce", "self", titles=["A church story"])],
-        blindspot_themes=[{
-            "key": "faith", "title": "Life of the church", "dominant_diet": "modeled_ce",
-            "other_diet": "self", "story_count": 2, "article_count": 7,
-            "one_sided": 0.93, "method": "claude",
-            "stories": [{
-                "cluster_id": 3, "title": "A church story", "articles": 4,
-                "one_sided": 1.0,
-                "outlets": [{"label": "Christianity Today",
-                             "url": "https://christianitytoday.com/a"},
-                            {"label": "The Christian Post", "url": None}],
-            }],
-        }],
+        blindspot_themes=[
+            {
+                "key": "faith",
+                "title": "Life of the church",
+                "dominant_diet": "modeled_ce",
+                "other_diet": "self",
+                "story_count": 2,
+                "article_count": 7,
+                "one_sided": 0.93,
+                "method": "claude",
+                "stories": [
+                    {
+                        "cluster_id": 3,
+                        "title": "A church story",
+                        "articles": 4,
+                        "one_sided": 1.0,
+                        "outlets": [
+                            {
+                                "label": "Christianity Today",
+                                "url": "https://christianitytoday.com/a",
+                            },
+                            {"label": "The Christian Post", "url": None},
+                        ],
+                    }
+                ],
+            }
+        ],
     )
     html = render_html(payload, own_diet="self")
     assert "Life of the church" in html
     assert "2 stories · 7 articles · 93% one-sided" in html
-    assert "4 articles" in html                       # the story's own tally
+    assert "4 articles" in html  # the story's own tally
     assert 'href="https://christianitytoday.com/a"' in html
-    assert "The Christian Post" in html               # named even without a link
+    assert "The Christian Post" in html  # named even without a link
 
 
 def test_ordering_is_stable_when_no_diet_is_named_as_the_authors():
@@ -341,24 +423,44 @@ def test_the_caveat_is_always_present():
 
 
 def test_liberty_carries_its_own_weaker_provenance():
-    payload = _payload(liberty={
-        "scorer": "claude-liberty/claude-sonnet-5",
-        "diets": {"self": {"mean": .31, "salient_share": .18, "docs_scored": 88,
-                           "docs_total": 128, "coverage": .69, "thin": False}},
-        "gap": 0.1,
-    })
+    payload = _payload(
+        liberty={
+            "scorer": "claude-liberty/claude-sonnet-5",
+            "diets": {
+                "self": {
+                    "mean": 0.31,
+                    "salient_share": 0.18,
+                    "docs_scored": 88,
+                    "docs_total": 128,
+                    "coverage": 0.69,
+                    "thin": False,
+                }
+            },
+            "gap": 0.1,
+        }
+    )
     html = render_html(payload)
     assert "least corroborated" in html
-    assert "69% of docs scored" in html      # coverage, not just the mean
+    assert "69% of docs scored" in html  # coverage, not just the mean
 
 
 def test_a_fairness_split_with_no_evidence_is_not_shown_as_a_ratio():
-    payload = _payload(fairness_split={
-        "diets": {"self": {"equality": None, "proportionality": None,
-                           "docs_split": 0, "docs_total": 128, "coverage": 0.0,
-                           "thin": True, "leans": None}},
-        "gap": None,
-    })
+    payload = _payload(
+        fairness_split={
+            "diets": {
+                "self": {
+                    "equality": None,
+                    "proportionality": None,
+                    "docs_split": 0,
+                    "docs_total": 128,
+                    "coverage": 0.0,
+                    "thin": True,
+                    "leans": None,
+                }
+            },
+            "gap": None,
+        }
+    )
     assert "not enough split-terms" in render_html(payload)
 
 
@@ -435,8 +537,8 @@ def test_paragraph_breaks_survive_into_the_email():
     assert html.count("First para.") == 1
     # three separate blocks, the first two carrying the gap after them
     assert "First para.</div>" in html and "Third.</div>" in html
-    assert "padding-bottom:10px;\">First para." in html
-    assert "padding-bottom:0px;\">Third." in html
+    assert 'padding-bottom:10px;">First para.' in html
+    assert 'padding-bottom:0px;">Third.' in html
 
 
 def test_a_hard_wrap_inside_a_paragraph_is_not_a_break():
@@ -459,8 +561,9 @@ def test_the_summary_provenance_survives_when_only_the_executive_ran():
 def _labelled(**over) -> dict:
     payload = _payload(**over)
     for diet in payload["diets"]:
-        diet["label"] = ("My diet" if diet["id"] == "self"
-                         else "Modeled conservative-evangelical diet")
+        diet["label"] = (
+            "My diet" if diet["id"] == "self" else "Modeled conservative-evangelical diet"
+        )
         diet["short_label"] = "My diet" if diet["id"] == "self" else "The modeled diet"
     return payload
 
@@ -468,12 +571,25 @@ def _labelled(**over) -> dict:
 def test_no_machine_id_reaches_the_reader():
     """`modeled_ce` is a database key. It appeared in the composition heading,
     the log-ratio legend, the blindspot headings, and the summary prose."""
-    html = render_html(_labelled(
-        blindspots=[_spot("modeled_ce", "self", titles=["A church story"])],
-        liberty={"scorer": "claude-liberty", "diets": {
-            "self": {"mean": .3, "salient_share": .2, "docs_scored": 8,
-                     "docs_total": 10, "coverage": .8, "thin": False}}},
-    ), own_diet="self")
+    html = render_html(
+        _labelled(
+            blindspots=[_spot("modeled_ce", "self", titles=["A church story"])],
+            liberty={
+                "scorer": "claude-liberty",
+                "diets": {
+                    "self": {
+                        "mean": 0.3,
+                        "salient_share": 0.2,
+                        "docs_scored": 8,
+                        "docs_total": 10,
+                        "coverage": 0.8,
+                        "thin": False,
+                    }
+                },
+            },
+        ),
+        own_diet="self",
+    )
     assert "modeled_ce" not in html
     assert "The modeled diet covered" in html
     text = render_text(_labelled(), own_diet="self")
@@ -539,7 +655,7 @@ def test_send_without_configuration_warns_and_returns_false(monkeypatch, caplog)
     with caplog.at_level(logging.WARNING):
         assert send(build_digest(_payload())) is not None
     assert "not configured" in caplog.text
-    assert "crontab" in caplog.text          # cron doesn't inherit your shell
+    assert "crontab" in caplog.text  # cron doesn't inherit your shell
 
 
 class _SMTP:
@@ -548,8 +664,11 @@ class _SMTP:
     def __init__(self, calls):
         self.calls = calls
 
-    def __enter__(self): return self
-    def __exit__(self, *a): return False
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
 
     def starttls(self, context=None):
         self.calls.append(f"starttls:{type(context).__name__}")
@@ -557,15 +676,17 @@ class _SMTP:
             self.calls.append(f"verify:{context.verify_mode.name}")
             self.calls.append(f"hostname:{context.check_hostname}")
 
-    def login(self, user, password): self.calls.append(f"login:{user}")
-    def send_message(self, message): self.calls.append(f"send:{message['To']}")
+    def login(self, user, password):
+        self.calls.append(f"login:{user}")
+
+    def send_message(self, message):
+        self.calls.append(f"send:{message['To']}")
 
 
 def test_send_uses_starttls_login_and_send():
     calls = []
     config = MailConfig.from_env(ENV)
-    assert send(build_digest(_payload()), config,
-                smtp_factory=lambda: _SMTP(calls)) is None
+    assert send(build_digest(_payload()), config, smtp_factory=lambda: _SMTP(calls)) is None
     assert calls[0] == "starttls:SSLContext"
     assert calls[-2:] == ["login:me@example.com", "send:me@example.com"]
 
@@ -580,8 +701,7 @@ def test_starttls_gets_a_verifying_context():
     error to say so — an on-path attacker presents any certificate and reads
     the AUTH exchange that follows in the clear."""
     calls = []
-    send(build_digest(_payload()), MailConfig.from_env(ENV),
-         smtp_factory=lambda: _SMTP(calls))
+    send(build_digest(_payload()), MailConfig.from_env(ENV), smtp_factory=lambda: _SMTP(calls))
     assert "verify:CERT_REQUIRED" in calls
     assert "hostname:True" in calls
     # and the password only moves after the handshake is verified
@@ -604,10 +724,11 @@ def test_plaintext_to_a_remote_host_is_refused_before_connecting(caplog):
     opened = []
     config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_STARTTLS": "0"})
     with caplog.at_level(logging.WARNING):
-        result = send(build_digest(_payload()), config,
-                      smtp_factory=lambda: opened.append(1) or _SMTP([]))
+        result = send(
+            build_digest(_payload()), config, smtp_factory=lambda: opened.append(1) or _SMTP([])
+        )
     assert result is not None
-    assert opened == []                       # never dialled
+    assert opened == []  # never dialled
     assert "would cross the network in the clear" in caplog.text
 
 
@@ -615,10 +736,10 @@ def test_plaintext_to_a_local_relay_is_allowed():
     """The documented use for STARTTLS=0 — a relay on this machine, where there
     is no network for anyone to sit on."""
     calls = []
-    config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_STARTTLS": "0",
-                                  "PARALLAX_SMTP_HOST": "localhost"})
-    assert send(build_digest(_payload()), config,
-                smtp_factory=lambda: _SMTP(calls)) is None
+    config = MailConfig.from_env(
+        {**ENV, "PARALLAX_SMTP_STARTTLS": "0", "PARALLAX_SMTP_HOST": "localhost"}
+    )
+    assert send(build_digest(_payload()), config, smtp_factory=lambda: _SMTP(calls)) is None
     assert not any(c.startswith("starttls") for c in calls)
     assert "login:me@example.com" in calls
 
@@ -628,30 +749,31 @@ def test_implicit_tls_port_skips_the_starttls_upgrade():
     error, not a belt-and-braces."""
     calls = []
     config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_PORT": "465"})
-    assert send(build_digest(_payload()), config,
-                smtp_factory=lambda: _SMTP(calls)) is None
+    assert send(build_digest(_payload()), config, smtp_factory=lambda: _SMTP(calls)) is None
     assert not any(c.startswith("starttls") for c in calls)
 
 
 def test_implicit_tls_is_not_refused_when_starttls_is_off():
     """465 with STARTTLS=0 is a correct configuration, not a cleartext one."""
     calls = []
-    config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_PORT": "465",
-                                  "PARALLAX_SMTP_STARTTLS": "0"})
-    assert send(build_digest(_payload()), config,
-                smtp_factory=lambda: _SMTP(calls)) is None
+    config = MailConfig.from_env(
+        {**ENV, "PARALLAX_SMTP_PORT": "465", "PARALLAX_SMTP_STARTTLS": "0"}
+    )
+    assert send(build_digest(_payload()), config, smtp_factory=lambda: _SMTP(calls)) is None
 
 
 def test_a_certificate_failure_is_reported_as_its_own_thing(caplog):
     """A verification failure is what a misconfigured server looks like and
     also what an interception looks like. Folding it into the generic 'send
     failed' invites disabling verification to make the message go away."""
+
     def _boom():
         raise ssl.SSLCertVerificationError("hostname mismatch")
 
     with caplog.at_level(logging.WARNING):
-        assert send(build_digest(_payload()), MailConfig.from_env(ENV),
-                    smtp_factory=_boom) is not None
+        assert (
+            send(build_digest(_payload()), MailConfig.from_env(ENV), smtp_factory=_boom) is not None
+        )
     assert "could not verify the TLS certificate" in caplog.text
     assert "password was NOT sent" in caplog.text
     assert "Do not work around it" in caplog.text
@@ -659,12 +781,14 @@ def test_a_certificate_failure_is_reported_as_its_own_thing(caplog):
 
 def test_a_send_failure_is_reported_not_raised(monkeypatch, caplog):
     """The daily run must survive a mail outage; the step reports it."""
+
     def _boom():
         raise OSError("connection refused")
 
     with caplog.at_level(logging.WARNING):
-        assert send(build_digest(_payload()), MailConfig.from_env(ENV),
-                    smtp_factory=_boom) is not None
+        assert (
+            send(build_digest(_payload()), MailConfig.from_env(ENV), smtp_factory=_boom) is not None
+        )
     assert "connection refused" in caplog.text
 
 
@@ -697,8 +821,9 @@ def test_the_step_reports_the_actual_cause_not_a_generic_one(monkeypatch):
     """send() fails for four different reasons and the daily report is what
     gets read. Saying "not configured" when the connection was refused sends
     you to edit environment variables that were already correct."""
-    monkeypatch.setattr("digest.send.send",
-                        lambda *a, **k: "digest send failed (OSError: connection refused)")
+    monkeypatch.setattr(
+        "digest.send.send", lambda *a, **k: "digest send failed (OSError: connection refused)"
+    )
     monkeypatch.setattr("dashboard.export.build_payload", lambda *a, **k: _payload())
     with pytest.raises(RuntimeError, match="connection refused"):
         runner._step_digest(object(), DailyConfig(own_diet="self"), _reg(), pair())
@@ -715,9 +840,15 @@ def test_a_sent_digest_reports_the_subject(monkeypatch):
 
 
 def _history(n, start=0.05, step=0.002):
-    return [{"date": f"2026-07-{d:02d}", "jsd_cumulative": start + i * step,
-             "jsd_window": start + i * step, "window_days": 7}
-            for i, d in enumerate(range(1, n + 1))]
+    return [
+        {
+            "date": f"2026-07-{d:02d}",
+            "jsd_cumulative": start + i * step,
+            "jsd_window": start + i * step,
+            "window_days": 7,
+        }
+        for i, d in enumerate(range(1, n + 1))
+    ]
 
 
 def test_the_sparkline_shows_only_the_most_recent_window():
@@ -740,16 +871,17 @@ def test_sparkline_columns_scale_to_the_peak_and_never_vanish():
     html = render_html(_payload(history=_history(5)))
     heights = [int(h) for h in re.findall(r"height:(\d+)px;border-radius:2px", html)]
     assert len(heights) == 5
-    assert max(heights) == 48                 # the tallest is the peak
-    assert min(heights) >= 2                  # and nothing renders as invisible
-    assert heights == sorted(heights)         # monotone input, monotone output
+    assert max(heights) == 48  # the tallest is the peak
+    assert min(heights) >= 2  # and nothing renders as invisible
+    assert heights == sorted(heights)  # monotone input, monotone output
 
 
 def _ratio_row(value: float, foundation: str = "care") -> str:
     """The one row of the diverging chart, isolated from the composition panel
     (which also has a row per foundation)."""
-    html = render_html(_payload(comparison={
-        "pair": ["self", "modeled_ce"], "log_ratios": {foundation: value}}))
+    html = render_html(
+        _payload(comparison={"pair": ["self", "modeled_ce"], "log_ratios": {foundation: value}})
+    )
     panel = html.split("Who leans on which foundation")[1]
     return panel.split(f"{foundation}</td>")[1].split("</tr>")[0]
 
@@ -776,8 +908,8 @@ def test_a_negative_log_ratio_lands_on_the_left():
 def test_the_two_sides_of_the_ratio_chart_are_coloured_by_diet():
     from digest.render import DIET_A, DIET_B
 
-    assert DIET_A in _ratio_row(0.5)          # self over-indexes
-    assert DIET_B in _ratio_row(-0.5)         # modeled_ce does
+    assert DIET_A in _ratio_row(0.5)  # self over-indexes
+    assert DIET_B in _ratio_row(-0.5)  # modeled_ce does
 
 
 # -- one colour per diet, everywhere ----------------------------------------
@@ -789,23 +921,27 @@ def test_a_diet_keeps_one_colour_across_every_panel():
     `self`) the same diet came out blue in one panel and orange in another."""
     from digest.render import _colours
 
-    payload = _payload(blindspots=[_spot("modeled_ce", "self", "theirs"),
-                                   _spot("self", "modeled_ce", "mine")])
+    payload = _payload(
+        blindspots=[_spot("modeled_ce", "self", "theirs"), _spot("self", "modeled_ce", "mine")]
+    )
     colours = _colours(payload)
     html = render_html(payload, own_diet="self")
 
     # the composition heading and the theme heading for that diet agree
     for diet_id in ("self", "modeled_ce"):
         heading = html.split(_label(diet_id))[1][:200]
-        assert colours[diet_id] in html.split(f"{_label(diet_id)} covered ")[0][-400:] \
+        assert (
+            colours[diet_id] in html.split(f"{_label(diet_id)} covered ")[0][-400:]
             or colours[diet_id] in heading
+        )
 
 
 def test_colours_do_not_depend_on_the_own_diet_setting():
     """Colour means 'which diet', not 'whose blindspot'. An unset own_diet used
     to make every blindspot the same colour."""
-    payload = _payload(blindspots=[_spot("modeled_ce", "self", "one"),
-                                   _spot("self", "modeled_ce", "two")])
+    payload = _payload(
+        blindspots=[_spot("modeled_ce", "self", "one"), _spot("self", "modeled_ce", "two")]
+    )
     assert render_html(payload, own_diet=None) == render_html(payload, own_diet="self")
 
 
@@ -814,7 +950,7 @@ def test_an_unknown_own_diet_is_warned_about(caplog):
     with caplog.at_level(logging.WARNING):
         build_digest(_payload(), own_diet="slef")
     assert "matches no diet" in caplog.text
-    assert "modeled_ce" in caplog.text        # names the ids that do exist
+    assert "modeled_ce" in caplog.text  # names the ids that do exist
 
 
 # -- confidence bands -------------------------------------------------------
@@ -823,12 +959,20 @@ def test_an_unknown_own_diet_is_warned_about(caplog):
 def _banded():
     payload = _payload()
     payload["diets"][0]["band"] = {
-        "care": {"point": 0.28, "low": 0.19, "high": 0.37,
-                 "dictionary": 0.31, "transformer": 0.25, "disagreement": 0.06}}
+        "care": {
+            "point": 0.28,
+            "low": 0.19,
+            "high": 0.37,
+            "dictionary": 0.31,
+            "transformer": 0.25,
+            "disagreement": 0.06,
+        }
+    }
     payload["caveat"] = (
         "Read every number as a noisy estimate, never ground truth. "
         "Whiskers on the radar show the dictionary-vs-transformer range — wider "
-        "means the two methods disagree more, so trust that foundation's number less.")
+        "means the two methods disagree more, so trust that foundation's number less."
+    )
     return payload
 
 
@@ -837,8 +981,8 @@ def test_the_email_shows_the_ensemble_point_not_the_dictionary_share():
     profile here put a different number on each surface for the same
     foundation, which is exactly the drift the module docstring disclaims."""
     html = render_html(_banded())
-    assert "0.280" in html                    # the ensemble point
-    assert "0.310" not in html                # not the dictionary-only share
+    assert "0.280" in html  # the ensemble point
+    assert "0.310" not in html  # not the dictionary-only share
 
 
 def test_the_band_range_travels_with_the_number():
@@ -866,19 +1010,48 @@ def test_text_and_html_carry_the_same_sections():
     payload = _payload(
         history=_history(5),
         blindspots=[_spot("modeled_ce", "self")],
-        fairness_split={"diets": {"self": {"equality": .71, "proportionality": .29,
-                                           "docs_split": 40, "docs_total": 128,
-                                           "coverage": .31, "thin": False,
-                                           "leans": "equality"}}, "gap": .3},
-        liberty={"scorer": "x", "diets": {"self": {"mean": .31, "salient_share": .18,
-                                                   "docs_scored": 88, "docs_total": 128,
-                                                   "coverage": .69, "thin": False}},
-                 "gap": .1})
+        fairness_split={
+            "diets": {
+                "self": {
+                    "equality": 0.71,
+                    "proportionality": 0.29,
+                    "docs_split": 40,
+                    "docs_total": 128,
+                    "coverage": 0.31,
+                    "thin": False,
+                    "leans": "equality",
+                }
+            },
+            "gap": 0.3,
+        },
+        liberty={
+            "scorer": "x",
+            "diets": {
+                "self": {
+                    "mean": 0.31,
+                    "salient_share": 0.18,
+                    "docs_scored": 88,
+                    "docs_total": 128,
+                    "coverage": 0.69,
+                    "thin": False,
+                }
+            },
+            "gap": 0.1,
+        },
+    )
     html, text = render_html(payload), render_text(payload)
-    for section in ("Divergence over time", "equality", "proportionality",
-                    "Liberty", "least corroborated", "Summaries",
-                    "one-sided", "identical pipeline",
-                    "the short version", "what each diet said"):
+    for section in (
+        "Divergence over time",
+        "equality",
+        "proportionality",
+        "Liberty",
+        "least corroborated",
+        "Summaries",
+        "one-sided",
+        "identical pipeline",
+        "the short version",
+        "what each diet said",
+    ):
         assert section.lower() in html.lower(), f"missing from html: {section}"
         assert section.lower() in text.lower(), f"missing from text: {section}"
 
@@ -896,11 +1069,22 @@ def test_a_split_with_no_documents_is_not_rendered_as_zero():
     """FairnessProfile returns 0.0/0.0 when there is no fairness mass, so the
     `equality is None` guard never fired and an unsplit diet printed
     'equality 0.00 / proportionality 0.00' — unscored rendered as zero."""
-    payload = _payload(fairness_split={
-        "diets": {"self": {"equality": 0.0, "proportionality": 0.0, "docs_split": 0,
-                           "docs_total": 128, "coverage": 0.0, "thin": True,
-                           "leans": None}},
-        "gap": None})
+    payload = _payload(
+        fairness_split={
+            "diets": {
+                "self": {
+                    "equality": 0.0,
+                    "proportionality": 0.0,
+                    "docs_split": 0,
+                    "docs_total": 128,
+                    "coverage": 0.0,
+                    "thin": True,
+                    "leans": None,
+                }
+            },
+            "gap": None,
+        }
+    )
     html = render_html(payload).split("Reported separately")[1]
     text = render_text(payload).split("Fairness: equality")[1]
     for rendered in (html, text):
@@ -981,8 +1165,8 @@ def test_the_password_stays_out_of_the_repr():
     config = MailConfig.from_env({**ENV, "PARALLAX_SMTP_PASSWORD": "s3cret-app-pw"})
     for rendered in (repr(config), str(config), f"{config}"):
         assert "s3cret-app-pw" not in rendered
-    assert config.password == "s3cret-app-pw"      # still usable for login
-    assert "smtp.example.com" in repr(config)      # the rest still debuggable
+    assert config.password == "s3cret-app-pw"  # still usable for login
+    assert "smtp.example.com" in repr(config)  # the rest still debuggable
 
 
 # -- N personas: the email stays about two of them ---------------------------
@@ -996,12 +1180,22 @@ def _many_personas_payload():
         d["role"] = "mine" if d["id"] == "self" else "theirs"
         d["family"] = "left" if d["id"] == "self" else "conservative_evangelical"
     for extra in ("left_wonk", "ce_devout", "ce_talk_radio"):
-        payload["diets"].append({
-            "id": extra, "doc_count": 40, "role": "", "family": "left",
-            "profile": {"care": .2, "fairness": .2, "loyalty": .2,
-                        "authority": .2, "sanctity": .2},
-            "summary": f"{extra} prose that must not reach the email.",
-        })
+        payload["diets"].append(
+            {
+                "id": extra,
+                "doc_count": 40,
+                "role": "",
+                "family": "left",
+                "profile": {
+                    "care": 0.2,
+                    "fairness": 0.2,
+                    "loyalty": 0.2,
+                    "authority": 0.2,
+                    "sanctity": 0.2,
+                },
+                "summary": f"{extra} prose that must not reach the email.",
+            }
+        )
     return payload
 
 

@@ -90,7 +90,9 @@ def resolve(
     fallback = _fallback(available, families)
     logger.warning(
         "reference pair names unknown persona(s) %s; falling back to %s vs %s",
-        ", ".join(missing), fallback.mine, fallback.theirs,
+        ", ".join(missing),
+        fallback.mine,
+        fallback.theirs,
     )
     return fallback
 

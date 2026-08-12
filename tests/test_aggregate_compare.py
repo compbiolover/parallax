@@ -12,8 +12,9 @@ from scoring.dictionary import DocumentScore
 def _doc(**foundations):
     base = {"care": 0.0, "fairness": 0.0, "loyalty": 0.0, "authority": 0.0, "sanctity": 0.0}
     base.update(foundations)
-    return DocumentScore(foundations=base, sentiment=0.0, moral_word_ratio=0.0,
-                         word_count=1, matched_words=0)
+    return DocumentScore(
+        foundations=base, sentiment=0.0, moral_word_ratio=0.0, word_count=1, matched_words=0
+    )
 
 
 def test_composition_sums_to_one():
@@ -58,7 +59,7 @@ def test_log_ratio_sign_and_parity():
     p = {"care": 0.6, "fairness": 0.4, "loyalty": 0.0, "authority": 0.0, "sanctity": 0.0}
     q = {"care": 0.3, "fairness": 0.4, "loyalty": 0.0, "authority": 0.0, "sanctity": 0.0}
     lr = log_ratios(p, q)
-    assert lr["care"] > 0            # p over-indexes on care
+    assert lr["care"] > 0  # p over-indexes on care
     assert abs(lr["fairness"]) < 1e-3  # parity
     idx = index_form(p, q)
     assert idx["care"] > 100 and abs(idx["fairness"] - 100) < 1.0

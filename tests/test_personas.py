@@ -116,15 +116,32 @@ def _registry_yaml(**overrides) -> dict:
         "version": 3,
         "strata": [{"id": "papers"}, {"id": "audio"}],
         "catalog": [
-            {"id": "times", "name": "The Times", "medium": "news", "stratum": "papers",
-             "ingest": {"type": "rss", "url": "https://t.test/f"}, "rationale": "r"},
-            {"id": "show", "name": "A Show", "medium": "podcast", "stratum": "audio",
-             "ingest": {"type": "podcast_rss", "url": "https://s.test/f"}, "rationale": "r"},
+            {
+                "id": "times",
+                "name": "The Times",
+                "medium": "news",
+                "stratum": "papers",
+                "ingest": {"type": "rss", "url": "https://t.test/f"},
+                "rationale": "r",
+            },
+            {
+                "id": "show",
+                "name": "A Show",
+                "medium": "podcast",
+                "stratum": "audio",
+                "ingest": {"type": "podcast_rss", "url": "https://s.test/f"},
+                "rationale": "r",
+            },
         ],
         "personas": [
-            {"id": "reader", "label": "A reader", "family": "left",
-             "description": "d", "strata": {"papers": 0.8, "audio": 0.2},
-             "sources": {"times": 1.0, "show": 0.5}},
+            {
+                "id": "reader",
+                "label": "A reader",
+                "family": "left",
+                "description": "d",
+                "strata": {"papers": 0.8, "audio": 0.2},
+                "sources": {"times": 1.0, "show": 0.5},
+            },
         ],
     }
     base.update(overrides)
@@ -148,10 +165,16 @@ def test_a_source_two_personas_read_appears_in_the_catalog_once(tmp_path):
     source is fetched, extracted, scored, embedded and tagged once however many
     personas read it, so adding a persona costs nothing at runtime."""
     data = _registry_yaml()
-    data["personas"].append({
-        "id": "listener", "label": "A listener", "family": "left", "description": "d",
-        "strata": {"papers": 0.1, "audio": 0.9}, "sources": {"times": 1.0, "show": 1.0},
-    })
+    data["personas"].append(
+        {
+            "id": "listener",
+            "label": "A listener",
+            "family": "left",
+            "description": "d",
+            "strata": {"papers": 0.1, "audio": 0.9},
+            "sources": {"times": 1.0, "show": 1.0},
+        }
+    )
     registry = load_registry(_write(tmp_path, data))
 
     assert [s.id for s in registry.ingestable(("rss", "podcast_rss"))] == ["times", "show"]
@@ -167,14 +190,25 @@ def test_membership_is_opt_in_so_a_shared_stratum_is_not_a_shared_diet(tmp_path)
     adds a source."""
     data = _registry_yaml()
     data["catalog"].append(
-        {"id": "other_show", "name": "Another Show", "medium": "podcast",
-         "stratum": "audio", "ingest": {"type": "podcast_rss", "url": "https://o.test/f"},
-         "rationale": "r"},
+        {
+            "id": "other_show",
+            "name": "Another Show",
+            "medium": "podcast",
+            "stratum": "audio",
+            "ingest": {"type": "podcast_rss", "url": "https://o.test/f"},
+            "rationale": "r",
+        },
     )
-    data["personas"].append({
-        "id": "listener", "label": "A listener", "family": "right", "description": "d",
-        "strata": {"audio": 1.0}, "sources": {"other_show": 1.0},
-    })
+    data["personas"].append(
+        {
+            "id": "listener",
+            "label": "A listener",
+            "family": "right",
+            "description": "d",
+            "strata": {"audio": 1.0},
+            "sources": {"other_show": 1.0},
+        }
+    )
     registry = load_registry(_write(tmp_path, data))
 
     assert set(registry.weights_for("reader")) == {"times", "show"}
@@ -194,14 +228,14 @@ def test_a_source_whose_stratum_carries_no_weight_fails_at_load(tmp_path):
     """Zero-weighting it silently would drop a source the persona plainly means to
     consume — the same failure as a typo, arrived at from the other direction."""
     data = _registry_yaml()
-    data["personas"][0]["strata"] = {"papers": 1.0}      # `audio` dropped
+    data["personas"][0]["strata"] = {"papers": 1.0}  # `audio` dropped
     with pytest.raises(ValueError, match="audio"):
         load_registry(_write(tmp_path, data))
 
 
 def test_a_source_in_an_undeclared_stratum_fails_at_load(tmp_path):
     data = _registry_yaml()
-    data["catalog"][0]["stratum"] = "newspapers"          # declared as `papers`
+    data["catalog"][0]["stratum"] = "newspapers"  # declared as `papers`
     with pytest.raises(ValueError, match="newspapers"):
         load_registry(_write(tmp_path, data))
 
@@ -223,10 +257,23 @@ def test_duplicate_ids_fail_at_load(tmp_path):
 def test_a_local_overlay_adds_a_persona_the_public_registry_does_not_have(tmp_path):
     base = _write(tmp_path, _registry_yaml())
     overlay = tmp_path / "local.yaml"
-    overlay.write_text(yaml.safe_dump({"personas": [{
-        "id": "me", "label": "My actual diet", "family": "left", "description": "d",
-        "strata": {"papers": 1.0}, "sources": {"times": 1.0},
-    }]}), encoding="utf-8")
+    overlay.write_text(
+        yaml.safe_dump(
+            {
+                "personas": [
+                    {
+                        "id": "me",
+                        "label": "My actual diet",
+                        "family": "left",
+                        "description": "d",
+                        "strata": {"papers": 1.0},
+                        "sources": {"times": 1.0},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
 
     registry = load_registry(base, overlay=overlay)
     assert registry.persona_ids() == ["reader", "me"]
@@ -239,29 +286,61 @@ def test_a_local_persona_replaces_a_public_one_of_the_same_id_wholesale(tmp_path
     about."""
     base = _write(tmp_path, _registry_yaml())
     overlay = tmp_path / "local.yaml"
-    overlay.write_text(yaml.safe_dump({"personas": [{
-        "id": "reader", "label": "My tuning", "family": "left", "description": "d",
-        "strata": {"audio": 1.0}, "sources": {"show": 1.0},
-    }]}), encoding="utf-8")
+    overlay.write_text(
+        yaml.safe_dump(
+            {
+                "personas": [
+                    {
+                        "id": "reader",
+                        "label": "My tuning",
+                        "family": "left",
+                        "description": "d",
+                        "strata": {"audio": 1.0},
+                        "sources": {"show": 1.0},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
 
     registry = load_registry(base, overlay=overlay)
     assert registry.persona_ids() == ["reader"]
-    assert set(registry.weights_for("reader")) == {"show"}      # not {"times", "show"}
+    assert set(registry.weights_for("reader")) == {"show"}  # not {"times", "show"}
     assert registry.persona("reader").label == "My tuning"
 
 
 def test_a_local_overlay_can_add_sources_and_strata(tmp_path):
     base = _write(tmp_path, _registry_yaml())
     overlay = tmp_path / "local.yaml"
-    overlay.write_text(yaml.safe_dump({
-        "strata": [{"id": "newsletters"}],
-        "catalog": [{"id": "letter", "name": "A Letter", "medium": "newsletter",
-                     "stratum": "newsletters",
-                     "ingest": {"type": "rss", "url": "https://l.test/f"},
-                     "rationale": "r"}],
-        "personas": [{"id": "me", "label": "Me", "family": "left", "description": "d",
-                      "strata": {"newsletters": 1.0}, "sources": {"letter": 1.0}}],
-    }), encoding="utf-8")
+    overlay.write_text(
+        yaml.safe_dump(
+            {
+                "strata": [{"id": "newsletters"}],
+                "catalog": [
+                    {
+                        "id": "letter",
+                        "name": "A Letter",
+                        "medium": "newsletter",
+                        "stratum": "newsletters",
+                        "ingest": {"type": "rss", "url": "https://l.test/f"},
+                        "rationale": "r",
+                    }
+                ],
+                "personas": [
+                    {
+                        "id": "me",
+                        "label": "Me",
+                        "family": "left",
+                        "description": "d",
+                        "strata": {"newsletters": 1.0},
+                        "sources": {"letter": 1.0},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     registry = load_registry(base, overlay=overlay)
     assert registry.source("letter") is not None
@@ -287,10 +366,23 @@ def test_the_overlay_is_named_in_the_log_but_never_its_contents(tmp_path, caplog
     """The file records what one person reads. A log is a file too."""
     base = _write(tmp_path, _registry_yaml())
     overlay = tmp_path / "local.yaml"
-    overlay.write_text(yaml.safe_dump({"personas": [{
-        "id": "me", "label": "SENSITIVE LABEL", "family": "left", "description": "d",
-        "strata": {"papers": 1.0}, "sources": {"times": 1.0},
-    }]}), encoding="utf-8")
+    overlay.write_text(
+        yaml.safe_dump(
+            {
+                "personas": [
+                    {
+                        "id": "me",
+                        "label": "SENSITIVE LABEL",
+                        "family": "left",
+                        "description": "d",
+                        "strata": {"papers": 1.0},
+                        "sources": {"times": 1.0},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
 
     with caplog.at_level(logging.DEBUG):
         load_registry(base, overlay=overlay)
@@ -301,14 +393,25 @@ def test_the_overlay_is_named_in_the_log_but_never_its_contents(tmp_path, caplog
 def test_the_overlay_path_comes_from_settings_when_not_passed(tmp_path):
     base = _write(tmp_path, _registry_yaml())
     overlay = tmp_path / "mine.yaml"
-    overlay.write_text(yaml.safe_dump({"personas": [{
-        "id": "me", "label": "Me", "family": "left", "description": "d",
-        "strata": {"papers": 1.0}, "sources": {"times": 1.0},
-    }]}), encoding="utf-8")
-
-    registry = load_registry(
-        base, settings={"sources": {"local_registry": str(overlay)}}
+    overlay.write_text(
+        yaml.safe_dump(
+            {
+                "personas": [
+                    {
+                        "id": "me",
+                        "label": "Me",
+                        "family": "left",
+                        "description": "d",
+                        "strata": {"papers": 1.0},
+                        "sources": {"times": 1.0},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
     )
+
+    registry = load_registry(base, settings={"sources": {"local_registry": str(overlay)}})
     assert "me" in registry.persona_ids()
 
 
@@ -366,7 +469,8 @@ def test_the_devout_persona_is_mostly_content_no_other_persona_reads():
     devout = registry.weights_for("ce_devout")
     others = {
         source_id
-        for persona_id in registry.persona_ids() if persona_id != "ce_devout"
+        for persona_id in registry.persona_ids()
+        if persona_id != "ce_devout"
         for source_id in registry.weights_for(persona_id)
     }
     exclusive_weight = sum(w for sid, w in devout.items() if sid not in others)
@@ -400,20 +504,32 @@ def test_ingestion_can_be_scoped_to_a_subset_of_personas(tmp_path):
     ingestion time, GDELT backfill time and liberty-tagger spend per document."""
     data = _registry_yaml()
     data["catalog"].append(
-        {"id": "extra", "name": "Extra", "medium": "news", "stratum": "papers",
-         "ingest": {"type": "rss", "url": "https://e.test/f"}, "rationale": "r"},
+        {
+            "id": "extra",
+            "name": "Extra",
+            "medium": "news",
+            "stratum": "papers",
+            "ingest": {"type": "rss", "url": "https://e.test/f"},
+            "rationale": "r",
+        },
     )
-    data["personas"].append({
-        "id": "other", "label": "Other", "family": "right", "description": "d",
-        "strata": {"papers": 1.0}, "sources": {"extra": 1.0},
-    })
+    data["personas"].append(
+        {
+            "id": "other",
+            "label": "Other",
+            "family": "right",
+            "description": "d",
+            "strata": {"papers": 1.0},
+            "sources": {"extra": 1.0},
+        }
+    )
     registry = load_registry(_write(tmp_path, data))
 
-    assert registry.scope(None) is None                       # the whole catalog
+    assert registry.scope(None) is None  # the whole catalog
     assert registry.scope(["reader"]) == {"times", "show"}
     assert [s.id for s in registry.ingestable(("rss",), registry.scope(["other"]))] == ["extra"]
     # Unscoped still reaches everything.
-    assert len(registry.ingestable(("rss",))) == 2            # times, extra
+    assert len(registry.ingestable(("rss",))) == 2  # times, extra
 
 
 def test_the_ingest_scope_setting_defaults_to_the_whole_catalog():
@@ -422,9 +538,7 @@ def test_the_ingest_scope_setting_defaults_to_the_whole_catalog():
     from ingestion.pipeline import PipelineConfig
 
     assert PipelineConfig.from_settings({}).ingest_personas is None
-    assert PipelineConfig.from_settings(
-        {"ingestion": {"personas": "all"}}
-    ).ingest_personas is None
+    assert PipelineConfig.from_settings({"ingestion": {"personas": "all"}}).ingest_personas is None
     assert PipelineConfig.from_settings(
         {"ingestion": {"personas": ["self", "ce_devout"]}}
     ).ingest_personas == ["self", "ce_devout"]
@@ -450,9 +564,7 @@ def test_an_explicit_path_still_beats_the_configured_one(tmp_path):
     configured = tmp_path / "configured.yaml"
     configured.write_text(yaml.safe_dump(other), encoding="utf-8")
 
-    registry = load_registry(
-        explicit, settings={"sources": {"registry": str(configured)}}
-    )
+    registry = load_registry(explicit, settings={"sources": {"registry": str(configured)}})
     assert registry.persona_ids() == ["reader"]
 
 
@@ -479,15 +591,32 @@ def test_a_relative_configured_overlay_resolves_from_any_directory(monkeypatch, 
     """Quieter than the registry case and worse: a missing overlay is not an error,
     so from the wrong directory your own diet left the comparison in silence."""
     overlay = pathlib.Path(REPO_ROOT) / "config" / "personas.local.test.yaml"
-    overlay.write_text(yaml.safe_dump({"personas": [{
-        "id": "me", "label": "Me", "family": "left", "description": "d",
-        "strata": {"national_dailies": 0.5}, "sources": {"self_nyt_home": 1.0},
-    }]}), encoding="utf-8")
+    overlay.write_text(
+        yaml.safe_dump(
+            {
+                "personas": [
+                    {
+                        "id": "me",
+                        "label": "Me",
+                        "family": "left",
+                        "description": "d",
+                        "strata": {"national_dailies": 0.5},
+                        "sources": {"self_nyt_home": 1.0},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
     try:
         monkeypatch.chdir(tmp_path)
-        registry = load_registry(settings={"sources": {
-            "local_registry": "config/personas.local.test.yaml",
-        }})
+        registry = load_registry(
+            settings={
+                "sources": {
+                    "local_registry": "config/personas.local.test.yaml",
+                }
+            }
+        )
         assert "me" in registry.persona_ids()
     finally:
         overlay.unlink()
@@ -499,7 +628,7 @@ def test_a_configured_path_expands_a_home_tilde(monkeypatch, tmp_path):
     target = home / "reg" / "sources.yaml"
     target.write_text(yaml.safe_dump(_registry_yaml()), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))   # Windows equivalent
+    monkeypatch.setenv("USERPROFILE", str(home))  # Windows equivalent
 
     registry = load_registry(settings={"sources": {"registry": "~/reg/sources.yaml"}})
     assert registry.persona_ids() == ["reader"]
