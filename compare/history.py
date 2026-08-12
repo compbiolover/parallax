@@ -315,7 +315,7 @@ def _format_series(series: list[dict]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from ingestion.config import load_settings
+    from ingestion.config import datastore_path, load_settings
     from ingestion.datastore import Datastore
 
     p = argparse.ArgumentParser(
@@ -335,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     settings = load_settings(args.settings)
-    db = args.db or (settings.get("datastore", {}) or {}).get("path", "data/parallax.sqlite")
+    db = datastore_path(settings, args.db)
     store = Datastore(db)
     try:
         if args.backfill:

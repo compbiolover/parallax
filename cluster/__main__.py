@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 
 from compare.reference import resolve
-from ingestion.config import load_registry, load_settings
+from ingestion.config import datastore_path, load_registry, load_settings
 from ingestion.datastore import Datastore
 
 from .blindspot import run_clustering
@@ -29,12 +29,6 @@ def _configured_effort(themes_cfg: dict):
     # `.get` *with a default* keeps a stored None; it is `.get("effort")` and
     # `or` that collapse it, which is how this broke in the first place.
     return themes_cfg.get("effort", UNSET)
-
-
-def _db_path(args: argparse.Namespace, settings: dict) -> str:
-    if args.db:
-        return args.db
-    return (settings.get("datastore", {}) or {}).get("path", "data/parallax.sqlite")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -64,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         settings, args.mine, args.theirs,
         available=registry.persona_ids(), families=registry.families(),
     )
-    store = Datastore(_db_path(args, settings))
+    store = Datastore(datastore_path(settings, args.db))
     try:
         if store.embedding_count() == 0:
             print("No embeddings found — run `python -m ingestion run` first.")

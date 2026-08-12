@@ -11,16 +11,10 @@ from __future__ import annotations
 import argparse
 
 from compare.reference import resolve
-from ingestion.config import load_registry, load_settings
+from ingestion.config import datastore_path, load_registry, load_settings
 from ingestion.datastore import Datastore
 
 from .summarizer import DEFAULT_EFFORT, DEFAULT_MODEL, Summarizer
-
-
-def _db_path(args: argparse.Namespace, settings: dict) -> str:
-    if args.db:
-        return args.db
-    return (settings.get("datastore", {}) or {}).get("path", "data/parallax.sqlite")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -40,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
         settings, args.mine, args.theirs,
         available=registry.persona_ids(), families=registry.families(),
     )
-    store = Datastore(_db_path(args, settings))
+    store = Datastore(datastore_path(settings, args.db))
     try:
         # CLI flag, then the `summarize:` block in settings, then the defaults.
         cfg = settings.get("summarize", {}) or {}

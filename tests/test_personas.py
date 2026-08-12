@@ -19,7 +19,7 @@ import pathlib
 import pytest
 import yaml
 
-from ingestion.config import REPO_ROOT, load_registry
+from ingestion.config import REPO_ROOT, datastore_path, load_registry
 
 # Every source's effective weight under registry version 2, generated from the
 # v2 file itself (`stratum_weight * source weight`) rather than retyped. Version 3
@@ -503,3 +503,44 @@ def test_a_configured_path_expands_a_home_tilde(monkeypatch, tmp_path):
 
     registry = load_registry(settings={"sources": {"registry": "~/reg/sources.yaml"}})
     assert registry.persona_ids() == ["reader"]
+
+
+# -- the datastore path resolves the same way a configured path does ---------
+# Eight entry points each resolved this themselves. The failure mode of the
+# duplication was quiet: an entry point opening a different file than the run
+# just wrote to reports an empty corpus, not an error.
+
+
+def test_datastore_path_defaults_under_the_repo_not_the_cwd(monkeypatch, tmp_path):
+    """The scheduled run inherits no working directory (see `_configured_path`).
+
+    Resolved against the cwd, the shipped relative default would quietly create a
+    second, empty store wherever the job happened to start."""
+    monkeypatch.chdir(tmp_path)
+    resolved = pathlib.Path(datastore_path())
+    assert resolved.is_absolute()
+    assert resolved == pathlib.Path(REPO_ROOT) / "data" / "parallax.sqlite"
+
+
+def test_datastore_path_prefers_settings_over_the_default():
+    resolved = datastore_path({"datastore": {"path": "var/other.sqlite"}})
+    assert pathlib.Path(resolved) == pathlib.Path(REPO_ROOT) / "var" / "other.sqlite"
+
+
+def test_datastore_path_leaves_an_explicit_argument_alone(monkeypatch, tmp_path):
+    """`--db` is typed at a shell, so it means that path relative to the shell."""
+    monkeypatch.chdir(tmp_path)
+    assert datastore_path({"datastore": {"path": "ignored.sqlite"}}, "given.sqlite") == (
+        "given.sqlite"
+    )
+
+
+def test_datastore_path_expands_a_home_tilde(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    assert datastore_path({"datastore": {"path": "~/db.sqlite"}}) == str(tmp_path / "db.sqlite")
+
+
+def test_datastore_path_survives_an_empty_datastore_block():
+    """`datastore:` present but empty parses as None, which `.get` cannot chain off."""
+    assert datastore_path({"datastore": None}) == datastore_path({})

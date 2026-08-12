@@ -309,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
 
     from compare.reference import resolve
-    from ingestion.config import load_registry, load_settings
+    from ingestion.config import datastore_path, load_registry, load_settings
     from ingestion.datastore import Datastore
 
     parser = argparse.ArgumentParser(
@@ -329,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
-    db = args.db or (settings.get("datastore", {}) or {}).get("path", "data/parallax.sqlite")
+    db = datastore_path(settings, args.db)
     registry = load_registry(settings=settings)
     pair = resolve(settings, args.mine, args.theirs,
                    available=registry.persona_ids(), families=registry.families())

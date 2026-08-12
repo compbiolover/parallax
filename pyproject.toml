@@ -67,7 +67,21 @@ dev = [
 parallax-daily = "daily.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["ingestion", "scoring", "cluster", "compare", "summarize", "daily"]
+# Every package a run imports, not just the ones the pipeline is named after.
+# `daily.runner` imports dashboard.export and digest.render/send at step time,
+# so omitting either breaks the export and digest steps in any environment that
+# does not happen to have the repo root on sys.path — which is every container.
+packages = [
+  "ingestion",
+  "scoring",
+  "cluster",
+  "compare",
+  "summarize",
+  "daily",
+  "dashboard",
+  "digest",
+  "validation",
+]
 
 [tool.ruff]
 line-length = 100

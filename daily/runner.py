@@ -217,12 +217,6 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _resolve_db(cfg: DailyConfig, settings: dict) -> str:
-    if cfg.db:
-        return cfg.db
-    return (settings.get("datastore", {}) or {}).get("path", "data/parallax.sqlite")
-
-
 # -- individual steps -------------------------------------------------------
 # Each returns a human-readable detail string. Exceptions propagate to the
 # isolation wrapper in run_daily, which records them as a failed step.
@@ -402,7 +396,7 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
     nothing until the end without it, which makes a slow network and a hung
     process look identical.
     """
-    from ingestion.config import load_registry, load_settings
+    from ingestion.config import datastore_path, load_registry, load_settings
     from ingestion.pipeline import PipelineConfig
 
     cfg = cfg or DailyConfig()
@@ -411,7 +405,7 @@ def run_daily(cfg: DailyConfig | None = None, store: Datastore | None = None,
     started = time.monotonic()
 
     owns_store = store is None
-    store = store or Datastore(_resolve_db(cfg, settings))
+    store = store or Datastore(datastore_path(settings, cfg.db))
 
     try:
         pcfg = PipelineConfig.from_settings(settings)

@@ -26,7 +26,7 @@ from pathlib import Path
 from compare.divergence import index_form, jensen_shannon_divergence, log_ratios
 from compare.history import DEFAULT_SERIES_LIMIT, load_series
 from compare.reference import ReferencePair, resolve
-from ingestion.config import Registry, load_registry, load_settings
+from ingestion.config import Registry, datastore_path, load_registry, load_settings
 from ingestion.datastore import Datastore
 from ingestion.pipeline import persona_profiles
 from scoring.foundations import CLASSIC_FOUNDATIONS
@@ -464,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
-    db = args.db or (settings.get("datastore", {}) or {}).get("path", "data/parallax.sqlite")
+    db = datastore_path(settings, args.db)
     registry = load_registry(settings=settings)
     pair = resolve(
         settings, args.mine, args.theirs,

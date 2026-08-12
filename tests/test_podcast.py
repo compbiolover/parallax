@@ -445,8 +445,12 @@ def test_already_seen_counts_the_window_not_the_archive(feed_server):
     Counted against the whole feed, a show with a long back catalogue reports
     thousands "already seen" every run — which is the window filtering, not the
     ledger skipping."""
+    # Dated relative to now, not pinned: the point of the episode is that it is
+    # inside the 7-day window below, and a literal date stops being inside it a
+    # week after someone writes the test.
+    recent = (datetime.now(UTC) - timedelta(days=1)).strftime("%a, %d %b %Y %H:%M:%S +0000")
     feed_server["feed"] = _feed_xml(
-        _item(guid="urn:new", date="Mon, 03 Aug 2026 10:00:00 +0000")
+        _item(guid="urn:new", date=recent)
         + _item(guid="urn:old-1", date="Mon, 03 Aug 2020 10:00:00 +0000")
         + _item(guid="urn:old-2", date="Mon, 03 Aug 2019 10:00:00 +0000"))
     store = Datastore(":memory:")
