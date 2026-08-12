@@ -1,0 +1,70 @@
+# What must not enter a build context, in priority order.
+
+# ---- Private, and the reason this file is not merely an optimisation ----
+# personas.local.yaml is a real person's real media consumption — the one thing
+# CLAUDE.md §0 keeps out of this repository. It is gitignored, so it is invisible
+# to git and entirely visible to `docker build`, and the Dockerfile copies
+# config/ wholesale. An image is pushed to a registry and pulled by anything with
+# read access, so a diet baked into a layer is published in a way a committed
+# file at least would have been reviewed.
+config/personas.local.yaml
+config/settings.yaml
+config/*.local.yaml
+.env
+.env.*
+!.env.example
+*.key
+credentials.json
+*.pem
+**/bitwarden.conf
+
+# ---- Corpus and derived data: large, private, and rebuilt anyway ----
+data/
+corpus/
+audio/
+transcripts/
+*.sqlite
+*.db
+*.parquet
+*.jsonl
+dashboard/public/data/
+
+# ---- Model caches: the image builds its own ----
+models/
+.cache/
+.embeddings/
+*.pt
+*.safetensors
+
+# ---- Infrastructure state ----
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform/
+
+# ---- Build noise ----
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+node_modules/
+dist/
+build/
+*.egg-info/
+.mypy_cache/
+
+# ---- Not needed at runtime ----
+tests/
+validation/gold/
+docs/
+*.md
+!README.md
+.pre-commit-config.yaml
+.DS_Store
+.vscode/
+.idea/

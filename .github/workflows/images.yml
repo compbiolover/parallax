@@ -1,0 +1,161 @@
+# Build the container images and check the things about them that are easy to
+# get wrong and hard to notice.
+#
+# Separate from ci.yml because of the path filter: `scored` pulls torch and five
+# RoBERTa models, so building it on every documentation change would be minutes
+# of runner time for nothing. It builds when something that could change it does.
+#
+# Build-only for now. Pushing to ECR needs an AWS account and an OIDC role that
+# do not exist yet; when they do, a push step goes here rather than a new file.
+name: Images
+
+# The two path lists are duplicated rather than shared through a YAML anchor,
+# because the Actions workflow parser does not support anchors and silently
+# treats the alias as a literal — which would filter on nothing at all.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docker/**"
+      - "scripts/parallax-entrypoint.sh"
+      - "pyproject.toml"
+      - ".dockerignore"
+      - ".github/workflows/images.yml"
+  pull_request:
+    paths:
+      - "docker/**"
+      - "scripts/parallax-entrypoint.sh"
+      - "pyproject.toml"
+      - ".dockerignore"
+      - ".github/workflows/images.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      # A real private overlay, present in the working tree exactly as it would
+      # be on the author's machine, so the .dockerignore claim is tested rather
+      # than trusted. config/personas.local.yaml is a real person's real media
+      # consumption; it is gitignored, so nothing else in this repository would
+      # ever catch it being copied into a layer and pushed to a registry.
+      - name: Plant a private overlay that must not reach the image
+        run: |
+          printf 'personas:\n  - id: canary_must_not_ship\n    label: Canary\n' \
+            > config/personas.local.yaml
+          printf 'SECRET_CANARY=must-not-ship\n' > .env
+
+      - name: Build core
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: core
+          tags: parallax-core:ci
+          load: true
+          cache-from: type=gha,scope=core
+          cache-to: type=gha,scope=core,mode=max
+
+      - name: The private overlay is not in the image
+        run: |
+          set -eu
+          if docker run --rm --entrypoint sh parallax-core:ci -c \
+               'ls /app/config/personas.local.yaml /app/.env 2>/dev/null'; then
+            echo "::error::a gitignored private file was baked into the image"
+            exit 1
+          fi
+          # Prove the negative is meaningful: the public registry *is* there, so
+          # the check above is not passing because config/ is simply missing.
+          docker run --rm --entrypoint sh parallax-core:ci -c \
+            'test -s /app/config/sources.yaml'
+          echo "config/ present, private overlay absent"
+
+      - name: The entrypoint reaches daily's argv
+        run: |
+          set -eu
+          docker run --rm parallax-core:ci --help | grep -q -- "--only"
+          docker run --rm parallax-core:ci --help | grep -q -- "--skip"
+
+      - name: Every step module imports, and REPO_ROOT still finds config/
+        # The editable install is what keeps REPO_ROOT (ingestion/config.py)
+        # pointing at a directory that holds config/. A non-editable install
+        # resolves it to site-packages and the registry vanishes — which is the
+        # packaging trap this whole stage exists downstream of.
+        run: |
+          docker run --rm --entrypoint python parallax-core:ci -c '
+          import dashboard.export, digest.render, digest.send, daily.runner
+          from ingestion.config import load_registry, load_settings
+          r = load_registry(settings=load_settings())
+          assert r.personas, "registry loaded but empty"
+          print(f"registry v{r.version}: {len(r.sources)} sources, {len(r.personas)} personas")
+          '
+
+      - name: It does not run as root
+        run: |
+          test "$(docker run --rm --entrypoint id parallax-core:ci -un)" = "nobody"
+
+      - name: The lexicon guard refuses to score with the demo seed
+        # PARALLAX_REQUIRE_LEXICON is the container's answer to the one failure
+        # that produces a complete, plausible, entirely unvalidated set of
+        # numbers instead of an error.
+        run: |
+          set -eu
+          if docker run --rm -e PARALLAX_REQUIRE_LEXICON=1 parallax-core:ci --only export; then
+            echo "::error::the guard let a run start with no eMFD lexicon"
+            exit 1
+          fi
+          echo "guard refused, as intended"
+
+  scored:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      # Reclaim the runner disk the image will need: the hosted image ships with
+      # Android SDKs and .NET that this build has no use for, and torch plus five
+      # RoBERTa models does not fit comfortably beside them.
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h /
+
+      - name: Build scored
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: scored
+          tags: parallax-scored:ci
+          load: true
+          cache-from: type=gha,scope=scored
+          cache-to: type=gha,scope=scored,mode=max
+
+      - name: Mformer loads with the network unavailable
+        # The whole point of baking the weights in. --network none is the honest
+        # test: HF_HUB_OFFLINE=1 alone would still pass if the files were absent
+        # and something silently fell back.
+        run: |
+          docker run --rm --network none --entrypoint python parallax-scored:ci -c '
+          from scoring.transformer import TransformerScorer
+          scorer = TransformerScorer()
+          print("loaded:", scorer.name)
+          '
+
+      - name: Torch is the CPU build, not the CUDA one
+        run: |
+          docker run --rm --entrypoint python parallax-scored:ci -c '
+          import torch
+          v = torch.__version__
+          print("torch", v)
+          assert "+cpu" in v or torch.version.cuda is None, f"CUDA build leaked in: {v}"
+          '
