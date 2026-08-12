@@ -322,8 +322,10 @@ def _format_series(series: list[dict]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from ingestion.config import datastore_path, load_settings
+    from ingestion.config import datastore_path, load_registry, load_settings
     from ingestion.datastore import Datastore
+
+    from .reference import resolve
 
     p = argparse.ArgumentParser(
         prog="compare.history", description="Inspect or reconstruct the snapshot history"
@@ -355,15 +357,25 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = load_settings(args.settings)
     db = datastore_path(settings, args.db)
+    # Both writers need the registry and the reference pair — a snapshot is a
+    # statement about two named personas, so there is no sensible default to
+    # invent here. Resolved the same way every other entry point does it.
+    registry = load_registry(settings=settings)
+    pair = resolve(settings, available=registry.persona_ids(), families=registry.families())
     store = Datastore(db)
     try:
         if args.backfill:
             written = backfill_series(
-                store, args.backfill, args.window_days, overwrite=args.overwrite
+                store,
+                registry,
+                pair,
+                days=args.backfill,
+                window_days=args.window_days,
+                overwrite=args.overwrite,
             )
             print(f"Reconstructed {len(written)} snapshot(s).")
         if args.record:
-            snap = record_snapshot(store, window_days=args.window_days)
+            snap = record_snapshot(store, registry, pair, window_days=args.window_days)
             print(f"Recorded live snapshot for {snap.snapshot_date}.")
         print(_format_series(load_series(store, args.limit)))
     finally:

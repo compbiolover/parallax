@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -337,6 +339,36 @@ def _blindspot_payload(
     return serialized, [t.to_dict() for t in themes_from_store(store, members, spots)]
 
 
+def _write_atomic(out: Path, text: str) -> Path:
+    """Write via a sibling temp file and ``os.replace``, which is atomic.
+
+    A plain ``write_text`` truncates first and fills after, so anything that
+    reads the file in between — or any interruption partway through — sees a
+    half-written payload rather than the previous one. That is a real window
+    now that the run is a scheduled task that can be stopped mid-write, and the
+    file is about to be uploaded somewhere: the page fails to parse
+    ``window.PARALLAX_DATA`` and renders as though there were no data at all,
+    which looks like an empty corpus rather than an interrupted write.
+
+    The temp file is a sibling rather than in ``/tmp`` because ``os.replace`` is
+    only atomic within a filesystem, and in a container those are frequently
+    different mounts.
+    """
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, out)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return out
+
+
 def write_payload_dict(payload: dict, out: str | Path = DEFAULT_OUT) -> Path:
     """Serialize an already-built payload.
 
@@ -346,13 +378,10 @@ def write_payload_dict(payload: dict, out: str | Path = DEFAULT_OUT) -> Path:
     two separately computed ones.
     """
     out = Path(out)
-    out.parent.mkdir(parents=True, exist_ok=True)
     body = json.dumps(payload, indent=2)
     if out.suffix == ".js":
-        out.write_text(f"window.PARALLAX_DATA = {body};\n", encoding="utf-8")
-    else:
-        out.write_text(body + "\n", encoding="utf-8")
-    return out
+        return _write_atomic(out, f"window.PARALLAX_DATA = {body};\n")
+    return _write_atomic(out, body + "\n")
 
 
 def write_payload(
@@ -441,13 +470,10 @@ def write_catalog(
     registry: Registry, pair: ReferencePair, out: str | Path = DEFAULT_CATALOG_OUT
 ) -> Path:
     out = Path(out)
-    out.parent.mkdir(parents=True, exist_ok=True)
     body = json.dumps(build_catalog(registry, pair), indent=2)
     if out.suffix == ".js":
-        out.write_text(f"window.PARALLAX_CATALOG = {body};\n", encoding="utf-8")
-    else:
-        out.write_text(body + "\n", encoding="utf-8")
-    return out
+        return _write_atomic(out, f"window.PARALLAX_CATALOG = {body};\n")
+    return _write_atomic(out, body + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:

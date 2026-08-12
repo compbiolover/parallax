@@ -230,3 +230,93 @@ def test_backfill_on_an_empty_store_is_a_no_op():
     assert backfill_series(store, _reg(), pair(), days=30) == []
     assert store.snapshot_count() == 0
     store.close()
+
+
+# -- the CLI, which nothing exercised ----------------------------------------
+# `--record` and `--backfill` were both broken and had been for as long as the
+# registry has been a parameter. `record_snapshot(store, registry, pair, ...)`
+# was called as `record_snapshot(store, window_days=...)` — a TypeError — and
+# `backfill_series(store, registry, pair, days=...)` was called positionally
+# with two ints, so an int arrived where a registry belonged.
+#
+# Nothing caught it because `make history` runs the CLI with no flags, and the
+# plain listing path never touches either function. The flags are the manual
+# recovery path after a failed scheduled run, which is exactly when nobody wants
+# to discover them broken.
+
+
+def _cli_store(tmp_path, monkeypatch):
+    """A real store on disk, with the CLI pointed at it and at a real registry."""
+    db = tmp_path / "cli.sqlite"
+    store = _store()
+    dest = Datastore(str(db))
+    for row in store.conn.execute("SELECT * FROM documents"):
+        dest.conn.execute(
+            "INSERT OR REPLACE INTO documents "
+            "(id, source_id, stratum_id, url, title, published_utc, fetched_utc, word_count) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (
+                row["id"],
+                row["source_id"],
+                row["stratum_id"],
+                row["url"],
+                row["title"],
+                row["published_utc"],
+                row["fetched_utc"],
+                row["word_count"],
+            ),
+        )
+    for row in store.conn.execute("SELECT * FROM foundation_scores"):
+        dest.conn.execute(
+            "INSERT OR REPLACE INTO foundation_scores "
+            "(document_id, scorer, care, fairness, loyalty, authority, sanctity) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                row["document_id"],
+                row["scorer"],
+                row["care"],
+                row["fairness"],
+                row["loyalty"],
+                row["authority"],
+                row["sanctity"],
+            ),
+        )
+    dest.conn.commit()
+    dest.close()
+    store.close()
+
+    monkeypatch.setattr(
+        "ingestion.config.load_registry", lambda **kw: _reg("mine", "theirs"), raising=True
+    )
+    return db
+
+
+def test_cli_record_actually_records(tmp_path, monkeypatch, capsys):
+    from compare import history as history_module
+
+    db = _cli_store(tmp_path, monkeypatch)
+
+    assert history_module.main(["--db", str(db), "--record"]) == 0
+    out = capsys.readouterr().out
+    assert "Recorded live snapshot for" in out
+
+
+def test_cli_backfill_actually_backfills(tmp_path, monkeypatch, capsys):
+    from compare import history as history_module
+
+    db = _cli_store(tmp_path, monkeypatch)
+
+    assert history_module.main(["--db", str(db), "--backfill", "5"]) == 0
+    assert "Reconstructed" in capsys.readouterr().out
+
+
+def test_cli_listing_still_works_without_flags(tmp_path, monkeypatch, capsys):
+    """The one path that did work, kept working."""
+    from compare import history as history_module
+
+    db = _cli_store(tmp_path, monkeypatch)
+
+    assert history_module.main(["--db", str(db)]) == 0
+    # Nothing has been recorded into this fresh store, so the listing says so
+    # rather than printing an empty table.
+    assert "No snapshots recorded yet" in capsys.readouterr().out

@@ -125,6 +125,22 @@ jobs:
           print(f"registry v{r.version}: {len(r.sources)} sources, {len(r.personas)} personas")
           '
 
+      - name: The state module is importable, with boto3 present
+        # deploy.state is inert without PARALLAX_STATE_BUCKET, so a missing
+        # boto3 would not surface until the first real scheduled run tried to
+        # fetch the database — at which point the failure is a container that
+        # cannot start, on a morning nobody is watching.
+        run: |
+          set -eu
+          docker run --rm parallax-core:ci --help >/dev/null
+          docker run --rm --entrypoint python parallax-core:ci -c '
+          import boto3
+          from deploy.state import StateConfig
+          assert StateConfig.from_env({}).enabled is False, "must be inert with no bucket"
+          print("deploy.state ready, boto3", boto3.__version__)
+          '
+          docker run --rm --entrypoint python parallax-core:ci -m deploy.state check
+
       - name: It does not run as root
         run: |
           test "$(docker run --rm --entrypoint id parallax-core:ci -un)" = "nobody"
