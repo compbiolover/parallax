@@ -15,8 +15,12 @@
 name: CI
 
 on:
+  # Push is scoped to the default branch on purpose. Listening on every branch
+  # as well as pull_request runs the whole matrix twice for each commit on a
+  # branch that has a PR open — the same commit, the same result, twice the
+  # minutes. Branch work is covered by its pull request.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -44,14 +48,33 @@ jobs:
     # The guardrail against committing an API key or a .env (CLAUDE.md §1).
     # It existed only as a pre-commit hook, which protects contributors who
     # installed it and nobody else — the wrong default for a public repository.
+    #
+    # Installed from a pinned release rather than via gitleaks-action, which
+    # downloads the same binary with two retries and, when that download fails,
+    # dies on a misleading "parameter 'file' is required" from the unpacking
+    # step. A secret scanner that fails obscurely on a flaky network is a gate
+    # people learn to re-run rather than read.
+    #
+    # The version tracks the rev in .pre-commit-config.yaml, so a commit that
+    # passes the local hook cannot fail here on a rule the two versions disagree
+    # about. Keep the two in lockstep, as pyproject does for ruff.
     runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: "8.18.4"
+      GITLEAKS_SHA256: "ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d"
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # scan history, not just the working tree
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0   # detect scans history, not just the working tree
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 5 "$url" -o /tmp/gitleaks.tar.gz
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+      - name: Scan history for secrets
+        run: /tmp/gitleaks detect --redact --no-banner --exit-code 1
 
   test:
     runs-on: ubuntu-latest
