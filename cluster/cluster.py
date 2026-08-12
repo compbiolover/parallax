@@ -32,7 +32,7 @@ class ClusterResult:
     # the one outlet fetched first is what made a shared story look one-sided.
     coverage: list[frozenset[str]]
     titles: list[str | None]
-    labels: list[int]         # cluster id per doc, -1 = noise
+    labels: list[int]  # cluster id per doc, -1 = noise
 
     @property
     def n_docs(self) -> int:

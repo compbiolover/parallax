@@ -25,39 +25,69 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--out", help="dashboard payload path (default dashboard/public/data/latest.js)")
 
     sel = p.add_mutually_exclusive_group()
-    sel.add_argument("--only", nargs="+", choices=STEPS, metavar="STEP",
-                     help=f"run only these steps ({', '.join(STEPS)})")
-    sel.add_argument("--skip", nargs="+", choices=STEPS, metavar="STEP",
-                     help="run everything except these steps")
+    sel.add_argument(
+        "--only",
+        nargs="+",
+        choices=STEPS,
+        metavar="STEP",
+        help=f"run only these steps ({', '.join(STEPS)})",
+    )
+    sel.add_argument(
+        "--skip", nargs="+", choices=STEPS, metavar="STEP", help="run everything except these steps"
+    )
 
     p.add_argument("--max-items", type=int, help="max items per feed (ingest)")
     p.add_argument("--lexicon", help="eMFD-format CSV (overrides settings)")
-    p.add_argument("--transformer", dest="transformer", action="store_true", default=None,
-                   help="force the transformer tagger on (confidence bands)")
-    p.add_argument("--no-transformer", dest="transformer", action="store_false",
-                   help="skip the transformer tagger (faster, no bands)")
+    p.add_argument(
+        "--transformer",
+        dest="transformer",
+        action="store_true",
+        default=None,
+        help="force the transformer tagger on (confidence bands)",
+    )
+    p.add_argument(
+        "--no-transformer",
+        dest="transformer",
+        action="store_false",
+        help="skip the transformer tagger (faster, no bands)",
+    )
 
     # Backfill flags default to None so settings.yaml's `daily.backfill` block is
     # only overridden when a flag is actually given.
     p.add_argument("--backfill-days", type=int, help="GDELT window in days")
-    p.add_argument("--max-per-source", type=int,
-                   help="max GDELT articles per outlet (<=250)")
-    p.add_argument("--backfill-extract", action="store_true", default=None,
-                   help="fetch bodies for backfilled articles too (much slower)")
-    p.add_argument("--backfill-transformer", action="store_true", default=None,
-                   help="also transformer-score backfilled (title-only) articles")
+    p.add_argument("--max-per-source", type=int, help="max GDELT articles per outlet (<=250)")
+    p.add_argument(
+        "--backfill-extract",
+        action="store_true",
+        default=None,
+        help="fetch bodies for backfilled articles too (much slower)",
+    )
+    p.add_argument(
+        "--backfill-transformer",
+        action="store_true",
+        default=None,
+        help="also transformer-score backfilled (title-only) articles",
+    )
 
     p.add_argument("--min-cluster-size", type=int, default=2)
     p.add_argument("--dominance", type=float, default=0.75)
     p.add_argument("--min-blindspot-size", type=int, default=2)
     p.add_argument("--model", help="Claude model id for summaries")
-    p.add_argument("--window-days", type=int,
-                   help="trailing window for the snapshot's windowed basis (default 7)")
-    p.add_argument("--history-limit", type=int,
-                   help="most recent N snapshots to serialize into the payload")
+    p.add_argument(
+        "--window-days",
+        type=int,
+        help="trailing window for the snapshot's windowed basis (default 7)",
+    )
+    p.add_argument(
+        "--history-limit", type=int, help="most recent N snapshots to serialize into the payload"
+    )
     p.add_argument("--quiet", action="store_true", help="only print the final report")
-    p.add_argument("-v", "--verbose", action="store_true",
-                   help="log why individual fetches failed, not just the count")
+    p.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="log why individual fetches failed, not just the count",
+    )
     return p.parse_args(argv)
 
 

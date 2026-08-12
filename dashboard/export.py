@@ -40,7 +40,8 @@ def _caveat(lexicon: str | None, has_bands: bool = False) -> str:
     band_note = (
         " Whiskers on the radar show the dictionary-vs-transformer range — wider "
         "means the two methods disagree more, so trust that foundation's number less."
-        if has_bands else ""
+        if has_bands
+        else ""
     )
     base = (
         "Scores come from a dictionary method and cover the five classic "
@@ -69,8 +70,11 @@ def _band_payload(store: Datastore, registry: Registry) -> tuple[dict, str | Non
     payload = {
         diet_id: {
             f: {
-                "point": b.point, "low": b.low, "high": b.high,
-                "dictionary": b.dictionary, "transformer": b.transformer,
+                "point": b.point,
+                "low": b.low,
+                "high": b.high,
+                "dictionary": b.dictionary,
+                "transformer": b.transformer,
                 "disagreement": b.disagreement,
             }
             for f, b in bands.items()
@@ -91,10 +95,7 @@ def _matrix_payload(profiles: dict[str, dict[str, float]], order: list[str]) -> 
     high overlap is an artifact, low divergence plus low overlap is a finding.
     """
     present = [p for p in order if p in profiles]
-    jsd = [
-        [jensen_shannon_divergence(profiles[a], profiles[b]) for b in present]
-        for a in present
-    ]
+    jsd = [[jensen_shannon_divergence(profiles[a], profiles[b]) for b in present] for a in present]
     return {"personas": present, "jsd": jsd}
 
 
@@ -159,14 +160,17 @@ def build_payload(
                 "family": persona.family if persona else "",
                 "description": persona.description if persona else "",
                 "role": (
-                    "mine" if persona_id == pair.mine
-                    else "theirs" if persona_id == pair.theirs
+                    "mine"
+                    if persona_id == pair.mine
+                    else "theirs"
+                    if persona_id == pair.theirs
                     else ""
                 ),
                 "doc_count": store.doc_count_for_sources(weights),
                 "source_count": len(weights),
                 "profile": {f: profile_of.get(f, 0.0) for f in CLASSIC_FOUNDATIONS}
-                if (profile_of := profiles[persona_id]) else {},
+                if (profile_of := profiles[persona_id])
+                else {},
                 "band": bands.get(persona_id),  # None unless the transformer ran
                 "summary": srow["text"] if srow else "",
             }
@@ -296,9 +300,7 @@ def _liberty_payload(store: Datastore, registry: Registry, pair: ReferencePair) 
     }
 
 
-def _agenda_payload(
-    store: Datastore, registry: Registry, pair: ReferencePair
-) -> dict | None:
+def _agenda_payload(store: Datastore, registry: Registry, pair: ReferencePair) -> dict | None:
     """Attention divergence, or ``None`` before anything has been clustered."""
     from compare.agenda import compare_agendas
 
@@ -380,9 +382,7 @@ def build_catalog(registry: Registry, pair: ReferencePair) -> dict:
         "version": registry.version,
         "reference": {"mine": pair.mine, "theirs": pair.theirs},
         "families": registry.families(),
-        "strata": [
-            {"id": s.id, "description": s.description} for s in registry.strata
-        ],
+        "strata": [{"id": s.id, "description": s.description} for s in registry.strata],
         "sources": [
             {
                 "id": s.id,
@@ -455,20 +455,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
     parser.add_argument("--out", default=str(DEFAULT_OUT), help="output .js (or .json) path")
-    parser.add_argument("--catalog-out", default=str(DEFAULT_CATALOG_OUT),
-                        help="output path for the persona/source catalog")
+    parser.add_argument(
+        "--catalog-out",
+        default=str(DEFAULT_CATALOG_OUT),
+        help="output path for the persona/source catalog",
+    )
     parser.add_argument("--mine", help="persona id for your side of the reference pair")
     parser.add_argument("--theirs", help="persona id for the other side")
-    parser.add_argument("--history-limit", type=int, default=DEFAULT_SERIES_LIMIT,
-                        help="most recent N snapshots to serialize (0 = all)")
+    parser.add_argument(
+        "--history-limit",
+        type=int,
+        default=DEFAULT_SERIES_LIMIT,
+        help="most recent N snapshots to serialize (0 = all)",
+    )
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
     db = datastore_path(settings, args.db)
     registry = load_registry(settings=settings)
     pair = resolve(
-        settings, args.mine, args.theirs,
-        available=registry.persona_ids(), families=registry.families(),
+        settings,
+        args.mine,
+        args.theirs,
+        available=registry.persona_ids(),
+        families=registry.families(),
     )
     store = Datastore(db)
     try:

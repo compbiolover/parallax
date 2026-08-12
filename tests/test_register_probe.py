@@ -119,8 +119,8 @@ def test_noise_pools_only_cells_that_were_repeated():
     its zero into the mean would understate the noise floor and turn variance
     into a finding."""
     result = ProbeResult(model="m", repeats=2)
-    result.state["a"] = Cell(presences=[0.9, 0.5])      # stdev ~0.283
-    result.private["a"] = Cell(presences=[0.7])          # no spread to pool
+    result.state["a"] = Cell(presences=[0.9, 0.5])  # stdev ~0.283
+    result.private["a"] = Cell(presences=[0.7])  # no spread to pool
     assert abs(result.noise - result.state["a"].spread) < 1e-9
 
 
@@ -170,7 +170,7 @@ def test_failed_calls_are_counted_not_averaged_in():
     assert result.private[pair.topic].presences == [0.4]
     assert result.private[pair.topic].failures == 1
     assert result.failures == 1
-    assert result.private_mean == 0.4        # not (0.4 + 0) / 2
+    assert result.private_mean == 0.4  # not (0.4 + 0) / 2
 
 
 def test_a_one_sided_tilt_shows_up_as_a_gap():
@@ -200,9 +200,7 @@ def _flat(result: ProbeResult) -> str:
 def _report(state, private, repeats):
     result = ProbeResult(model="m", repeats=repeats)
     result.state["compulsion"] = Cell(presences=list(state), registers=[STATE] * len(state))
-    result.private["compulsion"] = Cell(
-        presences=list(private), registers=[PRIVATE] * len(private)
-    )
+    result.private["compulsion"] = Cell(presences=list(private), registers=[PRIVATE] * len(private))
     return _flat(result)
 
 
@@ -275,10 +273,10 @@ def _result(gaps: dict[str, float], spread: float = 0.024, base: float = 0.70):
     """A result whose per-topic gaps are exactly `gaps`, with a known noise floor."""
     r = ProbeResult(model="m", repeats=7)
     for topic, gap in gaps.items():
-        r.state[topic] = Cell(presences=[base - spread, base + spread],
-                              registers=[STATE] * 2)
-        r.private[topic] = Cell(presences=[base - gap - spread, base - gap + spread],
-                                registers=[PRIVATE] * 2)
+        r.state[topic] = Cell(presences=[base - spread, base + spread], registers=[STATE] * 2)
+        r.private[topic] = Cell(
+            presences=[base - gap - spread, base - gap + spread], registers=[PRIVATE] * 2
+        )
     return r
 
 
@@ -325,11 +323,12 @@ def test_no_noise_floor_means_no_concentration_claim():
 
 
 def test_the_report_names_the_carrying_topics():
-    text = _flat(_result({"surveillance": 0.12, "property": 0.12,
-                          "compulsion": 0.01, "exit": -0.01}))
+    text = _flat(
+        _result({"surveillance": 0.12, "property": 0.12, "compulsion": 0.01, "exit": -0.01})
+    )
     assert "Concentrated, not uniform" in text
     assert "surveillance" in text and "property" in text
-    assert "would overcorrect" in text          # why it matters
+    assert "would overcorrect" in text  # why it matters
 
 
 def test_a_uniform_result_does_not_claim_concentration_in_the_report():
@@ -348,8 +347,7 @@ def _deterministic(gaps: dict[str, float], repeats: int = 7, base: float = 0.70)
     r = ProbeResult(model="m", repeats=repeats)
     for topic, gap in gaps.items():
         r.state[topic] = Cell(presences=[base] * repeats, registers=[STATE] * repeats)
-        r.private[topic] = Cell(presences=[base - gap] * repeats,
-                                registers=[PRIVATE] * repeats)
+        r.private[topic] = Cell(presences=[base - gap] * repeats, registers=[PRIVATE] * repeats)
     return r
 
 

@@ -64,6 +64,7 @@ def test_describe_availability_is_a_one_liner(monkeypatch):
 
 # -- the callers warn rather than failing silently -------------------------
 
+
 def test_build_tagger_warns_with_the_reason(monkeypatch, caplog):
     """The regression this exists to prevent: returning None at INFO level, so a
     misconfigured run produced no liberty scores and no visible explanation."""

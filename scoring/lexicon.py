@@ -105,7 +105,8 @@ def build_lexicon(path: str | Path | None = None) -> tuple[Lexicon, str]:
             "%s instead, which is illustrative only and not a validated instrument. "
             "Download emfd_scoring.csv from the eMFDscore repo and put it there, or "
             "clear scoring.taggers.dictionary.lexicon_path to silence this.",
-            p, SEED_NAME,
+            p,
+            SEED_NAME,
         )
     return load_seed(), SEED_NAME
 

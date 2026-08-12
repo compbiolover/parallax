@@ -9,6 +9,7 @@ from validation.metrics import foundation_agreement, krippendorff_alpha
 
 # -- metrics ---------------------------------------------------------------
 
+
 def test_foundation_agreement_perfect_separation():
     gold = [1, 1, 0, 0]
     scores = [0.9, 0.8, 0.1, 0.2]
@@ -21,7 +22,7 @@ def test_foundation_agreement_perfect_separation():
 
 def test_foundation_agreement_single_class_gives_none():
     m = foundation_agreement([0, 0, 0], [0.1, 0.2, 0.0], threshold=0.5)
-    assert m["auc"] is None      # AUC undefined with one class
+    assert m["auc"] is None  # AUC undefined with one class
     assert m["kappa"] is None
 
 
@@ -45,6 +46,7 @@ def test_krippendorff_perfect_and_none():
 
 # -- gold loader -----------------------------------------------------------
 
+
 def test_seed_gold_loads_and_is_balanced():
     gold = load_gold(GOLD_DIR / "seed.json")
     assert len(gold.items) >= 40
@@ -56,30 +58,50 @@ def test_seed_gold_loads_and_is_balanced():
 
 # -- evaluate + trigger ----------------------------------------------------
 
+
 def _toy_gold():
-    return GoldSet(version=1, coders=["t"], items=[
-        GoldItem("a", "x", {"care": 1, "fairness": 0, "loyalty": 1, "authority": 0, "sanctity": 0}),
-        GoldItem("b", "y", {"care": 0, "fairness": 1, "loyalty": 0, "authority": 1, "sanctity": 1}),
-        GoldItem("c", "z", {"care": 1, "fairness": 0, "loyalty": 1, "authority": 0, "sanctity": 0}),
-        GoldItem("d", "w", {"care": 0, "fairness": 1, "loyalty": 0, "authority": 1, "sanctity": 1}),
-    ])
+    return GoldSet(
+        version=1,
+        coders=["t"],
+        items=[
+            GoldItem(
+                "a", "x", {"care": 1, "fairness": 0, "loyalty": 1, "authority": 0, "sanctity": 0}
+            ),
+            GoldItem(
+                "b", "y", {"care": 0, "fairness": 1, "loyalty": 0, "authority": 1, "sanctity": 1}
+            ),
+            GoldItem(
+                "c", "z", {"care": 1, "fairness": 0, "loyalty": 1, "authority": 0, "sanctity": 0}
+            ),
+            GoldItem(
+                "d", "w", {"care": 0, "fairness": 1, "loyalty": 0, "authority": 1, "sanctity": 1}
+            ),
+        ],
+    )
 
 
 def test_evaluate_and_binding_trigger():
     gold = _toy_gold()
+
     # a scorer that perfectly separates loyalty but is random on sanctity
     def score_fn(text):
-        return {"care": 0.0, "fairness": 0.0,
-                "loyalty": 0.9 if text in ("x", "z") else 0.1,
-                "authority": 0.0, "sanctity": 0.5}
+        return {
+            "care": 0.0,
+            "fairness": 0.0,
+            "loyalty": 0.9 if text in ("x", "z") else 0.1,
+            "authority": 0.0,
+            "sanctity": 0.5,
+        }
+
     results = evaluate(gold, score_fn, threshold=0.5)
     assert results["loyalty"]["auc"] == 1.0
     flagged = binding_trigger(results, trigger_auc=0.7)
-    assert "loyalty" not in flagged          # perfect -> not flagged
-    assert "authority" in flagged            # constant 0.0 -> below trigger
+    assert "loyalty" not in flagged  # perfect -> not flagged
+    assert "authority" in flagged  # constant 0.0 -> below trigger
 
 
 # -- transformer scorer (stubbed, no model download) -----------------------
+
 
 def test_positive_index_robust_across_label_conventions():
     # Mformer convention: {0:'not care', 1:'care'} -> positive is 1

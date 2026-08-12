@@ -37,11 +37,11 @@ class Tagger:
 
 @dataclass(frozen=True)
 class EnsembleScore:
-    score: float                 # weighted mean presence probability [0, 1]
-    label: int                   # 1 if score > 0.5 else 0 (matches metrics' threshold)
-    confidence: float            # weighted fraction of taggers agreeing with label
-    low_confidence: bool         # taggers split on presence
-    votes: dict[str, int] = field(default_factory=dict)   # per-tagger 0/1
+    score: float  # weighted mean presence probability [0, 1]
+    label: int  # 1 if score > 0.5 else 0 (matches metrics' threshold)
+    confidence: float  # weighted fraction of taggers agreeing with label
+    low_confidence: bool  # taggers split on presence
+    votes: dict[str, int] = field(default_factory=dict)  # per-tagger 0/1
 
 
 class EnsembleScorer:
@@ -119,7 +119,9 @@ def build_ensemble(
     if revision:
         ts_kwargs["revision"] = revision
     transformer = TransformerScorer(**ts_kwargs)
-    return EnsembleScorer([
-        Tagger("dictionary", dictionary_prob(dict_scorer), dict_weight),
-        Tagger("transformer", transformer.score, transformer_weight),
-    ])
+    return EnsembleScorer(
+        [
+            Tagger("dictionary", dictionary_prob(dict_scorer), dict_weight),
+            Tagger("transformer", transformer.score, transformer_weight),
+        ]
+    )

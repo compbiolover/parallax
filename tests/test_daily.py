@@ -25,6 +25,7 @@ def _stub_all(monkeypatch, record: list, failing: str | None = None):
             if name == failing:
                 raise RuntimeError(f"{name} exploded")
             return f"{name} detail"
+
         return step
 
     for name in STEPS:
@@ -43,6 +44,7 @@ def _run(monkeypatch, cfg, record, failing=None):
 
 
 # -- ordering and selection ------------------------------------------------
+
 
 def test_runs_all_steps_in_dependency_order(monkeypatch):
     record: list[str] = []
@@ -78,6 +80,7 @@ def test_only_runs_selected_steps(monkeypatch):
 
 # -- isolation: one failure must not stop the run --------------------------
 
+
 def test_failed_step_does_not_abort_the_rest(monkeypatch):
     record: list[str] = []
     report = _run(monkeypatch, DailyConfig(), record, failing="backfill")
@@ -101,13 +104,13 @@ def test_report_formats_failure_visibly(monkeypatch):
 
 # -- transformer is loaded once, and only when needed ----------------------
 
+
 def test_transformer_built_once_and_shared(monkeypatch):
     calls: list[object] = []
     for name in STEPS:
         monkeypatch.setattr(runner, f"_step_{name}", lambda *a, **k: "")
     monkeypatch.setattr(runner, "_build_embedder", lambda settings: object())
-    monkeypatch.setattr(runner, "_build_transformer",
-                        lambda pcfg: calls.append(pcfg) or "TR")
+    monkeypatch.setattr(runner, "_build_transformer", lambda pcfg: calls.append(pcfg) or "TR")
     store = Datastore(":memory:")
     try:
         run_daily(DailyConfig(), store=store)
@@ -133,6 +136,7 @@ def test_transformer_not_built_when_no_step_needs_it(monkeypatch):
 
 # -- settings <-> flag layering --------------------------------------------
 
+
 def test_settings_block_drives_backfill_defaults():
     cfg = DailyConfig.from_settings(
         {"daily": {"backfill": {"days": 3, "max_per_source": 50, "transformer": True}}}
@@ -151,14 +155,14 @@ def test_settings_can_disable_backfill():
 def test_flags_override_settings_but_absent_flags_do_not():
     settings = {"daily": {"backfill": {"days": 3, "max_per_source": 50}}}
     cfg = build_config(_parse(["--backfill-days", "21"]), settings)
-    assert cfg.backfill_days == 21     # flag wins
+    assert cfg.backfill_days == 21  # flag wins
     assert cfg.backfill_max_per_source == 50  # untouched by an absent flag
 
 
 def test_skip_flag_composes_with_disabled_settings_step():
     settings = {"daily": {"backfill": {"enabled": False}}}
     cfg = build_config(_parse(["--skip", "summarize"]), settings)
-    assert "backfill" not in cfg.steps   # from settings
+    assert "backfill" not in cfg.steps  # from settings
     assert "summarize" not in cfg.steps  # from the flag
     assert "ingest" in cfg.steps
 
@@ -185,10 +189,11 @@ def test_failed_transformer_build_is_not_retried_by_ingest(monkeypatch):
     finally:
         store.close()
     assert seen["transformer"] is None
-    assert seen["enabled"] is False   # run() won't rebuild
+    assert seen["enabled"] is False  # run() won't rebuild
 
 
 # -- snapshot step ---------------------------------------------------------
+
 
 def test_snapshot_runs_before_export():
     # The payload has to carry today's point, not lag a day behind it.
@@ -201,15 +206,30 @@ def test_snapshot_step_records_a_dated_row():
     try:
         for diet, care in (("self", 0.5), ("modeled_ce", 0.1)):
             store.upsert_document(
-                doc_id=f"{diet}-d", diet_id=diet, source_id="s", stratum_id=None,
-                url=None, title="t", published_utc=None,
-                fetched_utc="2026-07-25T00:00:00+00:00", word_count=200, minhash=None,
+                doc_id=f"{diet}-d",
+                diet_id=diet,
+                source_id="s",
+                stratum_id=None,
+                url=None,
+                title="t",
+                published_utc=None,
+                fetched_utc="2026-07-25T00:00:00+00:00",
+                word_count=200,
+                minhash=None,
             )
             store.upsert_scores(
-                document_id=f"{diet}-d", scorer="dictionary",
-                foundations={"care": care, "fairness": 0.1, "loyalty": 0.2,
-                             "authority": 0.1, "sanctity": 0.1},
-                sentiment=0.0, moral_word_ratio=0.2, matched_words=20,
+                document_id=f"{diet}-d",
+                scorer="dictionary",
+                foundations={
+                    "care": care,
+                    "fairness": 0.1,
+                    "loyalty": 0.2,
+                    "authority": 0.1,
+                    "sanctity": 0.1,
+                },
+                sentiment=0.0,
+                moral_word_ratio=0.2,
+                matched_words=20,
             )
         detail = runner._step_snapshot(store, DailyConfig(), _reg(), pair())
         assert store.snapshot_count() == 1

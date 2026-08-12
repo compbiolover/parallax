@@ -139,11 +139,17 @@ def format_calibration(cal: dict) -> str:
         acc = f"{b['accuracy']:.2f}" if b["accuracy"] is not None else "n/a"
         return f"  {name:18} n={b['n']:>4}  label-accuracy={acc}"
 
-    out = ["Confidence calibration (taggers agree = high, split = low):",
-           line("high-confidence", hi), line("low-confidence", lo)]
+    out = [
+        "Confidence calibration (taggers agree = high, split = low):",
+        line("high-confidence", hi),
+        line("low-confidence", lo),
+    ]
     if hi["accuracy"] is not None and lo["accuracy"] is not None:
         gap = hi["accuracy"] - lo["accuracy"]
-        verdict = "meaningful — confident predictions are more accurate" if gap > 0 else \
-                  "not separating — confidence gives no accuracy lift here"
+        verdict = (
+            "meaningful — confident predictions are more accurate"
+            if gap > 0
+            else "not separating — confidence gives no accuracy lift here"
+        )
         out.append(f"  → {verdict} (gap {gap:+.2f}).")
     return "\n".join(out)

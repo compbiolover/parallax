@@ -52,10 +52,10 @@ class Perturbation:
 
     persona: str
     stratum: str
-    factor: float             # 1.5 = counted 50% more, 0.5 = 50% less
+    factor: float  # 1.5 = counted 50% more, 0.5 = 50% less
     jsd: float
-    delta: float              # signed change from the baseline JSD
-    flipped: tuple[str, ...] = ()   # foundations whose log-ratio changed sign
+    delta: float  # signed change from the baseline JSD
+    flipped: tuple[str, ...] = ()  # foundations whose log-ratio changed sign
 
     @property
     def label(self) -> str:
@@ -109,8 +109,12 @@ class SensitivityReport:
             "flipped": {k: list(v) for k, v in self.flipped_foundations.items()},
             "perturbations": [
                 {
-                    "persona": p.persona, "stratum": p.stratum, "factor": p.factor,
-                    "jsd": p.jsd, "delta": p.delta, "flipped": list(p.flipped),
+                    "persona": p.persona,
+                    "stratum": p.stratum,
+                    "factor": p.factor,
+                    "jsd": p.jsd,
+                    "delta": p.delta,
+                    "flipped": list(p.flipped),
                 }
                 for p in self.worst
             ],
@@ -148,7 +152,10 @@ def _profile(rows: list, weights: dict[str, float]) -> dict[str, float] | None:
     scores = [
         DocumentScore(
             foundations={f: (row[f] or 0.0) for f in CLASSIC_FOUNDATIONS},
-            sentiment=0.0, moral_word_ratio=0.0, word_count=1, matched_words=0,
+            sentiment=0.0,
+            moral_word_ratio=0.0,
+            word_count=1,
+            matched_words=0,
         )
         for row in rows
     ]
@@ -236,41 +243,41 @@ def analyze(
                 candidate = dict(base)
                 candidate[persona_id] = profile
                 jsd = jensen_shannon_divergence(candidate[mine], candidate[theirs])
-                report.perturbations.append(Perturbation(
-                    persona=persona_id,
-                    stratum=stratum,
-                    factor=multiplier,
-                    jsd=jsd,
-                    delta=jsd - baseline_jsd,
-                    flipped=_sign_flips(
-                        baseline_lr, log_ratios(candidate[mine], candidate[theirs])
-                    ),
-                ))
+                report.perturbations.append(
+                    Perturbation(
+                        persona=persona_id,
+                        stratum=stratum,
+                        factor=multiplier,
+                        jsd=jsd,
+                        delta=jsd - baseline_jsd,
+                        flipped=_sign_flips(
+                            baseline_lr, log_ratios(candidate[mine], candidate[theirs])
+                        ),
+                    )
+                )
     return report
 
 
 def format_report(report: SensitivityReport | None, limit: int = 10) -> str:
     """The report as text, worst movers first."""
     if report is None:
-        return ("Not enough scored documents to test a weighting. Run "
-                "`python -m ingestion run` first.")
+        return (
+            "Not enough scored documents to test a weighting. Run `python -m ingestion run` first."
+        )
     mine, theirs = report.pair
     low, high = report.jsd_range
     lines = [
         f"Weighting sensitivity — {mine} vs {theirs}",
         f"  each stratum weight moved +/-{report.factor:.0%}, one at a time",
-        f"  documents: {mine} {report.docs.get(mine, 0)}, "
-        f"{theirs} {report.docs.get(theirs, 0)}",
+        f"  documents: {mine} {report.docs.get(mine, 0)}, {theirs} {report.docs.get(theirs, 0)}",
         "",
-        f"  headline divergence  {report.baseline_jsd:.4f}"
-        f"   range {low:.4f} .. {high:.4f}",
+        f"  headline divergence  {report.baseline_jsd:.4f}   range {low:.4f} .. {high:.4f}",
         "",
     ]
 
     if report.stable:
         lines += [
-            "  Every per-foundation log-ratio kept its sign under every "
-            "perturbation.",
+            "  Every per-foundation log-ratio kept its sign under every perturbation.",
             "  Which diet over-indexes on what does not depend on these weights.",
         ]
     else:
@@ -279,17 +286,14 @@ def format_report(report: SensitivityReport | None, limit: int = 10) -> str:
             shown = ", ".join(causes[:3])
             more = f" (+{len(causes) - 3} more)" if len(causes) > 3 else ""
             lines.append(f"    {foundation:10} flips when {shown}{more}")
-        lines.append("  A flipped sign means the direction was an artifact of the "
-                     "weighting.")
+        lines.append("  A flipped sign means the direction was an artifact of the weighting.")
 
     movers = [p for p in report.worst if abs(p.delta) > NEGLIGIBLE][:limit]
     if movers:
         lines += ["", "  Largest movers:"]
         for p in movers:
             flag = "  <- sign flip" if p.flipped else ""
-            lines.append(
-                f"    {p.label:38} {p.jsd:.4f}  ({p.delta:+.4f}){flag}"
-            )
+            lines.append(f"    {p.label:38} {p.jsd:.4f}  ({p.delta:+.4f}){flag}")
     else:
         lines += ["", "  No perturbation moved the divergence measurably."]
     return "\n".join(lines)
@@ -318,21 +322,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
-    parser.add_argument("--factor", type=_factor_arg, default=DEFAULT_FACTOR,
-                        help="fraction to move each stratum weight, 0 < f < 1 "
-                             "(default 0.5)")
+    parser.add_argument(
+        "--factor",
+        type=_factor_arg,
+        default=DEFAULT_FACTOR,
+        help="fraction to move each stratum weight, 0 < f < 1 (default 0.5)",
+    )
     parser.add_argument("--scorer", default="dictionary")
     parser.add_argument("--mine", help="persona id for your side of the pair")
     parser.add_argument("--theirs", help="persona id for the other side")
-    parser.add_argument("--limit", type=int, default=10,
-                        help="how many movers to list (default 10)")
+    parser.add_argument(
+        "--limit", type=int, default=10, help="how many movers to list (default 10)"
+    )
     args = parser.parse_args(argv)
 
     settings = load_settings(args.settings)
     db = datastore_path(settings, args.db)
     registry = load_registry(settings=settings)
-    pair = resolve(settings, args.mine, args.theirs,
-                   available=registry.persona_ids(), families=registry.families())
+    pair = resolve(
+        settings,
+        args.mine,
+        args.theirs,
+        available=registry.persona_ids(),
+        families=registry.families(),
+    )
     store = Datastore(db)
     try:
         report = analyze(store, registry, pair, args.factor, args.scorer)

@@ -70,8 +70,8 @@ def test_normalize_url_canonicalizes_equivalent_urls():
 def test_normalize_url_keeps_content_query_and_distinguishes_articles():
     a = normalize_url("https://site.com/article?id=1&utm_source=x")
     b = normalize_url("https://site.com/article?id=2")
-    assert a == "site.com/article?id=1"      # content param kept, tracking dropped
-    assert a != b                            # different articles stay distinct
+    assert a == "site.com/article?id=1"  # content param kept, tracking dropped
+    assert a != b  # different articles stay distinct
 
 
 def test_document_id_matches_across_feed_and_gdelt_forms():

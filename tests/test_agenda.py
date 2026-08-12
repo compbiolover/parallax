@@ -36,10 +36,15 @@ def _seed(store: Datastore, layout: dict[str, dict[int, int]]):
             for i in range(n):
                 doc_id = f"{diet}-{cluster_id}-{i}"
                 store.upsert_document(
-                    doc_id=doc_id, source_id=f"src_{diet}", stratum_id=None,
-                    url=None, title=f"{diet} story {cluster_id} article {i}",
-                    published_utc=None, fetched_utc="2026-08-01T00:00:00+00:00",
-                    word_count=400, minhash=None,
+                    doc_id=doc_id,
+                    source_id=f"src_{diet}",
+                    stratum_id=None,
+                    url=None,
+                    title=f"{diet} story {cluster_id} article {i}",
+                    published_utc=None,
+                    fetched_utc="2026-08-01T00:00:00+00:00",
+                    word_count=400,
+                    minhash=None,
                 )
                 assignments.append((doc_id, cluster_id))
     clusters = [(c, f"cluster {c}", n) for c, n in sorted(sizes.items())]
@@ -88,7 +93,7 @@ def test_a_story_only_one_diet_touched_is_where_they_differ():
     reg = _seed(store, {"self": {0: 30, 1: 10}, "modeled_ce": {0: 30}})
     a = compare_agendas(store, reg, pair())
     assert a.divergence > 0.0
-    assert a.exclusive["self"] == 0.25          # 10 of 40 articles
+    assert a.exclusive["self"] == 0.25  # 10 of 40 articles
     assert a.exclusive["modeled_ce"] == 0.0
     assert a.exclusive_stories == {"self": 1, "modeled_ce": 0}
     assert a.shared_stories == 1
@@ -147,8 +152,15 @@ def test_the_comparison_serializes_flat():
     # Oriented mine-first, not alphabetically: the pair is named now.
     assert d["pair"] == ["self", "modeled_ce"]
     assert set(d) == {
-        "pair", "divergence", "exclusive", "exclusive_stories", "articles",
-        "shared_stories", "total_stories", "overlap", "thin",
+        "pair",
+        "divergence",
+        "exclusive",
+        "exclusive_stories",
+        "articles",
+        "shared_stories",
+        "total_stories",
+        "overlap",
+        "thin",
     }
     assert 0.0 <= d["divergence"] <= 1.0
     store.close()

@@ -64,7 +64,7 @@ DEFAULT_MAX_EPISODES = 3
 # should ingest this week, not the archive.
 DEFAULT_SINCE_DAYS = 7
 
-_AUDIO_TYPES = ("audio/", "video/")   # some feeds ship video enclosures
+_AUDIO_TYPES = ("audio/", "video/")  # some feeds ship video enclosures
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ class Episode:
     title: str
     audio_url: str
     published_utc: str | None = None
-    link: str | None = None            # episode page, for the dashboard to link
+    link: str | None = None  # episode page, for the dashboard to link
     duration_seconds: int | None = None
 
 
@@ -109,7 +109,7 @@ def _duration_seconds(entry) -> int | None:
     except ValueError:
         return None
     seconds = 0
-    for part in parts:            # works for [s], [m, s] and [h, m, s]
+    for part in parts:  # works for [s], [m, s] and [h, m, s]
         seconds = seconds * 60 + part
     return seconds
 
@@ -240,7 +240,7 @@ def download_audio(
 def _unlink(path: str) -> None:
     try:
         os.unlink(path)
-    except OSError as exc:          # already gone, or a permissions problem
+    except OSError as exc:  # already gone, or a permissions problem
         logger.debug("could not remove %s: %s", path, exc)
 
 
@@ -316,15 +316,14 @@ class PodcastConfig:
 
     @classmethod
     def from_settings(cls, settings: dict) -> PodcastConfig:
-        audio = ((settings.get("ingestion", {}) or {}).get("audio", {}) or {})
+        audio = (settings.get("ingestion", {}) or {}).get("audio", {}) or {}
         return cls(
-            max_episodes_per_source=int(audio.get("max_episodes_per_source",
-                                                  DEFAULT_MAX_EPISODES)),
+            max_episodes_per_source=int(audio.get("max_episodes_per_source", DEFAULT_MAX_EPISODES)),
             since_days=int(audio.get("since_days", DEFAULT_SINCE_DAYS)),
-            time_budget_seconds=int(audio.get("time_budget_seconds",
-                                              DEFAULT_TIME_BUDGET_SECONDS)),
+            time_budget_seconds=int(audio.get("time_budget_seconds", DEFAULT_TIME_BUDGET_SECONDS)),
             max_bytes=int(audio.get("max_megabytes", DEFAULT_MAX_BYTES // (1024 * 1024)))
-            * 1024 * 1024,
+            * 1024
+            * 1024,
             whisper_model=audio.get("whisper_model", "medium"),
             compute_type=audio.get("compute_type", "int8"),
             device=audio.get("device", "auto"),
@@ -364,15 +363,15 @@ def run(
     pcfg = podcast_config or PodcastConfig()
     stats = PodcastStats()
 
-    sources = [s for s in registry.all_sources()
-               if s.ingest_type == "podcast_rss" and s.url]
+    sources = [s for s in registry.all_sources() if s.ingest_type == "podcast_rss" and s.url]
     if not sources:
         _note(progress, "no podcast sources with a URL — nothing to do")
         return stats
 
     if transcriber is None:
         transcriber, reason = build_transcriber(
-            pcfg.whisper_model, pcfg.compute_type, pcfg.device, pcfg.vad_filter)
+            pcfg.whisper_model, pcfg.compute_type, pcfg.device, pcfg.vad_filter
+        )
         if transcriber is None:
             # The one place this step gives up entirely, and it says why at
             # WARNING: an absent transcript is indistinguishable from a diet
@@ -395,13 +394,28 @@ def run(
         if time.monotonic() >= deadline:
             # Said out loud, never silent: a truncated run that reports success
             # is how a diet quietly loses half its audio.
-            _note(progress, f"time budget spent — {source.id} and later sources "
-                            "were not reached this run")
-            logger.warning("podcast time budget (%ds) spent before %s",
-                           pcfg.time_budget_seconds, source.id)
+            _note(
+                progress,
+                f"time budget spent — {source.id} and later sources were not reached this run",
+            )
+            logger.warning(
+                "podcast time budget (%ds) spent before %s", pcfg.time_budget_seconds, source.id
+            )
             break
-        _ingest_source(source, store, cfg, pcfg, transcriber, scorer, embedder,
-                       transformer, index, stats, deadline, progress)
+        _ingest_source(
+            source,
+            store,
+            cfg,
+            pcfg,
+            transcriber,
+            scorer,
+            embedder,
+            transformer,
+            index,
+            stats,
+            deadline,
+            progress,
+        )
     stats.seconds_spent = time.monotonic() - started_all
     return stats
 
@@ -412,22 +426,32 @@ def _note(progress, message: str) -> None:
 
 
 def _ingest_source(
-    source, store, cfg, pcfg, transcriber, scorer, embedder, transformer,
-    index, stats: PodcastStats, deadline: float, progress,
+    source,
+    store,
+    cfg,
+    pcfg,
+    transcriber,
+    scorer,
+    embedder,
+    transformer,
+    index,
+    stats: PodcastStats,
+    deadline: float,
+    progress,
 ) -> None:
     try:
         episodes = parse_podcast_feed(source.url, cfg.user_agent)
     except Exception as exc:
-        logger.warning("podcast feed unreadable for %s (%s: %s)",
-                       source.id, type(exc).__name__, exc)
+        logger.warning(
+            "podcast feed unreadable for %s (%s: %s)", source.id, type(exc).__name__, exc
+        )
         stats.failed += 1
         return
 
     seen = store.seen_episode_keys(source.id)
     # Either key is enough to recognise an episode; see `seen_episode_keys`.
     in_window = recent(episodes, pcfg.since_days)
-    fresh = [ep for ep in in_window
-             if ep.guid not in seen and ep.audio_url not in seen]
+    fresh = [ep for ep in in_window if ep.guid not in seen and ep.audio_url not in seen]
     # Counted against the window, not the whole feed. A show with 3000
     # back-episodes would otherwise report 2997 "already seen" on every run,
     # which reads as the ledger working when it is only the window filtering —
@@ -438,17 +462,41 @@ def _ingest_source(
 
     for episode in todo:
         if time.monotonic() >= deadline:
-            _note(progress, f"time budget spent inside {source.id} — "
-                            f"{len(todo)} of its episodes were queued")
+            _note(
+                progress,
+                f"time budget spent inside {source.id} — {len(todo)} of its episodes were queued",
+            )
             return
         stats.considered += 1
-        _ingest_episode(episode, source, store, cfg, pcfg, transcriber, scorer,
-                        embedder, transformer, index, stats, progress)
+        _ingest_episode(
+            episode,
+            source,
+            store,
+            cfg,
+            pcfg,
+            transcriber,
+            scorer,
+            embedder,
+            transformer,
+            index,
+            stats,
+            progress,
+        )
 
 
 def _ingest_episode(
-    episode: Episode, source, store, cfg, pcfg, transcriber, scorer, embedder,
-    transformer, index, stats: PodcastStats, progress,
+    episode: Episode,
+    source,
+    store,
+    cfg,
+    pcfg,
+    transcriber,
+    scorer,
+    embedder,
+    transformer,
+    index,
+    stats: PodcastStats,
+    progress,
 ) -> None:
     """Download, transcribe, score, store — and record the outcome either way.
 
@@ -459,15 +507,16 @@ def _ingest_episode(
     from .pipeline import _ingest_one
 
     record = {
-        "guid": episode.guid, "source_id": source.id, "title": episode.title,
+        "guid": episode.guid,
+        "source_id": source.id,
+        "title": episode.title,
         "published_utc": episode.published_utc,
         "duration_seconds": episode.duration_seconds,
         "audio_url": episode.audio_url,
     }
     path = None
     try:
-        path = download_audio(episode.audio_url, cfg.user_agent, pcfg.max_bytes,
-                              cfg.timeout)
+        path = download_audio(episode.audio_url, cfg.user_agent, pcfg.max_bytes, cfg.timeout)
         _note(progress, f"transcribing {source.id}: {episode.title[:60]}")
         text = transcriber.transcribe(path)
     except Exception as exc:
@@ -495,17 +544,26 @@ def _ingest_episode(
     link = episode.link or episode.audio_url
     counters = _IngestCounters()
     _ingest_one(
-        store, source, scorer, embedder, index, counters,
-        title=episode.title, link=link, published_utc=episode.published_utc,
-        text=text, cluster_text=f"{episode.title}\n\n{text[:2000]}",
-        min_words=cfg.min_words, transformer=transformer, liberty_texts=None,
+        store,
+        source,
+        scorer,
+        embedder,
+        index,
+        counters,
+        title=episode.title,
+        link=link,
+        published_utc=episode.published_utc,
+        text=text,
+        cluster_text=f"{episode.title}\n\n{text[:2000]}",
+        min_words=cfg.min_words,
+        transformer=transformer,
+        liberty_texts=None,
     )
 
     if counters.stored:
         stats.stored += 1
         stats.per_source[source.id] = stats.per_source.get(source.id, 0) + 1
-        store.record_episode(status="transcribed", document_id=document_id(link, text),
-                             **record)
+        store.record_episode(status="transcribed", document_id=document_id(link, text), **record)
         return
     # Transcribed but not stored: too short to score, or the same segment
     # already arrived from another show. Recorded as handled either way — the

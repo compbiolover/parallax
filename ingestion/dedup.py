@@ -30,8 +30,21 @@ DEFAULT_SHINGLE = 5
 # same article reached via a feed (often utm-tagged) and via GDELT (usually
 # clean) canonicalizes to one identity.
 _TRACKING_KEYS = {
-    "fbclid", "gclid", "mc_cid", "mc_eid", "igshid", "ref", "ref_src",
-    "cmpid", "cmp", "spm", "src", "smid", "smtyp", "_hsenc", "_hsmi",
+    "fbclid",
+    "gclid",
+    "mc_cid",
+    "mc_eid",
+    "igshid",
+    "ref",
+    "ref_src",
+    "cmpid",
+    "cmp",
+    "spm",
+    "src",
+    "smid",
+    "smtyp",
+    "_hsenc",
+    "_hsmi",
 }
 
 

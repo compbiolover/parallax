@@ -37,11 +37,11 @@ INK = "#1a1d24"
 MUTED = "#5c6270"
 LINE = "#e2e5ea"
 PANEL = "#ffffff"
-CARD = "#fbfcfd"          # a theme card, one step off the panel it sits on
+CARD = "#fbfcfd"  # a theme card, one step off the panel it sits on
 BG = "#f7f8fa"
 
 MAX_WIDTH = 600
-SPARK_DAYS = 21           # ~3 weeks reads clearly at phone width
+SPARK_DAYS = 21  # ~3 weeks reads clearly at phone width
 
 # How much of the blindspot section a phone gets. The section it replaces ran a
 # card per cluster and a couple of dozen clusters a day, which is a scroll
@@ -151,8 +151,7 @@ def _delta(history: list[dict]) -> tuple[float | None, str, str | None]:
     if len(usable) < 2:
         return None, "first recorded point — nothing to compare against", None
     previous, latest = usable[-2], usable[-1]
-    return (latest["jsd_cumulative"] - previous["jsd_cumulative"],
-            "", previous.get("date"))
+    return (latest["jsd_cumulative"] - previous["jsd_cumulative"], "", previous.get("date"))
 
 
 def _headline(payload: dict) -> float | None:
@@ -179,7 +178,10 @@ def _check_own_diet(payload: dict, own: str | None) -> None:
     if ids and own not in ids:
         logger.warning(
             "digest.own_diet=%r matches no diet in the payload (have: %s) — your "
-            "own blindspots will not be ordered first", own, ", ".join(ids))
+            "own blindspots will not be ordered first",
+            own,
+            ", ".join(ids),
+        )
 
 
 def _colours(payload: dict) -> dict[str, str]:
@@ -200,8 +202,9 @@ def _colours(payload: dict) -> dict[str, str]:
     spare = 0
     for diet in payload.get("diets") or []:
         diet_id = diet["id"]
-        role = diet.get("role") or ("mine" if diet_id == mine else
-                                    "theirs" if diet_id == theirs else "")
+        role = diet.get("role") or (
+            "mine" if diet_id == mine else "theirs" if diet_id == theirs else ""
+        )
         if role == "mine":
             colours[diet_id] = DIET_A
         elif role == "theirs":
@@ -279,14 +282,15 @@ def _panel(title: str, body: str) -> str:
         f'style="background:{PANEL};border:1px solid {LINE};border-radius:12px;">'
         f'<tr><td style="padding:16px 18px;">'
         f'<div style="font:600 11px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,'
-        f'sans-serif;text-transform:uppercase;letter-spacing:.07em;color:{MUTED};'
+        f"sans-serif;text-transform:uppercase;letter-spacing:.07em;color:{MUTED};"
         f'padding-bottom:10px;">{_esc(title)}</div>{body}'
         f"</td></tr></table></td></tr>"
     )
 
 
-def _bar_row(label: str, value: float, share: float, colour: str,
-             spread: tuple[float, float] | None = None) -> str:
+def _bar_row(
+    label: str, value: float, share: float, colour: str, spread: tuple[float, float] | None = None
+) -> str:
     """One horizontal bar. ``share`` is 0..1 of the full width.
 
     ``spread`` is the dictionary-vs-transformer interval. It is printed rather
@@ -297,10 +301,11 @@ def _bar_row(label: str, value: float, share: float, colour: str,
     pct = max(0.0, min(1.0, share)) * 100
     band = ""
     if spread and spread[0] is not None and spread[1] is not None:
-        band = (f'<span style="color:{MUTED};font-size:11px;"> '
-                f"{spread[0]:.2f}–{spread[1]:.2f}</span>")
+        band = (
+            f'<span style="color:{MUTED};font-size:11px;"> {spread[0]:.2f}–{spread[1]:.2f}</span>'
+        )
     return (
-        f'<tr>'
+        f"<tr>"
         f'<td style="font:13px -apple-system,sans-serif;color:{INK};'
         f'padding:3px 8px 3px 0;white-space:nowrap;">{_esc(label)}</td>'
         f'<td style="width:100%;padding:3px 0;">'
@@ -355,7 +360,7 @@ def _composition_panel(payload: dict) -> str:
             f'<div style="font:600 13px -apple-system,sans-serif;color:{colour};'
             f'padding:{"0" if i == 0 else "14px"} 0 6px;">{_esc(_diet_label(diet))}'
             f'<span style="font-weight:400;color:{MUTED};"> · '
-            f'{diet.get("doc_count", 0)} docs</span></div>'
+            f"{diet.get('doc_count', 0)} docs</span></div>"
             f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
             f"{rows}</table>"
         )
@@ -395,10 +400,12 @@ def _log_ratio_panel(payload: dict) -> str:
             f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
             f'<tr><td style="font-size:0;">&nbsp;</td>'
             f'<td style="width:{pct:.1f}%;">{bar}</td></tr></table></td>'
-            if value <= 0 else f'<td style="width:{left_w};"></td>'
+            if value <= 0
+            else f'<td style="width:{left_w};"></td>'
         )
         right = (
-            f'<td style="width:{right_w};">{bar}</td>' if value > 0
+            f'<td style="width:{right_w};">{bar}</td>'
+            if value > 0
             else f'<td style="width:{right_w};"></td>'
         )
         rows.append(
@@ -468,7 +475,7 @@ def _themes(payload: dict) -> list[dict]:
         return []
     try:
         from cluster.themes import group_blindspots
-    except ImportError:      # renderer used standalone, without the cluster pkg
+    except ImportError:  # renderer used standalone, without the cluster pkg
         logger.warning("cluster.themes is unavailable — blindspots go unthemed")
         return []
     return [t.to_dict() for t in group_blindspots(spots)]
@@ -488,7 +495,7 @@ def _theme_groups(themes: list[dict], own: str | None) -> list[tuple[str, list[d
 
 
 def _more_themes(rest: list[dict], escape: bool = True) -> str:
-    """"2 more themes here: Sports, Media & speech" — named, not just counted.
+    """ "2 more themes here: Sports, Media & speech" — named, not just counted.
 
     A bare "+2 more" is the one thing this section cannot say: a theme the
     reader is not shown is indistinguishable from a theme that was never found,
@@ -522,7 +529,8 @@ def _outlets(story: dict, colour: str) -> str:
         parts.append(
             f'<a href="{_esc(url)}" style="color:{colour};text-decoration:none;'
             f'border-bottom:1px solid {LINE};">{label}</a>'
-            if url.startswith(("http://", "https://")) else label
+            if url.startswith(("http://", "https://"))
+            else label
         )
     tail = f" · +{len(rest)}" if rest else ""
     return (
@@ -544,8 +552,11 @@ def _theme_card(theme: dict, colour: str) -> str:
     story_html = ""
     for story in stories:
         count = story.get("articles") or 0
-        tally = (f'<span style="color:{MUTED};font-weight:400;"> · {count} articles'
-                 f"</span>" if count > 1 else "")
+        tally = (
+            f'<span style="color:{MUTED};font-weight:400;"> · {count} articles</span>'
+            if count > 1
+            else ""
+        )
         story_html += (
             f'<div style="font:600 13px/1.4 -apple-system,sans-serif;color:{INK};'
             f'padding:4px 0 0 2px;">· {_esc(story.get("title") or "")}{tally}</div>'
@@ -556,7 +567,8 @@ def _theme_card(theme: dict, colour: str) -> str:
     more = (
         f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding-top:2px;">'
         f"+{remainder} more {'story' if remainder == 1 else 'stories'}</div>"
-        if remainder > 0 else ""
+        if remainder > 0
+        else ""
     )
     articles = theme.get("article_count") or 0
     meta = (
@@ -608,7 +620,7 @@ def _agenda_panel(payload: dict) -> str:
         stories = (agenda.get("exclusive_stories") or {}).get(diet_id, 0)
         rows.append(
             f'<div style="font:13px/1.5 -apple-system,sans-serif;color:{INK};'
-            f'padding:2px 0;">{100 * share:.0f}% of {_esc(_named(payload, diet_id))}\'s '
+            f"padding:2px 0;\">{100 * share:.0f}% of {_esc(_named(payload, diet_id))}'s "
             f"articles were about stories the other diet never touched"
             f'<span style="color:{MUTED};"> · {stories} '
             f"{'story' if stories == 1 else 'stories'}</span></div>"
@@ -630,8 +642,9 @@ def _agenda_panel(payload: dict) -> str:
         "events. The second is what a reader experiences as a different world."
     )
     if agenda.get("thin"):
-        note += " Thin coverage — one diet has few clustered articles, so treat " \
-                "this as provisional."
+        note += (
+            " Thin coverage — one diet has few clustered articles, so treat this as provisional."
+        )
     rows.append(
         f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};'
         f'padding-top:10px;">{note}</div>'
@@ -663,13 +676,16 @@ def _blindspot_panel(payload: dict, own: str | None) -> str:
         # blindspot of whichever half it was printed nearest.
         overflow = (
             f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};'
-            f'padding:0 0 2px 2px;">+{_more_themes(rest)}</div>' if rest else ""
+            f'padding:0 0 2px 2px;">+{_more_themes(rest)}</div>'
+            if rest
+            else ""
         )
         blocks.append(
             f'<div style="font:600 13px -apple-system,sans-serif;color:{colour};'
             f'padding:{"2px" if not blocks else "12px"} 0 6px;">'
             f"{_esc(_named(payload, dominant))} covered · {_esc(missing)} barely did</div>"
-            + "".join(_theme_card(t, colour) for t in shown) + overflow
+            + "".join(_theme_card(t, colour) for t in shown)
+            + overflow
         )
     note = (
         f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};padding-top:10px;">'
@@ -739,7 +755,7 @@ def _summary_panel(payload: dict) -> str:
             f'<div style="padding-top:{14 if parts else 0}px;">'
             f'<div style="font:600 13px -apple-system,'
             f'sans-serif;color:{colour};padding-bottom:6px;">{_esc(_diet_label(diet))}</div>'
-            f'{_paragraphs(text, "14px/1.6")}</div>'
+            f"{_paragraphs(text, '14px/1.6')}</div>"
         )
     if not parts:
         # The method note belongs to whichever panel actually rendered prose.
@@ -786,8 +802,7 @@ def _extra_panel(payload: dict) -> str:
             )
         blocks.append(
             f'<div style="font:600 13px -apple-system,sans-serif;color:{INK};'
-            f'padding-bottom:4px;">Fairness: equality vs proportionality</div>'
-            + "".join(rows)
+            f'padding-bottom:4px;">Fairness: equality vs proportionality</div>' + "".join(rows)
         )
 
     liberty = payload.get("liberty")
@@ -800,7 +815,7 @@ def _extra_panel(payload: dict) -> str:
             rows.append(
                 f'<div style="font:13px -apple-system,sans-serif;color:{INK};'
                 f'padding:2px 0;">{_esc(_named(payload, diet_id))}: '
-                f'mean {values.get("mean", 0):.2f}, '
+                f"mean {values.get('mean', 0):.2f}, "
                 f"{100 * values.get('salient_share', 0):.0f}% salient"
                 f'<span style="color:{MUTED};"> · '
                 f"{100 * values.get('coverage', 0):.0f}% of docs scored{thin}</span></div>"
@@ -808,7 +823,8 @@ def _extra_panel(payload: dict) -> str:
         if rows:
             blocks.append(
                 f'<div style="font:600 13px -apple-system,sans-serif;color:{INK};'
-                f'padding:14px 0 4px;">Liberty / oppression</div>' + "".join(rows)
+                f'padding:14px 0 4px;">Liberty / oppression</div>'
+                + "".join(rows)
                 + f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};'
                 f'padding-top:6px;">One model, one rubric, no validation set — the '
                 f"least corroborated number here.</div>"
@@ -870,7 +886,8 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
             f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding-top:6px;">'
             f"{_esc(_named(payload, pair[0]))} vs {_esc(_named(payload, pair[1]))}"
             f"{_others_note(payload)}</div>"
-            if pair else ""
+            if pair
+            else ""
         )
         head = (
             f'<div style="text-align:center;padding:4px 0 2px;">'
@@ -881,23 +898,25 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
             f"1 disjoint</div>{movement}{pair_note}</div>"
         )
 
-    panels = "".join([
-        _panel("Today", head),
-        # Directly under the headline number, because it is the sentence that
-        # says what the number means. It used to sit below every chart, which
-        # asks the reader to interpret the evidence before being told what it
-        # was evidence of.
-        _executive_panel(payload),
-        # Before the foundation charts, because it is the number that explains
-        # why the headline one is small.
-        _agenda_panel(payload),
-        _composition_panel(payload),
-        _log_ratio_panel(payload),
-        _sparkline_panel(payload),
-        _blindspot_panel(payload, own_diet),
-        _summary_panel(payload),
-        _extra_panel(payload),
-    ])
+    panels = "".join(
+        [
+            _panel("Today", head),
+            # Directly under the headline number, because it is the sentence that
+            # says what the number means. It used to sit below every chart, which
+            # asks the reader to interpret the evidence before being told what it
+            # was evidence of.
+            _executive_panel(payload),
+            # Before the foundation charts, because it is the number that explains
+            # why the headline one is small.
+            _agenda_panel(payload),
+            _composition_panel(payload),
+            _log_ratio_panel(payload),
+            _sparkline_panel(payload),
+            _blindspot_panel(payload, own_diet),
+            _summary_panel(payload),
+            _extra_panel(payload),
+        ]
+    )
 
     caveat = _caveat_for_email(payload)
     generated = (payload.get("generated_utc") or "")[:10]
@@ -956,26 +975,36 @@ def _agenda_text(payload: dict) -> list[str]:
     agenda = payload.get("agenda")
     if not agenda or not agenda.get("total_stories"):
         return []
-    lines = ["", "SAME DAY, DIFFERENT AGENDA", "",
-             f"Attention divergence: {agenda['divergence']:.3f}  "
-             f"(across {agenda['total_stories']} stories)"]
+    lines = [
+        "",
+        "SAME DAY, DIFFERENT AGENDA",
+        "",
+        f"Attention divergence: {agenda['divergence']:.3f}  "
+        f"(across {agenda['total_stories']} stories)",
+    ]
     for diet_id in agenda.get("pair") or []:
         share = (agenda.get("exclusive") or {}).get(diet_id)
         if share is None:
             continue
         stories = (agenda.get("exclusive_stories") or {}).get(diet_id, 0)
-        lines.append(f"  {100 * share:.0f}% of {_named(payload, diet_id)}'s articles "
-                     f"were about stories the other never touched ({stories})")
+        lines.append(
+            f"  {100 * share:.0f}% of {_named(payload, diet_id)}'s articles "
+            f"were about stories the other never touched ({stories})"
+        )
     shared = agenda.get("shared_stories") or 0
-    lines.append(f"  both covered {shared} "
-                 f"{'story' if shared == 1 else 'stories'} "
-                 f"({100 * (agenda.get('overlap') or 0):.0f}% of the day's)")
+    lines.append(
+        f"  both covered {shared} "
+        f"{'story' if shared == 1 else 'stories'} "
+        f"({100 * (agenda.get('overlap') or 0):.0f}% of the day's)"
+    )
     jsd = _headline(payload)
-    lines.append("  Same scale as the foundation divergence"
-                 + (f" ({jsd:.3f})" if jsd is not None else "")
-                 + ": a small one there means the diets moralize in similar "
-                   "language, a large one here means they apply it to "
-                   "different events.")
+    lines.append(
+        "  Same scale as the foundation divergence"
+        + (f" ({jsd:.3f})" if jsd is not None else "")
+        + ": a small one there means the diets moralize in similar "
+        "language, a large one here means they apply it to "
+        "different events."
+    )
     if agenda.get("thin"):
         lines.append("  Thin coverage — treat as provisional.")
     return lines
@@ -1018,9 +1047,12 @@ def _extra_text(payload: dict) -> list[str]:
                 f"{100 * values.get('coverage', 0):.0f}% of docs scored{thin}"
             )
         if rows:
-            lines += ["", "Liberty / oppression", *rows,
-                      "  One model, one rubric, no validation set — the least "
-                      "corroborated number here."]
+            lines += [
+                "",
+                "Liberty / oppression",
+                *rows,
+                "  One model, one rubric, no validation set — the least corroborated number here.",
+            ]
     return lines
 
 
@@ -1037,16 +1069,16 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
     else:
         lines.append(f"Jensen-Shannon divergence: {jsd:.3f}  (0 identical, 1 disjoint)")
         delta, reason, since = _delta(payload.get("history") or [])
-        lines.append(f"  {_signed(delta)} since {since}" if delta is not None
-                     else f"  {reason}")
+        lines.append(f"  {_signed(delta)} since {since}" if delta is not None else f"  {reason}")
         pair = _pair(payload)
         if pair:
             rest = len(payload.get("diets") or []) - 2
-            more = (f"  (+{rest} more persona{'' if rest == 1 else 's'} in the dashboard)"
-                    if rest > 0 else "")
-            lines.append(
-                f"  {_named(payload, pair[0])} vs {_named(payload, pair[1])}{more}"
+            more = (
+                f"  (+{rest} more persona{'' if rest == 1 else 's'} in the dashboard)"
+                if rest > 0
+                else ""
             )
+            lines.append(f"  {_named(payload, pair[0])} vs {_named(payload, pair[1])}{more}")
 
     # Directly under the number, as in the HTML. The two parts are one brief
     # and a screen reader should not meet the sections in a different order.
@@ -1061,16 +1093,22 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
         lines += ["", f"{_diet_label(diet)} ({diet.get('doc_count', 0)} docs)"]
         for f in foundations:
             value, spread = _foundation(diet, f)
-            band = (f"   [{spread[0]:.2f}-{spread[1]:.2f}]"
-                    if spread and spread[0] is not None and spread[1] is not None else "")
+            band = (
+                f"   [{spread[0]:.2f}-{spread[1]:.2f}]"
+                if spread and spread[0] is not None and spread[1] is not None
+                else ""
+            )
             lines.append(f"  {f:<10} {value:.3f}{band}")
 
     ratios = (payload.get("comparison") or {}).get("log_ratios") or {}
     pair = _pair(payload)
     if ratios:
-        who = (f"positive = {_named(payload, pair[0])} over-indexes, "
-               f"negative = {_named(payload, pair[1])}"
-               if pair else "positive = the first diet leans harder")
+        who = (
+            f"positive = {_named(payload, pair[0])} over-indexes, "
+            f"negative = {_named(payload, pair[1])}"
+            if pair
+            else "positive = the first diet leans harder"
+        )
         lines += ["", f"Over/under-indexing (log-ratio; {who})"]
         lines += [f"  {f:<10} {_signed(ratios[f], 2)}" for f in ratios]
 
@@ -1078,15 +1116,21 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
     if len(history) >= 2:
         window = payload.get("history_window_days")
         peak = max(p["jsd_cumulative"] for p in history)
-        lines += ["", "Divergence over time",
-                  f"  {history[0]['date']} -> {history[-1]['date']}, "
-                  f"{len(history)} point(s), peak {peak:.3f}"
-                  + (f", {window}-day trailing window recorded alongside" if window else "")]
+        lines += [
+            "",
+            "Divergence over time",
+            f"  {history[0]['date']} -> {history[-1]['date']}, "
+            f"{len(history)} point(s), peak {peak:.3f}"
+            + (f", {window}-day trailing window recorded alongside" if window else ""),
+        ]
 
     themes = _themes(payload)
     if themes:
-        lines += ["", "Blindspots by theme (both directions; not a judgement about "
-                      "which story mattered more)"]
+        lines += [
+            "",
+            "Blindspots by theme (both directions; not a judgement about "
+            "which story mattered more)",
+        ]
         for dominant, group in _theme_groups(themes, own_diet):
             missing = _named(payload, group[0].get("other_diet") or "?")
             lines += ["", f"  {_named(payload, dominant)} covered · {missing} barely did"]
@@ -1106,8 +1150,7 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
                     if outlets:
                         named = ", ".join(o["label"] for o in outlets[:OUTLETS_PER_STORY])
                         extra = len(outlets) - len(outlets[:OUTLETS_PER_STORY])
-                        lines.append(f"            {named}"
-                                     + (f" +{extra}" if extra else ""))
+                        lines.append(f"            {named}" + (f" +{extra}" if extra else ""))
                     # The link, on its own line: the text part is what a screen
                     # reader gets, and a URL inside a sentence reads as noise.
                     lead = next((o["url"] for o in outlets if o.get("url")), None)
@@ -1135,8 +1178,9 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
     if caveat:
         lines += ["", "-- ", caveat]
     generated = (payload.get("generated_utc") or "")[:10]
-    lines.append(f"Parallax · generated {generated} · both diets run through "
-                 f"the identical pipeline.")
+    lines.append(
+        f"Parallax · generated {generated} · both diets run through the identical pipeline."
+    )
     return "\n".join(lines)
 
 

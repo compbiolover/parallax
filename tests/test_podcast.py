@@ -35,8 +35,14 @@ def _feed_xml(items: str) -> str:
 </rss>"""
 
 
-def _item(guid="ep-1", title="Episode One", audio="{BASE}/1.mp3",
-          date="Mon, 03 Aug 2026 10:00:00 +0000", duration="1:02:03", enclosure=True):
+def _item(
+    guid="ep-1",
+    title="Episode One",
+    audio="{BASE}/1.mp3",
+    date="Mon, 03 Aug 2026 10:00:00 +0000",
+    duration="1:02:03",
+    enclosure=True,
+):
     enc = f'<enclosure url="{audio}" type="audio/mpeg" length="1000"/>' if enclosure else ""
     return f"""<item>
       <title>{title}</title><guid>{guid}</guid><pubDate>{date}</pubDate>
@@ -105,7 +111,8 @@ def test_entries_without_audio_are_dropped(feed_server):
     """A show that also posts text to the same feed should not book a
     transcription slot for the text."""
     feed_server["feed"] = _feed_xml(
-        _item(guid="urn:show:a") + _item(guid="urn:show:b", enclosure=False))
+        _item(guid="urn:show:a") + _item(guid="urn:show:b", enclosure=False)
+    )
     episodes = parse_podcast_feed(f"{feed_server['url']}/feed.xml", "test-agent")
     assert [e.guid for e in episodes] == ["urn:show:a"]
     assert episodes[0].duration_seconds == 3723
@@ -123,8 +130,9 @@ def test_a_relative_guid_is_resolved_against_the_feed_url(feed_server):
 
 def test_the_audio_url_stands_in_for_a_missing_guid(feed_server):
     feed_server["feed"] = _feed_xml(
-        '<item><title>No guid</title>'
-        '<enclosure url="http://example.com/x.mp3" type="audio/mpeg"/></item>')
+        "<item><title>No guid</title>"
+        '<enclosure url="http://example.com/x.mp3" type="audio/mpeg"/></item>'
+    )
     episodes = parse_podcast_feed(f"{feed_server['url']}/feed.xml", "test-agent")
     assert episodes[0].guid == "http://example.com/x.mp3"
 
@@ -136,8 +144,7 @@ def _ep(guid, days_ago=None):
     when = None
     if days_ago is not None:
         when = (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
-    return Episode(guid=guid, title=guid, audio_url=f"http://x/{guid}.mp3",
-                   published_utc=when)
+    return Episode(guid=guid, title=guid, audio_url=f"http://x/{guid}.mp3", published_utc=when)
 
 
 def test_recent_keeps_the_window_and_anything_undated():
@@ -205,20 +212,32 @@ def _registry(url, ingest_type="podcast_rss"):
         version=3,
         strata=[Stratum(id="talk_radio")],
         sources=[
-            Source(id="show", name="A Show", medium="podcast", role="talk",
-                   ingest_type=ingest_type, url=url, stratum_id="talk_radio"),
+            Source(
+                id="show",
+                name="A Show",
+                medium="podcast",
+                role="talk",
+                ingest_type=ingest_type,
+                url=url,
+                stratum_id="talk_radio",
+            ),
         ],
         personas=[
-            Persona(id="modeled_ce", label="Modeled", family="right",
-                    stratum_weights={"talk_radio": 1.0},
-                    source_weights={"show": 1.0}),
+            Persona(
+                id="modeled_ce",
+                label="Modeled",
+                family="right",
+                stratum_weights={"talk_radio": 1.0},
+                source_weights={"show": 1.0},
+            ),
         ],
     )
 
 
 def _run(store, feed_server, transcriber, **kwargs):
-    return run(store, _registry(f"{feed_server['url']}/feed.xml"),
-               transcriber=transcriber, **kwargs)
+    return run(
+        store, _registry(f"{feed_server['url']}/feed.xml"), transcriber=transcriber, **kwargs
+    )
 
 
 def test_an_episode_is_transcribed_scored_and_recorded(feed_server):
@@ -239,7 +258,7 @@ def test_a_second_run_transcribes_nothing(feed_server):
     fake = _FakeTranscriber()
     _run(store, feed_server, fake, podcast_config=PodcastConfig(since_days=0))
     stats = _run(store, feed_server, fake, podcast_config=PodcastConfig(since_days=0))
-    assert len(fake.calls) == 1            # not called again
+    assert len(fake.calls) == 1  # not called again
     assert stats.transcribed == 0
     assert stats.already_seen == 1
     store.close()
@@ -264,8 +283,9 @@ def test_a_failed_episode_is_recorded_so_it_is_not_retried_forever(feed_server):
 
 def test_an_empty_transcript_is_skipped_not_stored(feed_server):
     store = Datastore(":memory:")
-    stats = _run(store, feed_server, _FakeTranscriber(text="   "),
-                 podcast_config=PodcastConfig(since_days=0))
+    stats = _run(
+        store, feed_server, _FakeTranscriber(text="   "), podcast_config=PodcastConfig(since_days=0)
+    )
     assert stats.skipped == 1 and stats.stored == 0
     assert store.episode_counts() == {"skipped": 1}
     store.close()
@@ -275,8 +295,12 @@ def test_the_per_source_episode_cap_holds(feed_server):
     feed_server["feed"] = _feed_xml("".join(_item(guid=f"ep-{i}") for i in range(6)))
     store = Datastore(":memory:")
     fake = _FakeTranscriber()
-    _run(store, feed_server, fake,
-         podcast_config=PodcastConfig(since_days=0, max_episodes_per_source=2))
+    _run(
+        store,
+        feed_server,
+        fake,
+        podcast_config=PodcastConfig(since_days=0, max_episodes_per_source=2),
+    )
     assert len(fake.calls) == 2
     store.close()
 
@@ -286,9 +310,13 @@ def test_a_spent_time_budget_stops_the_run_and_says_so(feed_server):
     store = Datastore(":memory:")
     fake = _FakeTranscriber()
     notes: list[str] = []
-    _run(store, feed_server, fake,
-         podcast_config=PodcastConfig(since_days=0, time_budget_seconds=0),
-         progress=notes.append)
+    _run(
+        store,
+        feed_server,
+        fake,
+        podcast_config=PodcastConfig(since_days=0, time_budget_seconds=0),
+        progress=notes.append,
+    )
     assert fake.calls == []
     # Truncation is never silent: a short run that reports success is how a
     # diet quietly loses half its audio.
@@ -317,18 +345,32 @@ def test_rss_sources_are_not_touched(feed_server):
     `pipeline.run`, which fetches bodies rather than enclosures."""
     store = Datastore(":memory:")
     fake = _FakeTranscriber()
-    stats = run(store, _registry(f"{feed_server['url']}/feed.xml", ingest_type="rss"),
-                transcriber=fake, podcast_config=PodcastConfig(since_days=0))
+    stats = run(
+        store,
+        _registry(f"{feed_server['url']}/feed.xml", ingest_type="rss"),
+        transcriber=fake,
+        podcast_config=PodcastConfig(since_days=0),
+    )
     assert fake.calls == []
     assert stats.considered == 0
     store.close()
 
 
 def test_settings_budgets_are_read():
-    cfg = PodcastConfig.from_settings({"ingestion": {"audio": {
-        "max_episodes_per_source": 9, "since_days": 30, "time_budget_seconds": 60,
-        "max_megabytes": 10, "whisper_model": "large-v3", "filter_silence": False,
-    }}})
+    cfg = PodcastConfig.from_settings(
+        {
+            "ingestion": {
+                "audio": {
+                    "max_episodes_per_source": 9,
+                    "since_days": 30,
+                    "time_budget_seconds": 60,
+                    "max_megabytes": 10,
+                    "whisper_model": "large-v3",
+                    "filter_silence": False,
+                }
+            }
+        }
+    )
     assert cfg.max_episodes_per_source == 9
     assert cfg.since_days == 30
     assert cfg.time_budget_seconds == 60
@@ -344,8 +386,11 @@ def test_missing_faster_whisper_degrades_the_run_rather_than_failing(feed_server
 
     store = Datastore(":memory:")
     with caplog.at_level(logging.WARNING):
-        stats = run(store, _registry(f"{feed_server['url']}/feed.xml"),
-                    podcast_config=PodcastConfig(whisper_model="definitely-not-a-model"))
+        stats = run(
+            store,
+            _registry(f"{feed_server['url']}/feed.xml"),
+            podcast_config=PodcastConfig(whisper_model="definitely-not-a-model"),
+        )
     assert stats.transcribed == 0
     assert "podcast ingestion skipped" in caplog.text
     store.close()
@@ -362,12 +407,16 @@ def test_a_moved_feed_does_not_re_transcribe_the_back_catalogue(feed_server):
     fake = _FakeTranscriber()
     audio = f"{feed_server['url']}/1.mp3"
 
-    store.record_episode(guid=f"{feed_server['url']}/old-host/ep-1", source_id="show",
-                         status="transcribed", audio_url=audio)
+    store.record_episode(
+        guid=f"{feed_server['url']}/old-host/ep-1",
+        source_id="show",
+        status="transcribed",
+        audio_url=audio,
+    )
     feed_server["feed"] = _feed_xml(_item(guid="ep-1", audio=audio))
     stats = _run(store, feed_server, fake, podcast_config=PodcastConfig(since_days=0))
 
-    assert fake.calls == []                # recognised by its audio url
+    assert fake.calls == []  # recognised by its audio url
     assert stats.already_seen == 1
     store.close()
 
@@ -389,8 +438,7 @@ def test_an_old_store_gains_the_audio_column(tmp_path):
     conn.close()
 
     store = Datastore(str(path))
-    store.record_episode(guid="g", source_id="s", status="transcribed",
-                         audio_url="http://x/1.mp3")
+    store.record_episode(guid="g", source_id="s", status="transcribed", audio_url="http://x/1.mp3")
     assert store.seen_episode_keys("s") == {"g", "http://x/1.mp3"}
     store.close()
 
@@ -401,10 +449,16 @@ def test_two_shows_may_share_a_guid(feed_server):
     episode would overwrite the first show's row, leaving one show skipping an
     episode it never transcribed and the other re-transcribing one it did."""
     store = Datastore(":memory:")
-    store.record_episode(guid="12", source_id="show-a", status="transcribed",
-                         document_id=None, audio_url="http://a/12.mp3")
-    store.record_episode(guid="12", source_id="show-b", status="failed",
-                         detail="boom", audio_url="http://b/12.mp3")
+    store.record_episode(
+        guid="12",
+        source_id="show-a",
+        status="transcribed",
+        document_id=None,
+        audio_url="http://a/12.mp3",
+    )
+    store.record_episode(
+        guid="12", source_id="show-b", status="failed", detail="boom", audio_url="http://b/12.mp3"
+    )
 
     assert store.seen_episode_keys("show-a") == {"12", "http://a/12.mp3"}
     assert store.seen_episode_keys("show-b") == {"12", "http://b/12.mp3"}
@@ -433,8 +487,8 @@ def test_a_guid_keyed_store_is_rebuilt_on_the_composite_key(tmp_path):
 
     store = Datastore(str(path))
     keys = {r["pk"] for r in store.conn.execute("PRAGMA table_info(podcast_episodes)")}
-    assert keys == {0, 1, 2}                      # composite, not single
-    assert store.seen_episode_keys("show") == {"ep-1"}   # the row survived
+    assert keys == {0, 1, 2}  # composite, not single
+    assert store.seen_episode_keys("show") == {"ep-1"}  # the row survived
     # And the rebuilt table takes a colliding guid from another show.
     store.record_episode(guid="ep-1", source_id="other", status="failed")
     assert store.episode_counts("show") == {"transcribed": 1}
@@ -455,7 +509,8 @@ def test_already_seen_counts_the_window_not_the_archive(feed_server):
     feed_server["feed"] = _feed_xml(
         _item(guid="urn:new", date=inside_window)
         + _item(guid="urn:old-1", date="Mon, 03 Aug 2020 10:00:00 +0000")
-        + _item(guid="urn:old-2", date="Mon, 03 Aug 2019 10:00:00 +0000"))
+        + _item(guid="urn:old-2", date="Mon, 03 Aug 2019 10:00:00 +0000")
+    )
     store = Datastore(":memory:")
     fake = _FakeTranscriber()
 
@@ -468,5 +523,5 @@ def test_already_seen_counts_the_window_not_the_archive(feed_server):
     # feed this said 3, two of which the ledger had nothing to do with.
     second = _run(store, feed_server, fake, podcast_config=PodcastConfig(since_days=7))
     assert second.already_seen == 1
-    assert len(fake.calls) == 3          # nothing new transcribed
+    assert len(fake.calls) == 3  # nothing new transcribed
     store.close()

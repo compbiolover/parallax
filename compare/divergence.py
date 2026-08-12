@@ -46,10 +46,7 @@ def log_ratios(
     A small epsilon replaces zeros so the ratio stays finite (see the smoothed
     sanity-check note in ``CLAUDE.md`` §3).
     """
-    return {
-        f: math.log((p.get(f, 0.0) + epsilon) / (q.get(f, 0.0) + epsilon))
-        for f in foundations
-    }
+    return {f: math.log((p.get(f, 0.0) + epsilon) / (q.get(f, 0.0) + epsilon)) for f in foundations}
 
 
 def index_form(
@@ -59,7 +56,4 @@ def index_form(
     epsilon: float = 1e-6,
 ) -> dict[str, float]:
     """Per-foundation 100 x (P_i / Q_i); 100 = parity. Reads well on a dashboard."""
-    return {
-        f: 100.0 * (p.get(f, 0.0) + epsilon) / (q.get(f, 0.0) + epsilon)
-        for f in foundations
-    }
+    return {f: 100.0 * (p.get(f, 0.0) + epsilon) / (q.get(f, 0.0) + epsilon) for f in foundations}

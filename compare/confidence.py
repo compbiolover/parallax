@@ -35,12 +35,12 @@ from scoring.foundations import CLASSIC_FOUNDATIONS
 
 @dataclass(frozen=True)
 class FoundationBand:
-    point: float          # ensemble emphasis (mean of the two compositions)
-    low: float            # min(dictionary, transformer)
-    high: float           # max(dictionary, transformer)
-    dictionary: float     # dictionary composition share
-    transformer: float    # transformer composition share
-    disagreement: float   # fraction of docs where the taggers split on presence
+    point: float  # ensemble emphasis (mean of the two compositions)
+    low: float  # min(dictionary, transformer)
+    high: float  # max(dictionary, transformer)
+    dictionary: float  # dictionary composition share
+    transformer: float  # transformer composition share
+    disagreement: float  # fraction of docs where the taggers split on presence
 
 
 def _weighted_composition(pairs, index: int, foundations) -> dict[str, float]:
@@ -103,8 +103,12 @@ def persona_band(
     for f in foundations:
         d, t = dict_comp[f], trans_comp[f]
         bands[f] = FoundationBand(
-            point=(d + t) / 2, low=min(d, t), high=max(d, t),
-            dictionary=d, transformer=t, disagreement=disagreement[f],
+            point=(d + t) / 2,
+            low=min(d, t),
+            high=max(d, t),
+            dictionary=d,
+            transformer=t,
+            disagreement=disagreement[f],
         )
     return bands
 

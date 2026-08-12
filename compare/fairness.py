@@ -42,10 +42,10 @@ LOW_COVERAGE = 0.10
 class FairnessProfile:
     """How one diet divides its fairness mass."""
 
-    equality: float           # share of fairness that is equality-framed, [0, 1]
-    proportionality: float    # share that is proportionality-framed, [0, 1]
-    docs_split: int           # documents that carried enough evidence to partition
-    docs_total: int           # documents the scorer saw at all
+    equality: float  # share of fairness that is equality-framed, [0, 1]
+    proportionality: float  # share that is proportionality-framed, [0, 1]
+    docs_split: int  # documents that carried enough evidence to partition
+    docs_total: int  # documents the scorer saw at all
 
     @property
     def coverage(self) -> float:

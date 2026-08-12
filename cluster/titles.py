@@ -151,7 +151,7 @@ def _strip_outlet(title: str) -> str:
     if cut is None:
         return title
     index, sep = cut
-    head, tail = title[:index].strip(), title[index + len(sep):].strip()
+    head, tail = title[:index].strip(), title[index + len(sep) :].strip()
     return head if _looks_like_outlet(head, tail) else title
 
 
@@ -200,6 +200,5 @@ def _looks_like_outlet(head: str, tail: str) -> bool:
     if len(head.split()) < 4:
         return False
     return all(
-        not word[0].isalpha() or word[0].isupper() or word.lower() in _NAME_WORDS
-        for word in words
+        not word[0].isalpha() or word[0].isupper() or word.lower() in _NAME_WORDS for word in words
     )

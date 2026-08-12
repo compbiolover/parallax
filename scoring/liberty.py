@@ -145,9 +145,9 @@ class LibertyScore:
     the persistence layer stores only ``presence`` and ``pole``.
     """
 
-    presence: float           # [0, 1]
-    pole: str                 # virtue | vice | mixed | none
-    register: str             # from_state | from_private_power | both | none
+    presence: float  # [0, 1]
+    pole: str  # virtue | vice | mixed | none
+    register: str  # from_state | from_private_power | both | none
     quote: str
     rationale: str
     model: str
@@ -286,7 +286,8 @@ class LibertyTagger:
         except Exception as exc:
             logger.warning(
                 "liberty batch failed (%s: %s) — falling back to synchronous calls",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             scored = {}
 
@@ -296,8 +297,9 @@ class LibertyTagger:
         # leaves this function unscored stays unscored forever.
         missing = {k: v for k, v in usable.items() if k not in scored}
         if missing:
-            logger.info("liberty: %d document(s) not returned by batch, retrying inline",
-                        len(missing))
+            logger.info(
+                "liberty: %d document(s) not returned by batch, retrying inline", len(missing)
+            )
             for k, v in missing.items():
                 score = self.score(v)
                 if score is not None:
@@ -306,8 +308,7 @@ class LibertyTagger:
 
     def _score_batch(self, texts: dict[str, str]) -> dict[str, LibertyScore]:
         requests = [
-            {"custom_id": doc_id, "params": self._params(text)}
-            for doc_id, text in texts.items()
+            {"custom_id": doc_id, "params": self._params(text)} for doc_id, text in texts.items()
         ]
         batch = self.client.messages.batches.create(requests=requests)
         logger.info("liberty: submitted batch %s (%d documents)", batch.id, len(requests))
@@ -318,8 +319,11 @@ class LibertyTagger:
             if current.processing_status == "ended":
                 break
             if time.monotonic() >= deadline:
-                logger.warning("liberty: batch %s still running after %ds — giving up on it",
-                               batch.id, self.batch_timeout_s)
+                logger.warning(
+                    "liberty: batch %s still running after %ds — giving up on it",
+                    batch.id,
+                    self.batch_timeout_s,
+                )
                 return {}
             time.sleep(self.poll_interval_s)
 
@@ -358,9 +362,7 @@ def build_tagger(
     if client is None:
         logger.warning("liberty tagging disabled: %s", reason)
         return None
-    return LibertyTagger(
-        client, model=model, effort=effort, use_batch=use_batch, **kwargs
-    )
+    return LibertyTagger(client, model=model, effort=effort, use_batch=use_batch, **kwargs)
 
 
 # -- self-check -------------------------------------------------------------
@@ -394,8 +396,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Client OK. Scoring one probe with {tagger.model}...\n")
     score = tagger.score(args.text)
     if score is None:
-        print("The call returned no usable verdict. The warning above says why; a "
-              "refusal or a malformed response both land here.")
+        print(
+            "The call returned no usable verdict. The warning above says why; a "
+            "refusal or a malformed response both land here."
+        )
         return 1
 
     print(f"  presence : {score.presence:.2f}")
@@ -404,9 +408,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  quote    : {score.quote or '(none)'}")
     print(f"  rationale: {score.rationale}")
     if not score.grounded:
-        print("\n  Note: no supporting quote. An ungrounded verdict is weaker "
-              "evidence — the rubric asks for one precisely so the judgment has "
-              "to point at the text.")
+        print(
+            "\n  Note: no supporting quote. An ungrounded verdict is weaker "
+            "evidence — the rubric asks for one precisely so the judgment has "
+            "to point at the text."
+        )
     print(f"\nReady. Scores will be recorded under: {tagger.name}")
     return 0
 

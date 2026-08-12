@@ -26,11 +26,11 @@ def test_a_missing_lexicon_path_warns_rather_than_falling_back_quietly(tmp_path,
     with caplog.at_level(logging.WARNING):
         _, name = build_lexicon(missing)
 
-    assert name == SEED_NAME                       # still degrades, as before
+    assert name == SEED_NAME  # still degrades, as before
     assert "no such file exists" in caplog.text
-    assert str(missing) in caplog.text             # says which path it looked at
+    assert str(missing) in caplog.text  # says which path it looked at
     assert "not a validated instrument" in caplog.text
-    assert "eMFDscore" in caplog.text              # and where to get the real one
+    assert "eMFDscore" in caplog.text  # and where to get the real one
 
 
 def test_no_configured_path_is_not_a_warning(caplog):
@@ -60,9 +60,16 @@ def _store_with(docs: int, lexicon: str | None) -> Datastore:
         store.set_meta("lexicon", lexicon)
     for i in range(docs):
         store.upsert_document(
-            doc_id=f"d{i}", diet_id="self", source_id="s", stratum_id=None,
-            url=None, title="t", published_utc=None,
-            fetched_utc="2026-07-29T00:00:00+00:00", word_count=200, minhash=None,
+            doc_id=f"d{i}",
+            diet_id="self",
+            source_id="s",
+            stratum_id=None,
+            url=None,
+            title="t",
+            published_utc=None,
+            fetched_utc="2026-07-29T00:00:00+00:00",
+            word_count=200,
+            minhash=None,
         )
     return store
 
@@ -80,10 +87,10 @@ def test_changing_lexicon_on_a_populated_store_warns(caplog):
         store.close()
 
     assert "lexicon changed" in caplog.text
-    assert SEED_NAME in caplog.text                    # names both instruments
+    assert SEED_NAME in caplog.text  # names both instruments
     assert "emfd_scoring.csv" in caplog.text
     assert "NOT re-scored" in caplog.text
-    assert "fresh datastore" in caplog.text            # the only clean answer
+    assert "fresh datastore" in caplog.text  # the only clean answer
 
 
 def test_an_empty_store_does_not_warn(caplog):
@@ -134,8 +141,9 @@ def test_a_real_run_warns_and_records_the_new_name(monkeypatch, tmp_path, caplog
     csv = tmp_path / "emfd_scoring.csv"
     csv.write_text("word,care_p,care_sent\nharm,0.8,-1\n", encoding="utf-8")
 
-    cfg = pipeline.PipelineConfig(lexicon_path=str(csv), transformer_enabled=False,
-                                  liberty_enabled=False)
+    cfg = pipeline.PipelineConfig(
+        lexicon_path=str(csv), transformer_enabled=False, liberty_enabled=False
+    )
     try:
         with caplog.at_level(logging.WARNING):
             pipeline.run(store, _Registry(), cfg)
@@ -148,8 +156,9 @@ def test_a_real_run_warns_and_records_the_new_name(monkeypatch, tmp_path, caplog
 def test_a_real_run_with_an_unchanged_lexicon_stays_quiet(monkeypatch, caplog):
     store = _store_with(3, SEED_NAME)
     monkeypatch.setattr(pipeline, "parse_feed", lambda *a, **k: [])
-    cfg = pipeline.PipelineConfig(lexicon_path=None, transformer_enabled=False,
-                                  liberty_enabled=False)
+    cfg = pipeline.PipelineConfig(
+        lexicon_path=None, transformer_enabled=False, liberty_enabled=False
+    )
     try:
         with caplog.at_level(logging.WARNING):
             pipeline.run(store, _Registry(), cfg)

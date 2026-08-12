@@ -15,6 +15,7 @@ def _lexicon(terms: dict[str, dict[str, float]]) -> Lexicon:
 
 # -- the categorical failure ----------------------------------------------
 
+
 def test_missing_side_is_detected():
     """The seed's original bug: equality vocabulary, no proportionality at all."""
     audit = audit_fairness(_lexicon({"equal": {"fairness": 1.0}}), "equality-only")
@@ -32,24 +33,26 @@ def test_missing_side_is_alarming_in_the_report():
 def test_cli_exits_non_zero_only_for_a_missing_side(capsys, tmp_path):
     csv_path = tmp_path / "lex.csv"
     csv_path.write_text(
-        "word,care_p,fairness_p,loyalty_p,authority_p,sanctity_p\n"
-        "equal,0.0,1.0,0.0,0.0,0.0\n",
+        "word,care_p,fairness_p,loyalty_p,authority_p,sanctity_p\nequal,0.0,1.0,0.0,0.0,0.0\n",
         encoding="utf-8",
     )
     assert main(["--lexicon", str(csv_path)]) == 1
     capsys.readouterr()
-    assert main([]) == 0        # built-in seed carries both sides
+    assert main([]) == 0  # built-in seed carries both sides
 
 
 # -- yield accounting ------------------------------------------------------
 
+
 def test_argmax_zeroes_words_the_lexicon_assigns_elsewhere():
     """A merit word the lexicon calls 'authority' contributes nothing to fairness,
     however clearly it belongs there conceptually."""
-    lex = _lexicon({
-        "equal": {"fairness": 0.5, "care": 0.1},
-        "merit": {"fairness": 0.4, "authority": 0.6},   # argmax is authority
-    })
+    lex = _lexicon(
+        {
+            "equal": {"fairness": 0.5, "care": 0.1},
+            "merit": {"fairness": 0.4, "authority": 0.6},  # argmax is authority
+        }
+    )
     audit = audit_fairness(lex, "t", assignment="argmax")
     assert audit.sides["equality"].mean_yield == 0.5
     assert audit.sides["proportionality"].mean_yield == 0.0
@@ -58,20 +61,24 @@ def test_argmax_zeroes_words_the_lexicon_assigns_elsewhere():
 
 
 def test_probability_mode_counts_the_weight_regardless_of_argmax():
-    lex = _lexicon({
-        "equal": {"fairness": 0.5, "care": 0.1},
-        "merit": {"fairness": 0.4, "authority": 0.6},
-    })
+    lex = _lexicon(
+        {
+            "equal": {"fairness": 0.5, "care": 0.1},
+            "merit": {"fairness": 0.4, "authority": 0.6},
+        }
+    )
     audit = audit_fairness(lex, "t", assignment="probability")
     assert audit.sides["proportionality"].mean_yield == 0.4
     assert abs(audit.yield_ratio - 0.8) < 1e-9
 
 
 def test_balanced_lexicon_reports_balanced():
-    lex = _lexicon({
-        "equal": {"fairness": 0.5},
-        "merit": {"fairness": 0.5},
-    })
+    lex = _lexicon(
+        {
+            "equal": {"fairness": 0.5},
+            "merit": {"fairness": 0.5},
+        }
+    )
     audit = audit_fairness(lex, "t")
     assert audit.yield_ratio == 1.0
     assert audit.balanced
@@ -79,10 +86,12 @@ def test_balanced_lexicon_reports_balanced():
 
 
 def test_lean_is_named_and_attributed_to_the_dictionary():
-    lex = _lexicon({
-        "equal": {"fairness": 1.0},
-        "merit": {"fairness": 0.2},
-    })
+    lex = _lexicon(
+        {
+            "equal": {"fairness": 1.0},
+            "merit": {"fairness": 0.2},
+        }
+    )
     audit = audit_fairness(lex, "t")
     assert not audit.balanced
     report = format_report(audit)
@@ -99,6 +108,7 @@ def test_unknown_assignment_mode_is_rejected():
 
 
 # -- the shipped seed ------------------------------------------------------
+
 
 def test_shipped_seed_carries_both_sides():
     """Regression guard on the fix: the seed must never lose a side again."""

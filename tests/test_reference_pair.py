@@ -87,6 +87,6 @@ def test_the_fallback_still_compares_across_families(caplog):
 def test_a_known_pair_is_not_second_guessed():
     families = {"left": ["self"], "right": ["modeled_ce"]}
     settings = {"compare": {"reference_pair": {"mine": "self", "theirs": "modeled_ce"}}}
-    assert resolve(
-        settings, available=["self", "modeled_ce"], families=families
-    ) == ReferencePair("self", "modeled_ce")
+    assert resolve(settings, available=["self", "modeled_ce"], families=families) == ReferencePair(
+        "self", "modeled_ce"
+    )

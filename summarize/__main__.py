@@ -22,8 +22,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", help="SQLite path (default from settings)")
     parser.add_argument("--settings", help="path to settings.yaml")
     parser.add_argument("--model", help=f"Claude model id (default: {DEFAULT_MODEL})")
-    parser.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"],
-                        help=f"thinking depth (default: {DEFAULT_EFFORT})")
+    parser.add_argument(
+        "--effort",
+        choices=["low", "medium", "high", "xhigh", "max"],
+        help=f"thinking depth (default: {DEFAULT_EFFORT})",
+    )
     parser.add_argument("--mine", help="persona id for your side of the reference pair")
     parser.add_argument("--theirs", help="persona id for the other side")
     args = parser.parse_args(argv)
@@ -31,8 +34,11 @@ def main(argv: list[str] | None = None) -> int:
     settings = load_settings(args.settings)
     registry = load_registry(settings=settings)
     pair = resolve(
-        settings, args.mine, args.theirs,
-        available=registry.persona_ids(), families=registry.families(),
+        settings,
+        args.mine,
+        args.theirs,
+        available=registry.persona_ids(),
+        families=registry.families(),
     )
     store = Datastore(datastore_path(settings, args.db))
     try:
@@ -40,8 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = settings.get("summarize", {}) or {}
         model = args.model or cfg.get("model")
         effort = args.effort or cfg.get("effort")
-        summarizer = Summarizer(model=model or DEFAULT_MODEL,
-                                effort=effort or DEFAULT_EFFORT)
+        summarizer = Summarizer(model=model or DEFAULT_MODEL, effort=effort or DEFAULT_EFFORT)
         result = summarizer.summarize(store, registry, pair)
         if not result.per_diet and not result.executive:
             print("No scored documents yet — run `python -m ingestion run` first.")

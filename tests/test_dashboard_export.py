@@ -22,20 +22,36 @@ def _store_with_two_diets():
     for diet, care in [("self", 0.3), ("modeled_ce", 0.1)]:
         did = f"{diet}-doc"
         store.upsert_document(
-            doc_id=did, source_id=f"src_{diet}", stratum_id=None, url=None,
-            title="t", published_utc=None, fetched_utc="2026-07-23T00:00:00+00:00",
-            word_count=90, minhash=None,
+            doc_id=did,
+            source_id=f"src_{diet}",
+            stratum_id=None,
+            url=None,
+            title="t",
+            published_utc=None,
+            fetched_utc="2026-07-23T00:00:00+00:00",
+            word_count=90,
+            minhash=None,
         )
         store.upsert_scores(
-            document_id=did, scorer="dictionary",
-            foundations={"care": care, "fairness": 0.1, "loyalty": 0.2,
-                         "authority": 0.1, "sanctity": 0.1},
-            sentiment=0.0, moral_word_ratio=0.2, matched_words=18,
+            document_id=did,
+            scorer="dictionary",
+            foundations={
+                "care": care,
+                "fairness": 0.1,
+                "loyalty": 0.2,
+                "authority": 0.1,
+                "sanctity": 0.1,
+            },
+            sentiment=0.0,
+            moral_word_ratio=0.2,
+            matched_words=18,
         )
-    store.upsert_summary(scope="self", generated_utc="t", model="m",
-                         method="deterministic", text="self summary")
-    store.upsert_summary(scope="executive", generated_utc="t", model="m",
-                         method="deterministic", text="exec summary")
+    store.upsert_summary(
+        scope="self", generated_utc="t", model="m", method="deterministic", text="self summary"
+    )
+    store.upsert_summary(
+        scope="executive", generated_utc="t", model="m", method="deterministic", text="exec summary"
+    )
     return store
 
 
@@ -64,8 +80,7 @@ def test_the_payload_carries_both_of_a_diets_names():
     """`label` reads as a noun phrase inside a sentence, `short_label` fits a
     legend. Emitting the id as the label put "modeled_ce" on every surface."""
     store = _store_with_two_diets()
-    store.set_diet_label("modeled_ce", "Modeled conservative-evangelical diet",
-                         "The modeled diet")
+    store.set_diet_label("modeled_ce", "Modeled conservative-evangelical diet", "The modeled diet")
     by_id = {d["id"]: d for d in build_payload(store, _reg(), pair())["diets"]}
     assert by_id["modeled_ce"]["label"] == "Modeled conservative-evangelical diet"
     assert by_id["modeled_ce"]["short_label"] == "The modeled diet"
@@ -100,7 +115,7 @@ def test_write_js_payload(tmp_path):
     out = write_payload(store, _reg(), pair(), tmp_path / "latest.js")
     text = out.read_text()
     assert text.startswith("window.PARALLAX_DATA = ")
-    data = json.loads(text[len("window.PARALLAX_DATA = "):].rstrip().rstrip(";"))
+    data = json.loads(text[len("window.PARALLAX_DATA = ") :].rstrip().rstrip(";"))
     assert data["diets"]
     store.close()
 
@@ -110,11 +125,25 @@ def test_blindspots_in_payload():
     # add two more modeled_ce docs so a cluster can be one-sided
     for i in range(3):
         did = f"ce-extra-{i}"
-        store.upsert_document(doc_id=did, source_id="src_modeled_ce", stratum_id=None,
-            url=None, title=f"faith story {i}", published_utc=None,
-            fetched_utc="2026-07-23T00:00:00+00:00", word_count=80, minhash=None)
-        store.upsert_scores(document_id=did, scorer="dictionary", foundations={"sanctity": 0.5},
-                            sentiment=0.0, moral_word_ratio=0.1, matched_words=5)
+        store.upsert_document(
+            doc_id=did,
+            source_id="src_modeled_ce",
+            stratum_id=None,
+            url=None,
+            title=f"faith story {i}",
+            published_utc=None,
+            fetched_utc="2026-07-23T00:00:00+00:00",
+            word_count=80,
+            minhash=None,
+        )
+        store.upsert_scores(
+            document_id=did,
+            scorer="dictionary",
+            foundations={"sanctity": 0.5},
+            sentiment=0.0,
+            moral_word_ratio=0.1,
+            matched_words=5,
+        )
     # seed a persisted clustering directly (cluster 5 = modeled_ce-only)
     store.replace_clustering(
         clusters=[(5, "faith · story", 3)],
@@ -139,19 +168,30 @@ def test_blindspot_themes_travel_with_the_clusters():
     sources = ["ct", "cp", "ct"]
     for i in range(3):
         did = f"ce-extra-{i}"
-        store.upsert_document(doc_id=did, source_id=sources[i], stratum_id=None,
+        store.upsert_document(
+            doc_id=did,
+            source_id=sources[i],
+            stratum_id=None,
             url=f"https://example.org/pastor-{i}",
             title=f"Church congregation welcomes a new pastor number {i}",
-            published_utc=None, fetched_utc="2026-07-23T00:00:00+00:00",
-            word_count=80, minhash=None)
-        store.upsert_scores(document_id=did, scorer="dictionary",
-                            foundations={"sanctity": 0.5}, sentiment=0.0,
-                            moral_word_ratio=0.1, matched_words=5)
-    store.replace_clustering(clusters=[(5, "faith · story", 3)],
-                             assignments=[(f"ce-extra-{i}", 5) for i in range(3)])
+            published_utc=None,
+            fetched_utc="2026-07-23T00:00:00+00:00",
+            word_count=80,
+            minhash=None,
+        )
+        store.upsert_scores(
+            document_id=did,
+            scorer="dictionary",
+            foundations={"sanctity": 0.5},
+            sentiment=0.0,
+            moral_word_ratio=0.1,
+            matched_words=5,
+        )
+    store.replace_clustering(
+        clusters=[(5, "faith · story", 3)], assignments=[(f"ce-extra-{i}", 5) for i in range(3)]
+    )
     store.replace_blindspot_themes(
-        [(f"ce-extra-{i}", "faith", "Faith & the church", "taxonomy")
-         for i in range(3)]
+        [(f"ce-extra-{i}", "faith", "Faith & the church", "taxonomy") for i in range(3)]
     )
 
     # `modeled_ce` reads the two mastheads as well as its own seed source.
@@ -169,9 +209,7 @@ def test_blindspot_themes_travel_with_the_clusters():
     story = themes[0]["stories"][0]
     assert story["articles"] == 3
     # The mastheads that carried it, de-duplicated, each with a link.
-    assert [o["label"] for o in story["outlets"]] == [
-        "Christianity Today", "The Christian Post"
-    ]
+    assert [o["label"] for o in story["outlets"]] == ["Christianity Today", "The Christian Post"]
     assert story["outlets"][0]["url"] == "https://example.org/pastor-0"
     store.close()
 
@@ -185,22 +223,34 @@ def test_the_agenda_divergence_travels_with_the_payload():
     for diet in ("self", "modeled_ce"):
         for i in range(3):
             did = f"{diet}-agenda-{i}"
-            store.upsert_document(doc_id=did, source_id=f"src_{diet}",
-                stratum_id=None, url=None, title=f"{diet} story {i}",
-                published_utc=None, fetched_utc="2026-07-23T00:00:00+00:00",
-                word_count=80, minhash=None)
-            store.upsert_scores(document_id=did, scorer="dictionary",
-                                foundations={"care": 0.5}, sentiment=0.0,
-                                moral_word_ratio=0.1, matched_words=5)
+            store.upsert_document(
+                doc_id=did,
+                source_id=f"src_{diet}",
+                stratum_id=None,
+                url=None,
+                title=f"{diet} story {i}",
+                published_utc=None,
+                fetched_utc="2026-07-23T00:00:00+00:00",
+                word_count=80,
+                minhash=None,
+            )
+            store.upsert_scores(
+                document_id=did,
+                scorer="dictionary",
+                foundations={"care": 0.5},
+                sentiment=0.0,
+                moral_word_ratio=0.1,
+                matched_words=5,
+            )
     store.replace_clustering(
         clusters=[(7, "mine", 3), (8, "theirs", 3)],
         assignments=[(f"self-agenda-{i}", 7) for i in range(3)]
-                    + [(f"modeled_ce-agenda-{i}", 8) for i in range(3)],
+        + [(f"modeled_ce-agenda-{i}", 8) for i in range(3)],
     )
     agenda = build_payload(store, _reg(), pair())["agenda"]
-    assert agenda["divergence"] == 1.0      # wholly different stories
+    assert agenda["divergence"] == 1.0  # wholly different stories
     assert agenda["shared_stories"] == 0
-    assert agenda["thin"] is True           # three articles each
+    assert agenda["thin"] is True  # three articles each
     store.close()
 
 
@@ -215,18 +265,31 @@ def test_no_blindspots_when_unclustered():
 def test_single_diet_has_no_comparison():
     store = Datastore(":memory:")
     store.upsert_document(
-        doc_id="d", diet_id="self", source_id="s", stratum_id=None, url=None,
-        title="t", published_utc=None, fetched_utc="2026-07-23T00:00:00+00:00",
-        word_count=90, minhash=None,
+        doc_id="d",
+        diet_id="self",
+        source_id="s",
+        stratum_id=None,
+        url=None,
+        title="t",
+        published_utc=None,
+        fetched_utc="2026-07-23T00:00:00+00:00",
+        word_count=90,
+        minhash=None,
     )
-    store.upsert_scores(document_id="d", scorer="dictionary",
-                        foundations={"care": 0.5}, sentiment=0.0,
-                        moral_word_ratio=0.1, matched_words=5)
+    store.upsert_scores(
+        document_id="d",
+        scorer="dictionary",
+        foundations={"care": 0.5},
+        sentiment=0.0,
+        moral_word_ratio=0.1,
+        matched_words=5,
+    )
     assert build_payload(store, _reg(), pair())["comparison"] is None
     store.close()
 
 
 # -- snapshot history in the payload ---------------------------------------
+
 
 def test_history_is_empty_until_a_snapshot_is_recorded():
     store = _store_with_two_diets()
@@ -273,6 +336,7 @@ def test_history_limit_caps_what_is_serialized():
 
 # -- fairness split in the payload -----------------------------------------
 
+
 def test_fairness_split_absent_when_nothing_was_partitioned():
     store = _store_with_two_diets()
     assert build_payload(store, _reg(), pair())["fairness_split"] is None
@@ -282,11 +346,20 @@ def test_fairness_split_absent_when_nothing_was_partitioned():
 def test_fairness_split_carries_shares_and_coverage():
     store = _store_with_two_diets()
     store.upsert_scores(
-        document_id="self-doc", scorer="dictionary",
-        foundations={"care": 0.3, "fairness": 0.2, "loyalty": 0.2,
-                     "authority": 0.1, "sanctity": 0.1},
-        sentiment=0.0, moral_word_ratio=0.2, matched_words=18,
-        equality=0.15, proportionality=0.05,
+        document_id="self-doc",
+        scorer="dictionary",
+        foundations={
+            "care": 0.3,
+            "fairness": 0.2,
+            "loyalty": 0.2,
+            "authority": 0.1,
+            "sanctity": 0.1,
+        },
+        sentiment=0.0,
+        moral_word_ratio=0.2,
+        matched_words=18,
+        equality=0.15,
+        proportionality=0.05,
     )
     fs = build_payload(store, _reg(), pair())["fairness_split"]
     assert fs["diets"]["self"]["leans"] == "equality"
@@ -300,6 +373,7 @@ def test_fairness_split_carries_shares_and_coverage():
 
 # -- liberty in the payload ------------------------------------------------
 
+
 def test_liberty_absent_until_the_tagger_runs():
     store = _store_with_two_diets()
     assert build_payload(store, _reg(), pair())["liberty"] is None
@@ -310,8 +384,13 @@ def test_liberty_reports_mean_and_coverage():
     store = _store_with_two_diets()
     scorer = "claude-liberty/claude-sonnet-5"
     store.upsert_scores(
-        document_id="self-doc", scorer=scorer, foundations={},
-        sentiment=0.0, moral_word_ratio=0.0, matched_words=0, liberty=0.75,
+        document_id="self-doc",
+        scorer=scorer,
+        foundations={},
+        sentiment=0.0,
+        moral_word_ratio=0.0,
+        matched_words=0,
+        liberty=0.75,
     )
     store.set_meta("liberty_scorer", scorer)
     lib = build_payload(store, _reg(), pair())["liberty"]
@@ -329,14 +408,19 @@ def test_liberty_does_not_change_the_headline_composition():
     store = _store_with_two_diets()
     before = build_payload(store, _reg(), pair())
     store.upsert_scores(
-        document_id="self-doc", scorer="claude-liberty/claude-sonnet-5", foundations={},
-        sentiment=0.0, moral_word_ratio=0.0, matched_words=0, liberty=0.9,
+        document_id="self-doc",
+        scorer="claude-liberty/claude-sonnet-5",
+        foundations={},
+        sentiment=0.0,
+        moral_word_ratio=0.0,
+        matched_words=0,
+        liberty=0.9,
     )
     store.set_meta("liberty_scorer", "claude-liberty/claude-sonnet-5")
     after = build_payload(store, _reg(), pair())
     assert after["comparison"]["jsd"] == before["comparison"]["jsd"]
     assert [d["profile"] for d in after["diets"]] == [d["profile"] for d in before["diets"]]
-    assert after["foundations"] == before["foundations"]   # still the classic five
+    assert after["foundations"] == before["foundations"]  # still the classic five
     store.close()
 
 
@@ -408,8 +492,8 @@ def test_the_overlap_matrix_ships_beside_the_divergence_one():
     overlap = build_payload(store, reg, pair())["overlap"]
     order = overlap["personas"]
     i, j = order.index("self"), order.index("modeled_ce")
-    assert overlap["cosine"][i][i] == 1.0        # a persona overlaps itself entirely
-    assert overlap["cosine"][i][j] == 0.0        # these two share no source
+    assert overlap["cosine"][i][i] == 1.0  # a persona overlaps itself entirely
+    assert overlap["cosine"][i][j] == 0.0  # these two share no source
     store.close()
 
 
@@ -453,22 +537,38 @@ def test_the_catalog_never_carries_a_resolved_subscriber_url(monkeypatch, tmp_pa
     secret = "https://example.com/private?id=SECRETTOKEN"
     monkeypatch.setenv("PARALLAX_TEST_FEED", secret)
     path = tmp_path / "sources.yaml"
-    path.write_text(yaml.safe_dump({
-        "version": 3,
-        "strata": [{"id": "audio"}],
-        "catalog": [{
-            "id": "show", "name": "A Show", "medium": "podcast", "stratum": "audio",
-            "ingest": {"type": "podcast_rss", "url_env": "PARALLAX_TEST_FEED"},
-            "rationale": "r",
-        }],
-        "personas": [{
-            "id": "self", "label": "Me", "family": "left", "description": "d",
-            "strata": {"audio": 1.0}, "sources": {"show": 1.0},
-        }],
-    }), encoding="utf-8")
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "version": 3,
+                "strata": [{"id": "audio"}],
+                "catalog": [
+                    {
+                        "id": "show",
+                        "name": "A Show",
+                        "medium": "podcast",
+                        "stratum": "audio",
+                        "ingest": {"type": "podcast_rss", "url_env": "PARALLAX_TEST_FEED"},
+                        "rationale": "r",
+                    }
+                ],
+                "personas": [
+                    {
+                        "id": "self",
+                        "label": "Me",
+                        "family": "left",
+                        "description": "d",
+                        "strata": {"audio": 1.0},
+                        "sources": {"show": 1.0},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     reg = load_registry(path)
-    assert reg.source("show").url == secret          # resolved in memory
+    assert reg.source("show").url == secret  # resolved in memory
     body = json.dumps(build_catalog(reg, pair()))
     assert "SECRETTOKEN" not in body
     assert secret not in body

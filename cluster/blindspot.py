@@ -38,12 +38,69 @@ from .titles import clean_title, clean_titles
 
 _WORD_RE = re.compile(r"[a-z][a-z'-]+")
 _STOP = {
-    "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "for", "with",
-    "at", "by", "from", "as", "is", "are", "was", "were", "be", "been", "it",
-    "its", "this", "that", "these", "those", "he", "she", "they", "we", "you",
-    "his", "her", "their", "our", "your", "will", "would", "can", "could", "has",
-    "have", "had", "not", "no", "new", "says", "say", "said", "after", "over",
-    "how", "why", "what", "who", "amid", "into", "out", "up", "down", "about",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "of",
+    "to",
+    "in",
+    "on",
+    "for",
+    "with",
+    "at",
+    "by",
+    "from",
+    "as",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "it",
+    "its",
+    "this",
+    "that",
+    "these",
+    "those",
+    "he",
+    "she",
+    "they",
+    "we",
+    "you",
+    "his",
+    "her",
+    "their",
+    "our",
+    "your",
+    "will",
+    "would",
+    "can",
+    "could",
+    "has",
+    "have",
+    "had",
+    "not",
+    "no",
+    "new",
+    "says",
+    "say",
+    "said",
+    "after",
+    "over",
+    "how",
+    "why",
+    "what",
+    "who",
+    "amid",
+    "into",
+    "out",
+    "up",
+    "down",
+    "about",
 }
 
 
@@ -57,7 +114,7 @@ REPRESENTATIVE_LIMIT = 6
 class Blindspot:
     cluster_id: int
     label: str
-    counts: dict[str, int]                 # persona_id -> member count, pair only
+    counts: dict[str, int]  # persona_id -> member count, pair only
     dominant_diet: str
     other_diet: str
     dominant_share: float
@@ -246,9 +303,7 @@ def blindspots_from_store(
         if cid == -1:
             continue
         cluster = store.cluster_members(cid)
-        carried = {
-            m["id"]: {m["source_id"]} | collapsed.get(m["id"], set()) for m in cluster
-        }
+        carried = {m["id"]: {m["source_id"]} | collapsed.get(m["id"], set()) for m in cluster}
         in_a = [m for m in cluster if carried[m["id"]] & members[a]]
         in_b = [m for m in cluster if carried[m["id"]] & members[b]]
         counts = {a: len(in_a), b: len(in_b)}
@@ -305,17 +360,19 @@ def articles_from_store(
                 title = clean_title(row["title"])
                 if not title:
                     continue
-                articles.append(Article(
-                    doc_id=row["id"],
-                    title=title,
-                    url=row["url"],
-                    outlet=outlets.get(row["source_id"], ""),
-                    # Carried so a story is still attributable in a store ingested
-                    # before outlet names were recorded: the key de-slugs into a
-                    # recognizable masthead, and no outlet at all is the one thing
-                    # that would make the story uncheckable.
-                    source_id=row["source_id"] or "",
-                ))
+                articles.append(
+                    Article(
+                        doc_id=row["id"],
+                        title=title,
+                        url=row["url"],
+                        outlet=outlets.get(row["source_id"], ""),
+                        # Carried so a story is still attributable in a store ingested
+                        # before outlet names were recorded: the key de-slugs into a
+                        # recognizable masthead, and no outlet at all is the one thing
+                        # that would make the story uncheckable.
+                        source_id=row["source_id"] or "",
+                    )
+                )
         if articles:
             out[spot.cluster_id] = articles
     return out
@@ -333,14 +390,9 @@ def themes_from_store(
     headlines with the taxonomy instead of returning nothing, so the dashboard
     and the email never fall back to the unreadable cluster labels.
     """
-    spots = (
-        blindspots if blindspots is not None
-        else blindspots_from_store(store, members)
-    )
+    spots = blindspots if blindspots is not None else blindspots_from_store(store, members)
     stored = {
-        row["document_id"]: ThemeAssignment(
-            row["theme_key"], row["theme_title"], row["method"]
-        )
+        row["document_id"]: ThemeAssignment(row["theme_key"], row["theme_title"], row["method"])
         for row in store.blindspot_theme_rows()
     }
     return group_blindspots(spots, stored, articles_from_store(store, spots, members))
@@ -383,11 +435,10 @@ def run_clustering(
     ]
     store.replace_clustering(cluster_rows, assignments)
 
-    blindspots = detect_blindspots(
-        result, members, dominance, min_blindspot_size, labels=labels
+    blindspots = detect_blindspots(result, members, dominance, min_blindspot_size, labels=labels)
+    themes = _theme_blindspots(
+        store, blindspots, members, theme_model, theme_client, claude_themes, theme_effort
     )
-    themes = _theme_blindspots(store, blindspots, members, theme_model, theme_client,
-                               claude_themes, theme_effort)
     n_noise = sum(1 for lbl in result.labels if lbl == -1)
     return ClusteringOutcome(
         n_docs=result.n_docs,

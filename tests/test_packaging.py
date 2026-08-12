@@ -34,9 +34,7 @@ def _declared() -> set[str]:
 def _local_packages() -> set[str]:
     """Top-level directories that are importable Python packages."""
     return {
-        path.name
-        for path in ROOT.iterdir()
-        if path.is_dir() and (path / "__init__.py").is_file()
+        path.name for path in ROOT.iterdir() if path.is_dir() and (path / "__init__.py").is_file()
     } - NOT_SHIPPED
 
 
