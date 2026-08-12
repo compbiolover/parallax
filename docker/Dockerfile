@@ -72,10 +72,10 @@ RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
         -e ".[llm,scoring,embeddings]"
 
 # eMFDscore is not on PyPI and is not a declared dependency. Pinned to a commit
-# rather than a branch by default in CI: an unpinned scorer changes what the
-# numbers mean between two builds of the same source, and nothing downstream
-# would report that.
-ARG EMFDSCORE_REF=master
+# rather than a branch, because an unpinned scorer changes what the numbers mean
+# between two builds of the same source and nothing downstream would report it.
+# Override the ARG to move it deliberately; do not point it at a branch.
+ARG EMFDSCORE_REF=5523d76c25afa65a59ca00e44efe45885499b116
 RUN pip install "git+https://github.com/medianeuroscience/emfdscore.git@${EMFDSCORE_REF}"
 
 # Bake the five Mformer models plus the shared tokenizer in. They are ~500 MB,

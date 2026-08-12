@@ -329,6 +329,29 @@ def datastore_path(
     return str(_configured_path(configured or DEFAULT_DATASTORE))
 
 
+def dictionary_lexicon_path(
+    settings: dict[str, Any] | None = None, explicit: str | Path | None = None
+) -> str | None:
+    """Where the eMFD CSV is, or ``None`` when none is configured.
+
+    Anchored at ``REPO_ROOT`` for the same reason the registry and the datastore
+    are, and with more at stake than either: a lexicon path that does not resolve
+    is not an error. ``build_lexicon`` warns and scores with the built-in demo
+    seed, so a run that lost track of its working directory still produces a
+    complete, plausible, fully-populated set of numbers — from an instrument that
+    was never validated. The scheduled run is exactly the case that inherits no
+    working directory, and exactly the case where nobody reads the warning.
+
+    ``explicit`` (``--lexicon``) is left as typed, like every other explicit path
+    argument: it comes from a shell and means what it means there.
+    """
+    if explicit:
+        return str(Path(explicit).expanduser())
+    taggers = ((settings or {}).get("scoring") or {}).get("taggers") or {}
+    configured = (taggers.get("dictionary") or {}).get("lexicon_path")
+    return str(_configured_path(configured)) if configured else None
+
+
 def _registry_path(explicit: str | Path | None, settings: dict[str, Any] | None) -> Path:
     """Which registry file to read: argument, then settings, then the committed one.
 

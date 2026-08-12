@@ -12,9 +12,18 @@ silently degrading a run later — the transformer tagger is optional and
 ``ingestion/pipeline.py`` logs and continues without it, which is the right
 behaviour for a workstation and the wrong one for an image built to include it.
 
-Deliberately imports the same constants the scorer uses rather than repeating
-the model names, so a change to either cannot leave the cache and the runtime
-disagreeing about what to load.
+Deliberately reads the same settings the scorer does — model prefix and
+revision — rather than repeating them, so the cache and the runtime cannot
+disagree about what to load. Baking one revision while the run asks for another
+would download the second at task start, which quietly undoes the point of
+baking anything, and ``HF_HUB_OFFLINE=1`` would then turn that into a failure
+instead.
+
+An unpinned revision resolves to whatever the hub's default branch points at
+*on the day the image is built*, so two builds of identical source can carry
+different weights and score the same corpus differently. Pin
+``scoring.taggers.transformer.revision`` in settings — ``settings.example.yaml``
+already recommends it — and both this and the run will honour it.
 """
 
 from __future__ import annotations
@@ -23,19 +32,34 @@ import sys
 
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+from ingestion.config import load_settings
 from scoring.foundations import CLASSIC_FOUNDATIONS
-from scoring.transformer import DEFAULT_PREFIX
+from scoring.transformer import resolve_model_prefix
 
 
 def main() -> int:
-    tokenizer_id = f"{DEFAULT_PREFIX}{CLASSIC_FOUNDATIONS[0]}"
+    settings = load_settings()
+    transformer = ((settings.get("scoring") or {}).get("taggers") or {}).get("transformer") or {}
+    prefix = resolve_model_prefix(transformer.get("model"))
+    revision = transformer.get("revision")
+
+    if revision:
+        print(f"revision   {revision}", flush=True)
+    else:
+        print(
+            "revision   UNPINNED — baking whatever the hub's default branch points at "
+            "today. Set scoring.taggers.transformer.revision for a reproducible image.",
+            flush=True,
+        )
+
+    tokenizer_id = f"{prefix}{CLASSIC_FOUNDATIONS[0]}"
     print(f"tokenizer  {tokenizer_id}", flush=True)
-    AutoTokenizer.from_pretrained(tokenizer_id)
+    AutoTokenizer.from_pretrained(tokenizer_id, revision=revision)
 
     for foundation in CLASSIC_FOUNDATIONS:
-        model_id = f"{DEFAULT_PREFIX}{foundation}"
+        model_id = f"{prefix}{foundation}"
         print(f"model      {model_id}", flush=True)
-        AutoModelForSequenceClassification.from_pretrained(model_id)
+        AutoModelForSequenceClassification.from_pretrained(model_id, revision=revision)
 
     print(f"cached {len(CLASSIC_FOUNDATIONS)} models + 1 tokenizer", flush=True)
     return 0

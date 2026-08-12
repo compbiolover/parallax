@@ -68,16 +68,42 @@ jobs:
       - name: The private overlay is not in the image
         run: |
           set -eu
-          if docker run --rm --entrypoint sh parallax-core:ci -c \
-               'ls /app/config/personas.local.yaml /app/.env 2>/dev/null'; then
-            echo "::error::a gitignored private file was baked into the image"
-            exit 1
-          fi
+          # One file at a time, deliberately. `ls a b` exits non-zero when
+          # *either* is missing, so testing both in one call would only fail
+          # when both leaked — and would pass silently on a single leak, which
+          # is the likelier case and the one that matters.
+          leaked=0
+          for f in /app/config/personas.local.yaml /app/.env; do
+            if docker run --rm --entrypoint test parallax-core:ci -e "$f"; then
+              echo "::error::$f was baked into the image"
+              leaked=1
+            else
+              echo "absent: $f"
+            fi
+          done
+          [ "$leaked" -eq 0 ] || exit 1
           # Prove the negative is meaningful: the public registry *is* there, so
           # the check above is not passing because config/ is simply missing.
-          docker run --rm --entrypoint sh parallax-core:ci -c \
-            'test -s /app/config/sources.yaml'
-          echo "config/ present, private overlay absent"
+          docker run --rm --entrypoint test parallax-core:ci -s /app/config/sources.yaml
+          echo "config/ present, private files absent"
+
+      - name: The canary check can actually fail
+        # A privacy check that has never failed is a privacy check nobody has
+        # confirmed works. This builds a deliberately leaky image and asserts the
+        # predicate above rejects it.
+        run: |
+          set -eu
+          printf 'FROM parallax-core:ci\nUSER root\nCOPY canary.yaml /app/config/personas.local.yaml\n' \
+            > Dockerfile.leak
+          printf 'personas: []\n' > canary.yaml
+          docker build -f Dockerfile.leak -t parallax-leak:ci .
+          if docker run --rm --entrypoint test parallax-leak:ci -e /app/config/personas.local.yaml; then
+            echo "predicate correctly detects a leaked file"
+          else
+            echo "::error::the canary predicate cannot detect a leak — it proves nothing"
+            exit 1
+          fi
+          rm -f Dockerfile.leak canary.yaml
 
       - name: The entrypoint reaches daily's argv
         run: |

@@ -19,7 +19,21 @@ set -euo pipefail
 
 # Ephemeral task storage. Present in the image, recreated here because a mounted
 # volume can shadow it with an empty directory.
+#
+# `mkdir -p` alone proves nothing: it succeeds when the directory already exists,
+# which is exactly the case when a volume is mounted over it — and a mount
+# defaults to root ownership while this container runs as nobody. The failure
+# then surfaces much later as sqlite's "unable to open database file", after the
+# run has already fetched and scored. Cheaper to find out now, and to say why.
 mkdir -p /app/data
+if ! (: > /app/data/.write-test) 2>/dev/null; then
+  echo "FATAL: /app/data is not writable by $(id -un)." >&2
+  echo "  A volume mounted there is owned by root by default, while this image" >&2
+  echo "  runs as nobody. Either chown it to $(id -u):$(id -g) on the host, or" >&2
+  echo "  run with --user \$(id -u):\$(id -g)." >&2
+  exit 1
+fi
+rm -f /app/data/.write-test
 
 # The eMFD lexicon is gitignored, so it is absent unless something put it there.
 # `build_lexicon` (scoring/lexicon.py) warns and falls back to the built-in demo
@@ -36,11 +50,22 @@ if [ "${PARALLAX_REQUIRE_LEXICON:-0}" = "1" ]; then
 import sys
 from pathlib import Path
 
-from ingestion.config import load_settings
+from ingestion.config import dictionary_lexicon_path, load_settings
 
 settings = load_settings()
 taggers = (settings.get("scoring") or {}).get("taggers") or {}
-configured = (taggers.get("dictionary") or {}).get("lexicon_path")
+dictionary = taggers.get("dictionary") or {}
+
+# Nothing to guard when the dictionary tagger is off: no lexicon is loaded, so
+# there is no silent fallback to refuse.
+if not dictionary.get("enabled", True):
+    print("lexicon    dictionary tagger disabled, guard skipped", flush=True)
+    raise SystemExit(0)
+
+# Resolved by the same function the pipeline uses, so the file this checks and
+# the file `build_lexicon` opens cannot be different ones. A guard that resolves
+# a path its own way is a guard that can pass while the run falls back anyway.
+configured = dictionary_lexicon_path(settings)
 
 if not configured:
     sys.exit(
@@ -49,9 +74,10 @@ if not configured:
     )
 if not Path(configured).exists():
     sys.exit(
-        f"PARALLAX_REQUIRE_LEXICON=1 and lexicon_path is {configured!r}, which "
-        "does not exist. Refusing to score a corpus with the demo seed lexicon, "
-        "which is illustrative only. Fetch the real emfd_scoring.csv into place."
+        f"PARALLAX_REQUIRE_LEXICON=1 and lexicon_path resolves to {configured!r}, "
+        "which does not exist. Refusing to score a corpus with the demo seed "
+        "lexicon, which is illustrative only. Fetch the real emfd_scoring.csv "
+        "into place."
     )
 print(f"lexicon    {configured}", flush=True)
 PY
