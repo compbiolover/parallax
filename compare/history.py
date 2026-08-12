@@ -357,13 +357,16 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = load_settings(args.settings)
     db = datastore_path(settings, args.db)
-    # Both writers need the registry and the reference pair — a snapshot is a
-    # statement about two named personas, so there is no sensible default to
-    # invent here. Resolved the same way every other entry point does it.
-    registry = load_registry(settings=settings)
-    pair = resolve(settings, available=registry.persona_ids(), families=registry.families())
     store = Datastore(db)
     try:
+        if args.record or args.backfill:
+            # Resolved only for the writers. A snapshot is a statement about two
+            # named personas, so they genuinely need it — but the listing path
+            # reads nothing except the SQLite file, and making it depend on a
+            # loadable registry would take away the one command that still works
+            # when the configuration is the thing that broke.
+            registry = load_registry(settings=settings)
+            pair = resolve(settings, available=registry.persona_ids(), families=registry.families())
         if args.backfill:
             written = backfill_series(
                 store,

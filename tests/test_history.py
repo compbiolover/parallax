@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from compare.history import (
     LIVE,
     RECONSTRUCTED,
@@ -320,3 +322,28 @@ def test_cli_listing_still_works_without_flags(tmp_path, monkeypatch, capsys):
     # Nothing has been recorded into this fresh store, so the listing says so
     # rather than printing an empty table.
     assert "No snapshots recorded yet" in capsys.readouterr().out
+
+
+def test_cli_listing_does_not_need_a_loadable_registry(tmp_path, monkeypatch, capsys):
+    """Inspecting a database must not require the configuration to be valid.
+
+    The listing path reads nothing but the SQLite file. Resolving the registry
+    for it anyway would take away the one command that still works when the
+    config is the thing that broke — which is exactly when you want to look at
+    the history.
+    """
+    from compare import history as history_module
+
+    db = _cli_store(tmp_path, monkeypatch)
+
+    def _broken(**kwargs):
+        raise ValueError("duplicate persona id in registry")
+
+    monkeypatch.setattr("ingestion.config.load_registry", _broken, raising=True)
+
+    assert history_module.main(["--db", str(db)]) == 0
+    assert "No snapshots recorded yet" in capsys.readouterr().out
+
+    # And the writers still fail loudly, rather than inventing a pair.
+    with pytest.raises(ValueError, match="duplicate persona id"):
+        history_module.main(["--db", str(db), "--record"])

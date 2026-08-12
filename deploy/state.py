@@ -66,8 +66,12 @@ class StateError(RuntimeError):
 def _boto3():
     """Imported here rather than at module scope, like every other heavy dep.
 
-    The image that runs `--only export` has no reason to carry boto3, and a
-    workstation has no reason to install it at all.
+    Both images do install the ``aws`` extra, so boto3 is present in a container.
+    The lazy import is for everywhere else: a workstation has no reason to carry
+    it, and this module still has to be *importable* there — the entrypoint runs
+    ``deploy.state check`` and the no-bucket paths of ``pull`` and ``push`` on
+    every start, including runs that never touch S3 at all. A module-scope import
+    would turn "no cloud account" into an ImportError at container start.
     """
     try:
         import boto3
