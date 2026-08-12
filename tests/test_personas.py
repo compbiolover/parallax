@@ -19,7 +19,12 @@ import pathlib
 import pytest
 import yaml
 
-from ingestion.config import REPO_ROOT, datastore_path, load_registry
+from ingestion.config import (
+    REPO_ROOT,
+    datastore_path,
+    dictionary_lexicon_path,
+    load_registry,
+)
 
 # Every source's effective weight under registry version 2, generated from the
 # v2 file itself (`stratum_weight * source weight`) rather than retyped. Version 3
@@ -673,3 +678,44 @@ def test_datastore_path_expands_a_home_tilde(monkeypatch, tmp_path):
 def test_datastore_path_survives_an_empty_datastore_block():
     """`datastore:` present but empty parses as None, which `.get` cannot chain off."""
     assert datastore_path({"datastore": None}) == datastore_path({})
+
+
+# -- the lexicon path resolves like every other configured path --------------
+# This one matters more than the rest: a datastore path that does not resolve
+# fails loudly, and a lexicon path that does not resolve does not fail at all —
+# `build_lexicon` warns and scores with the demo seed.
+
+
+def test_lexicon_path_defaults_under_the_repo_not_the_cwd(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    settings = {"scoring": {"taggers": {"dictionary": {"lexicon_path": "data/emfd.csv"}}}}
+    assert pathlib.Path(dictionary_lexicon_path(settings)) == (
+        pathlib.Path(REPO_ROOT) / "data" / "emfd.csv"
+    )
+
+
+def test_lexicon_path_is_none_when_unconfigured():
+    """None means "use the seed", which is a choice; it is not a missing file."""
+    assert dictionary_lexicon_path({}) is None
+    assert dictionary_lexicon_path({"scoring": {"taggers": {"dictionary": {}}}}) is None
+
+
+def test_lexicon_path_leaves_an_explicit_argument_alone(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    assert dictionary_lexicon_path({}, "given.csv") == "given.csv"
+
+
+def test_lexicon_path_survives_empty_blocks():
+    assert dictionary_lexicon_path({"scoring": None}) is None
+    assert dictionary_lexicon_path({"scoring": {"taggers": None}}) is None
+
+
+def test_pipeline_config_anchors_the_lexicon_path(monkeypatch, tmp_path):
+    """The guard and the pipeline must resolve to the same file, by construction."""
+    from ingestion.pipeline import PipelineConfig
+
+    monkeypatch.chdir(tmp_path)
+    settings = {"scoring": {"taggers": {"dictionary": {"lexicon_path": "data/emfd.csv"}}}}
+    cfg = PipelineConfig.from_settings(settings)
+    assert cfg.lexicon_path == dictionary_lexicon_path(settings)
+    assert pathlib.Path(cfg.lexicon_path).is_absolute()

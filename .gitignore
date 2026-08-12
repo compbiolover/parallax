@@ -269,3 +269,23 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---- Terraform: state is a secret store ----
+# tfstate holds every value the run produced or read, in plaintext — generated
+# passwords, SMTP credentials, key material. It is not a build artifact that
+# happens to be large; it is the one file in an infrastructure repo that must
+# never be committed. Ignored before the first .tf exists, because the window
+# to get this wrong is the first `terraform apply` someone runs in the repo.
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+# .terraform.lock.hcl is deliberately NOT ignored: it pins provider versions and
+# their checksums, so committing it is what makes an apply reproducible.
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

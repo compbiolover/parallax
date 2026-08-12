@@ -21,7 +21,13 @@ from scoring.aggregate import aggregate_profile, to_composition
 from scoring.dictionary import DictionaryScorer, DocumentScore
 from scoring.lexicon import build_lexicon
 
-from .config import Registry, Source, load_registry, load_settings
+from .config import (
+    Registry,
+    Source,
+    dictionary_lexicon_path,
+    load_registry,
+    load_settings,
+)
 from .datastore import Datastore
 from .dedup import (
     NearDuplicateIndex,
@@ -99,7 +105,7 @@ class PipelineConfig:
             per_host_rpm=int(rate.get("per_host_requests_per_minute", 20)),
             respect_robots=bool(ing.get("respect_robots_txt", True)),
             near_dup_threshold=float(dedup.get("minhash_threshold", 0.85)),
-            lexicon_path=dict_cfg.get("lexicon_path"),
+            lexicon_path=dictionary_lexicon_path(settings),
             assignment=dict_cfg.get("assignment", "argmax"),
             split_fairness=bool(dict_cfg.get("split_fairness", True)),
             fairness_min_evidence=int(dict_cfg.get("fairness_min_evidence", 2)),
