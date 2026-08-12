@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     from compare.history import DEFAULT_SERIES_LIMIT
     from compare.reference import resolve
     from dashboard.export import build_payload
-    from ingestion.config import load_registry, load_settings
+    from ingestion.config import datastore_path, load_registry, load_settings
     from ingestion.datastore import Datastore
 
     from .render import build_digest
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         settings, args.mine, args.theirs,
         available=registry.persona_ids(), families=registry.families(),
     )
-    db = args.db or (settings.get("datastore", {}) or {}).get("path", "data/parallax.sqlite")
+    db = datastore_path(settings, args.db)
     own = args.own_diet or (settings.get("digest", {}) or {}).get("own_diet")
     # Same default the daily run uses, so `make digest` and `make daily` don't
     # draw different sparklines from the same settings file.

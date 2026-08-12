@@ -17,7 +17,7 @@ from itertools import combinations
 from cluster.embed import build_embedder
 from compare.divergence import jensen_shannon_divergence, log_ratios
 
-from .config import load_registry, load_settings
+from .config import datastore_path, load_registry, load_settings
 from .datastore import Datastore
 from .pipeline import (
     PipelineConfig,
@@ -27,12 +27,6 @@ from .pipeline import (
     persona_profiles,
     run,
 )
-
-
-def _db_path(args: argparse.Namespace, settings: dict) -> str:
-    if args.db:
-        return args.db
-    return (settings.get("datastore", {}) or {}).get("path", "data/parallax.sqlite")
 
 
 def format_progress(event: SourceProgress) -> str:
@@ -236,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
     progress = None if args.quiet else build_reporter()
 
     settings = load_settings(args.settings)
-    store = Datastore(_db_path(args, settings))
+    store = Datastore(datastore_path(settings, args.db))
     try:
         if args.command in ("run", "backfill"):
             cfg = PipelineConfig.from_settings(settings)

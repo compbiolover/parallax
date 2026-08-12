@@ -37,6 +37,7 @@ DEFAULT_SOURCES = REPO_ROOT / "config" / "sources.yaml"
 DEFAULT_OVERLAY = REPO_ROOT / "config" / "personas.local.yaml"
 DEFAULT_SETTINGS = REPO_ROOT / "config" / "settings.yaml"
 EXAMPLE_SETTINGS = REPO_ROOT / "config" / "settings.example.yaml"
+DEFAULT_DATASTORE = "data/parallax.sqlite"
 
 # The registry schema this loader understands. Version 2 nested sources inside
 # diets, which made a source diet-private and a shared source impossible.
@@ -306,6 +307,29 @@ def _configured_path(value: str | Path) -> Path:
     """
     path = Path(value).expanduser()
     return path if path.is_absolute() else REPO_ROOT / path
+
+
+def datastore_path(
+    settings: dict[str, Any] | None = None, explicit: str | Path | None = None
+) -> str:
+    """Which SQLite file to open: argument, then settings, then the shipped default.
+
+    Every entry point resolved this itself, and the same expression appeared in
+    eight modules — which is eight places to update when the store moves, and
+    eight chances for one of them to keep opening the old file. An entry point
+    that reads from a different database than the one the run just wrote to
+    reports an empty corpus rather than an error, so the drift would be quiet.
+
+    ``explicit`` is left exactly as typed: someone passing ``--db`` at a shell
+    means that path relative to the shell. A *configured* path is anchored at
+    ``REPO_ROOT`` by :func:`_configured_path`, for the same reason the registry
+    is — the scheduled run inherits no working directory, and a relative default
+    resolved against the cwd would silently create a second, empty store.
+    """
+    if explicit:
+        return str(Path(explicit).expanduser())
+    configured = ((settings or {}).get("datastore") or {}).get("path")
+    return str(_configured_path(configured or DEFAULT_DATASTORE))
 
 
 def _registry_path(explicit: str | Path | None, settings: dict[str, Any] | None) -> Path:

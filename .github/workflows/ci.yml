@@ -1,0 +1,127 @@
+# Lint, test, and packaging checks on every push and pull request.
+#
+# Until now .pre-commit-config.yaml was the only automated gate, and it runs
+# locally or not at all — so gitleaks, the guardrail against committing an API
+# key (CLAUDE.md §1), only protected contributors who had installed the hook.
+# That is the wrong default for a public repository.
+#
+# The lint job runs `ruff check` and gitleaks rather than `pre-commit run
+# --all-files`. The difference is ruff-format: pre-commit only ever sees the
+# files a commit touches, so the repository has never been formatted wholesale
+# and `ruff format --check .` currently wants to reformat most of it. Gating on
+# that here would fail every build until someone lands a repo-wide reformat,
+# which is a decision to take deliberately rather than a side effect of adding
+# CI. `ruff check` is clean repo-wide today, so it gates from the start.
+name: CI
+
+on:
+  # Push is scoped to the default branch on purpose. Listening on every branch
+  # as well as pull_request runs the whole matrix twice for each commit on a
+  # branch that has a PR open — the same commit, the same result, twice the
+  # minutes. Branch work is covered by its pull request.
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Pinned to the rev in .pre-commit-config.yaml. An unpinned linter
+      # silently changes what "clean" means, which is the same reason the dev
+      # extra pins it.
+      - run: pip install "ruff==0.15.8"
+      - run: ruff check .
+
+  secrets:
+    # The guardrail against committing an API key or a .env (CLAUDE.md §1).
+    # It existed only as a pre-commit hook, which protects contributors who
+    # installed it and nobody else — the wrong default for a public repository.
+    #
+    # Installed from a pinned release rather than via gitleaks-action, which
+    # downloads the same binary with two retries and, when that download fails,
+    # dies on a misleading "parameter 'file' is required" from the unpacking
+    # step. A secret scanner that fails obscurely on a flaky network is a gate
+    # people learn to re-run rather than read.
+    #
+    # The version tracks the rev in .pre-commit-config.yaml, so a commit that
+    # passes the local hook cannot fail here on a rule the two versions disagree
+    # about. Keep the two in lockstep, as pyproject does for ruff.
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: "8.18.4"
+      GITLEAKS_SHA256: "ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # detect scans history, not just the working tree
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 5 "$url" -o /tmp/gitleaks.tar.gz
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+      - name: Scan history for secrets
+        run: /tmp/gitleaks detect --redact --no-banner --exit-code 1
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      # Core + dev only. The heavy extras (torch, whisper, sentence-transformers)
+      # are lazy-imported behind ImportError handling precisely so the pipeline
+      # runs without them, and the suite covers that degraded path.
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  package:
+    # The unit test asserts the package list is complete; this asserts the wheel
+    # that list produces actually imports somewhere the repo root is not on
+    # sys.path — which is the only place the bug could ever have shown up.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install build
+      - run: python -m build --wheel
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/wheelcheck
+          /tmp/wheelcheck/bin/pip install --no-deps dist/*.whl
+      - name: Every step module resolves from outside the repo
+        working-directory: /
+        run: |
+          /tmp/wheelcheck/bin/python - <<'PY'
+          import importlib.util as u
+          # daily.runner imports these at step time; an unpackaged one fails the
+          # run at the end of a long job rather than at the start.
+          missing = [m for m in (
+              "ingestion.pipeline", "scoring.aggregate", "cluster.blindspot",
+              "compare.divergence", "summarize.summarizer", "daily.runner",
+              "dashboard.export", "digest.render", "digest.send",
+              "validation.evaluate",
+          ) if u.find_spec(m) is None]
+          raise SystemExit(f"not in the wheel: {missing}" if missing else 0)
+          PY

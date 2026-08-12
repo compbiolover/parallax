@@ -27,6 +27,9 @@ sources:
 # embeddings becomes worthwhile.
 datastore:
   kind: sqlite                    # sqlite | postgres
+  # Relative paths resolve against the repository root, not the working
+  # directory, so the scheduled run — which inherits no cwd — opens the same
+  # file you do. Pass an absolute path, or `--db`, to put it elsewhere.
   path: data/parallax.sqlite      # gitignored
   # postgres_dsn: env:PARALLAX_POSTGRES_DSN   # resolved from .env when kind=postgres
   rollups_dir: data/rollups       # daily Parquet rollups for cheap aggregation
