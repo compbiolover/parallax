@@ -2,7 +2,7 @@
 # Container entrypoint: everything after it is `python -m daily`'s own argv.
 #
 #   docker run parallax-core --only export
-#   docker run parallax-scored --only ingest,backfill
+#   docker run parallax-scored --only ingest backfill
 #
 # Deliberately thin. The step vocabulary lives in daily/runner.py's STEPS tuple
 # and the scheduler passes it through verbatim, so adding a step does not mean
@@ -34,6 +34,30 @@ if ! (: > /app/data/.write-test) 2>/dev/null; then
   exit 1
 fi
 rm -f /app/data/.write-test
+
+# --- durable state, if this run has any -------------------------------------
+# With PARALLAX_STATE_BUCKET unset none of this executes and the run reads and
+# writes local paths, exactly as on a laptop. See deploy/state.py.
+#
+# Order matters: the lease first, because losing a race should cost nothing; the
+# pull second, because it is what *fetches* the lexicon the guard below insists
+# on. Guarding before pulling would fail every run on a file that was about to
+# arrive.
+STATE_TOKEN=""
+release_lease() {
+  if [ -n "${STATE_TOKEN}" ]; then
+    # Never let a failed release mask the run's own exit code — the lease has a
+    # TTL precisely so an unreleased one recovers on its own.
+    "${PARALLAX_PYTHON}" -m deploy.state release --token "${STATE_TOKEN}" || true
+    STATE_TOKEN=""
+  fi
+}
+trap release_lease EXIT INT TERM
+
+if [ -n "${PARALLAX_STATE_BUCKET:-}" ]; then
+  STATE_TOKEN="$("${PARALLAX_PYTHON}" -m deploy.state acquire)"
+  "${PARALLAX_PYTHON}" -m deploy.state pull
+fi
 
 # The eMFD lexicon is gitignored, so it is absent unless something put it there.
 # `build_lexicon` (scoring/lexicon.py) warns and falls back to the built-in demo
@@ -83,4 +107,32 @@ print(f"lexicon    {configured}", flush=True)
 PY
 fi
 
-exec "${PARALLAX_PYTHON}" -m daily "$@"
+# Without durable state there is nothing to do afterwards, so `exec` and let the
+# run own the process — one fewer shell in the signal path.
+if [ -z "${PARALLAX_STATE_BUCKET:-}" ]; then
+  trap - EXIT INT TERM
+  exec "${PARALLAX_PYTHON}" -m daily "$@"
+fi
+
+set +e
+"${PARALLAX_PYTHON}" -m daily "$@"
+status=$?
+set -e
+
+# The database goes up either way. SQLite is transactionally consistent whatever
+# failed above it, and discarding a successful ingest because backfill returned
+# 503 would lose real work to protect nothing.
+#
+# The payload does not. A non-zero exit means some step raised, and `export` may
+# be the one — in which case what is on disk describes an older corpus than the
+# database now does, and publishing the two together would be worse than
+# publishing neither. `--only ingest backfill` also exits 0 having never written
+# a payload; `push` reports that as "missing locally" rather than inventing one.
+if [ "${status}" -eq 0 ]; then
+  "${PARALLAX_PYTHON}" -m deploy.state push
+else
+  "${PARALLAX_PYTHON}" -m deploy.state push --no-payload
+fi
+
+release_lease
+exit "${status}"

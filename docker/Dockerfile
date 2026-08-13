@@ -12,6 +12,11 @@
 # `scored` (~2.5 GB) runs ingest and backfill, where the transformer tagger and
 # neural embeddings live.
 #
+# Both carry the `aws` extra: the entrypoint fetches the database and the lexicon
+# from S3 before the run and puts them back after (deploy/state.py), and the
+# aggregate half needs that as much as the ingest half does. It stays inert when
+# PARALLAX_STATE_BUCKET is unset, so the image still runs with no cloud account.
+#
 # The media extra (faster-whisper, yt-dlp, ffmpeg) is deliberately absent. Podcast
 # transcription runs in hours rather than minutes and is the largest single line
 # of the bill; it stays on the workstation until it earns its own image.
@@ -52,7 +57,7 @@ RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu "torch>=2
 FROM base AS core
 
 COPY . .
-RUN pip install -e ".[llm]" \
+RUN pip install -e ".[llm,aws]" \
  && chmod +x scripts/parallax-entrypoint.sh \
  && ln -s /app/scripts/parallax-entrypoint.sh /usr/local/bin/parallax-entrypoint \
  && mkdir -p /app/data \
@@ -69,7 +74,7 @@ COPY . .
 
 # torch is already satisfied from the stage above, so this resolves the rest.
 RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
-        -e ".[llm,scoring,embeddings]"
+        -e ".[llm,scoring,embeddings,aws]"
 
 # eMFDscore is not on PyPI and is not a declared dependency. Pinned to a commit
 # rather than a branch, because an unpinned scorer changes what the numbers mean

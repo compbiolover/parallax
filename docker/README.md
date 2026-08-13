@@ -7,7 +7,7 @@ docker build -f docker/Dockerfile --target core   -t parallax-core   .
 docker build -f docker/Dockerfile --target scored -t parallax-scored .
 
 docker run --rm parallax-core --only export
-docker run --rm parallax-scored --only ingest,backfill
+docker run --rm parallax-scored --only ingest backfill
 ```
 
 Everything after the image name is `python -m daily`'s own argv, so the step
@@ -67,3 +67,38 @@ for a task start that touches no network and needs no `HF_TOKEN` — one fewer
 secret at runtime, and a Hugging Face outage no longer sits on the critical path
 of the morning run. CI loads them with `--network none` to check the weights are
 really present rather than being fetched on demand.
+
+## Durable state
+
+With `PARALLAX_STATE_BUCKET` unset, none of this runs and the container reads and
+writes local paths exactly as a laptop does. Set it and the entrypoint takes a
+lease, fetches the database and the lexicon from S3, runs, and puts them back.
+
+| Variable | Meaning |
+| --- | --- |
+| `PARALLAX_STATE_BUCKET` | Enables state sync. Unset = local disk only. |
+| `PARALLAX_STATE_PREFIX` | Key prefix. Default `parallax/`. |
+| `PARALLAX_LEASE_TABLE` | DynamoDB table for the single-writer lease. Unset = no locking. |
+| `PARALLAX_LEASE_ID` | Lease name. Default `daily`. |
+| `PARALLAX_LEASE_TTL` | Seconds before an abandoned lease can be taken. Default 7200. |
+
+`python -m deploy.state check` prints where everything resolves to and touches
+nothing — the container equivalent of `make check-secrets`.
+
+The order is deliberate: lease, then pull, then the lexicon guard. Losing the
+race should cost nothing, and the pull is what *fetches* the lexicon the guard
+insists on — guarding first would fail every run on a file about to arrive.
+
+**The database is pushed even after a partly failed run.** SQLite is
+transactionally consistent whatever failed above it, and discarding a successful
+ingest because backfill returned 503 would lose real work to protect nothing.
+The payload is not: a non-zero exit means some step raised and `export` may be
+the one, in which case the file on disk describes an older corpus than the
+database does.
+
+**The lease is not optional if anything else might run.** The datastore has no
+WAL, no `busy_timeout` past sqlite3's five-second default, and
+`Datastore.__init__` runs the schema script and a migration pass on every open —
+so two processes opening the same store while a migration is pending is the
+sharpest edge in the codebase. The scheduler sequences the scheduled path; the
+lease is what stops a manual run colliding with it.
