@@ -1,0 +1,79 @@
+# Format and validate the Terraform. Both run with no AWS credentials, which is
+# the point: this gates every push without anything to leak.
+#
+# Be clear about what it does *not* prove. `validate` checks syntax, types and
+# references. It does not check whether an IAM policy grants enough, whether the
+# subnet can reach ECR, or whether a service can assume its role — those only
+# answer to a real `apply`. A green tick here means the configuration is
+# well-formed, not that it works.
+name: Infra
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both configurations, because bootstrap is the one nobody re-runs and
+        # therefore the one where a syntax error would sit unnoticed until the
+        # day it is needed.
+        directory: [infra, infra/bootstrap]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Format
+        run: terraform -chdir=${{ matrix.directory }} fmt -check -diff -recursive
+
+      # -backend=false: there is no state bucket to reach, and no credentials to
+      # reach it with. Provider schemas still download, which is what validate
+      # needs to type-check resource arguments.
+      - name: Init
+        run: terraform -chdir=${{ matrix.directory }} init -backend=false -input=false
+
+      - name: Validate
+        run: terraform -chdir=${{ matrix.directory }} validate
+
+  secrets-stay-out-of-state:
+    # The one Terraform-specific mistake with lasting consequences: a value
+    # resource writes its contents into state in plaintext, and state is a file
+    # people copy around. Terraform cannot catch this, so grep can.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No secret-version resources
+        run: |
+          set -eu
+          # Matches a resource *declaration*, not the string anywhere in the
+          # file — secrets.tf contains a comment explaining why this resource is
+          # deliberately absent, and a looser pattern flags that comment as the
+          # violation it is warning about.
+          if grep -rnE '^[[:space:]]*resource[[:space:]]+"(aws_secretsmanager_secret_version|aws_ssm_parameter)"' \
+               infra/ --include="*.tf"; then
+            echo "::error::this resource would put secret values into terraform.tfstate"
+            echo "Set them out of band instead — see infra/README.md step 3."
+            exit 1
+          fi
+          echo "no secret values managed by Terraform"
