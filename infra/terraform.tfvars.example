@@ -1,0 +1,25 @@
+# Copy to terraform.tfvars and fill in. That file is gitignored: tfvars is where
+# account-specific values live, and some of them are worth not publishing.
+
+# Globally unique across every AWS account, so put something of your own in it.
+data_bucket_name = "parallax-data-CHANGE-ME"
+
+# Failure alarms, the "nothing ran" alarm, and budget notices. You will get a
+# confirmation email from SNS that has to be clicked before any of it works.
+alarm_email = "you@example.com"
+
+# The digest goes to a tagged alias while the Mac job is still running, so both
+# briefs arrive and can be compared. That is set in the Secrets Manager value,
+# not here — see infra/README.md step 3.
+
+# Local wall-clock; EventBridge Scheduler handles DST.
+schedule_expression = "cron(0 6 * * ? *)"
+schedule_timezone   = "America/New_York"
+
+# Ships disabled on purpose. Trigger the state machine by hand and watch a whole
+# run before letting it happen unattended at six in the morning.
+schedule_enabled = false
+
+# Warn, then alarm. Expected steady state without podcasts is ~$80/month.
+budget_warn_usd  = 50
+budget_alarm_usd = 150
