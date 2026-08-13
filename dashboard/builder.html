@@ -52,7 +52,7 @@
   .stratum h3 { font-size:13.5px; margin:0 0 2px; font-weight:600; }
   .stratum .sdesc { color:var(--muted); font-size:12px; margin:0 0 8px; max-width:72ch; }
   .src { display:flex; align-items:baseline; gap:8px; padding:3px 0; font-size:13.5px; }
-  .src label { flex:1; cursor:pointer; }
+  .src label { flex:1; cursor:pointer; display:flex; align-items:baseline; gap:8px; }
   .src .medium { color:var(--muted); font-size:11.5px; }
   .src input[type=number] { width:64px; font:12px inherit; color:var(--ink);
     background:var(--bg); border:1px solid var(--line); border-radius:5px; padding:2px 5px; }
@@ -392,9 +392,13 @@ function identityPanel() {
   p.querySelector("#f-reset").addEventListener("click", () => update(d => {
     Object.assign(d, blankDraft());
   }));
-  // Re-render on id edits is too jumpy while typing, so validation refreshes
-  // on blur instead.
-  p.querySelector("#f-id").addEventListener("blur", render);
+  // Re-rendering on every keystroke is unusable, so the preview, the problem
+  // list and the button's enabled state refresh on blur instead. All four
+  // fields, not just the id: the description is the one most likely to be typed
+  // last, immediately before reaching for Download.
+  for (const sel of ["#f-id", "#f-label", "#f-short", "#f-desc"]) {
+    p.querySelector(sel).addEventListener("blur", render);
+  }
 }
 
 function sourcesPanel() {
@@ -413,11 +417,16 @@ function sourcesPanel() {
       <p class="sdesc">${escapeHtml(st.description || "")}</p>` +
       list.map(s => {
         const on = s.id in draft.sources;
+        // The input sits *inside* the label, which associates the two without
+        // minting an id per source. `<label for="">` associates with nothing:
+        // the name would not be clickable and a screen reader would read the
+        // checkbox unlabelled.
         return `<div class="src">
-          <input type="checkbox" data-src="${escapeHtml(s.id)}"${on ? " checked" : ""} />
-          <label for="">${escapeHtml(s.name)}
+          <label><input type="checkbox" data-src="${escapeHtml(s.id)}"${on ? " checked" : ""} />
+            ${escapeHtml(s.name)}
             <span class="medium">${escapeHtml(s.medium)}${s.role ? " · " + escapeHtml(s.role) : ""}</span></label>
           <input type="number" data-weight="${escapeHtml(s.id)}" min="0" max="1" step="0.1"
+                 aria-label="weight for ${escapeHtml(s.name)}"
                  value="${on ? draft.sources[s.id] : 1}"${on ? "" : " disabled"} />
         </div>`;
       }).join("");
@@ -553,10 +562,15 @@ function outputPanel() {
 
   if (errs.length) return;
   p.querySelector("#dl").addEventListener("click", () => {
+    // Serialized here rather than reused from the last render. The text fields
+    // update `draft` without re-rendering — re-rendering on every keystroke is
+    // unusable — so a `yaml` captured at render time is one edit stale, and the
+    // file you download is missing the description you just typed.
+    if (problems(draft).length) return;
     // A Blob and an object URL: the file is assembled in the page and handed to
     // the browser's download machinery. Nothing is uploaded, because there is
     // nowhere to upload it to.
-    const blob = new Blob([yaml], { type: "text/yaml" });
+    const blob = new Blob([toYaml(draft)], { type: "text/yaml" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = "personas.local.yaml";
@@ -564,8 +578,9 @@ function outputPanel() {
     URL.revokeObjectURL(url);
   });
   p.querySelector("#copy").addEventListener("click", () => {
+    if (problems(draft).length) return;
     const el = document.createElement("textarea");
-    el.value = yaml; document.body.appendChild(el); el.select();
+    el.value = toYaml(draft); document.body.appendChild(el); el.select();
     try { document.execCommand("copy"); } catch (e) {}
     el.remove();
     const b = p.querySelector("#copy");

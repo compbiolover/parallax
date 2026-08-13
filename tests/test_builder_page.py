@@ -52,6 +52,15 @@ def _page() -> str:
     return PAGE.read_text(encoding="utf-8")
 
 
+def _strip_js_comments(text: str) -> str:
+    """Drop `//` line comments, for assertions about markup rather than prose.
+
+    A comment that quotes the very thing it warns against is normal and good;
+    a test that cannot tell the two apart is not.
+    """
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("//"))
+
+
 # -- the same contract test index.html has -----------------------------------
 
 
@@ -157,6 +166,50 @@ def test_the_page_does_not_invent_a_divergence_score():
     # And the overlap panel says out loud what it is not.
     assert "Source overlap only" in page
     assert "cannot tell you how differently" in page
+
+
+def test_download_serializes_the_draft_at_the_moment_it_is_clicked():
+    """The file must be what is on screen, not what was on screen a render ago.
+
+    The text fields deliberately update `draft` without re-rendering — doing it
+    per keystroke is unusable — so a `yaml` string captured when the panel was
+    built is one edit stale. Typing a description and reaching straight for
+    Download produced a file without it: a bug that looks like the page ignoring
+    you, and that a reader would blame on the loader.
+    """
+    page = _page()
+    handlers = page[page.index('querySelector("#dl")') :]
+    assert "toYaml(draft)" in handlers, "download must serialize current state"
+    assert "new Blob([yaml]" not in page, "download must not reuse a render-time string"
+    assert "el.value = yaml;" not in page, "copy must not reuse a render-time string"
+
+
+def test_every_text_field_refreshes_the_preview_on_blur():
+    """Not just the id.
+
+    The description is the field most likely to be typed last, immediately
+    before reaching for Download, so it is the one where a stale preview and a
+    stale enabled-state are most likely to be seen.
+    """
+    page = _page()
+    assert '["#f-id", "#f-label", "#f-short", "#f-desc"]' in page
+    assert 'addEventListener("blur", render)' in page
+
+
+def test_source_checkboxes_are_labelled():
+    """`<label for="">` associates with nothing.
+
+    The name would not be clickable, and a screen reader would announce an
+    unlabelled checkbox in a list of 65 of them.
+    """
+    # Comments stripped first: the comment explaining this fix quotes the broken
+    # markup verbatim, so a naive substring check flags the explanation as the
+    # defect it describes.
+    page = _strip_js_comments(_page())
+    assert 'for=""' not in page
+    # The input sits inside its label, which needs no per-source id.
+    assert '<label><input type="checkbox" data-src=' in page
+    assert 'aria-label="weight for ' in page
 
 
 # -- the emitted file cannot carry a feed URL --------------------------------
