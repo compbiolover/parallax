@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Parallax — build a diet</title>
+<style>
+  /* Same seven tokens as index.html, in the same order, so the two pages are
+     one thing rather than two that happen to share a repository. Dark is the
+     :root default; light is a prefers-color-scheme override of the same names. */
+  :root {
+    --bg: #0f1115; --panel: #171a21; --ink: #e8eaed; --muted: #9aa0aa;
+    --line: #2a2f3a; --self: #4c9be8; --other: #e8894c; --warn: #3a2f1a;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f7f8fa; --panel:#fff; --ink:#1a1d24; --muted:#5c6270;
+            --line:#e2e5ea; --self:#2f6fb0; --other:#c46a2e; --warn:#fdf3e2; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 20px 60px; }
+  h1 { font-size: 22px; margin: 0 0 2px; letter-spacing:-0.01em; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 13px; max-width:72ch; }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px; margin-bottom:18px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing:.06em;
+    color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .empty { text-align:center; padding:60px 20px; color:var(--muted); }
+  .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px;
+    background:var(--line); color:var(--muted); vertical-align:middle; margin-left:8px; }
+  .caveat { background:var(--warn); border:1px solid var(--line);
+    border-radius:10px; padding:12px 14px; font-size:13px; color:var(--ink);
+    margin: 0 0 14px; max-width:74ch; }
+  .field { display:block; margin-bottom:12px; }
+  .field span { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .field input, .field textarea, .field select {
+    font:14px inherit; color:var(--ink); background:var(--bg);
+    border:1px solid var(--line); border-radius:6px; padding:7px 9px; width:100%; }
+  .field textarea { min-height:64px; resize:vertical; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row .field { flex:1 1 200px; }
+  button { font:14px inherit; color:var(--ink); background:var(--panel);
+    border:1px solid var(--line); border-radius:8px; padding:8px 14px; cursor:pointer; }
+  button:hover { border-color:var(--muted); }
+  button.primary { background:var(--self); border-color:var(--self); color:#fff; }
+  button.primary:disabled { opacity:.45; cursor:not-allowed; }
+  /* Source list. Grouped by stratum, because the stratum is the thing being
+     weighted and a flat list of 65 hides that structure entirely. */
+  .stratum { border-top:1px solid var(--line); padding:12px 0 4px; }
+  .stratum:first-of-type { border-top:0; }
+  .stratum h3 { font-size:13.5px; margin:0 0 2px; font-weight:600; }
+  .stratum .sdesc { color:var(--muted); font-size:12px; margin:0 0 8px; max-width:72ch; }
+  .src { display:flex; align-items:baseline; gap:8px; padding:3px 0; font-size:13.5px; }
+  .src label { flex:1; cursor:pointer; display:flex; align-items:baseline; gap:8px; }
+  .src .medium { color:var(--muted); font-size:11.5px; }
+  .src input[type=number] { width:64px; font:12px inherit; color:var(--ink);
+    background:var(--bg); border:1px solid var(--line); border-radius:5px; padding:2px 5px; }
+  /* The two-bar display: what you set, and what it actually comes to. */
+  .mix { margin-top:4px; }
+  .mixrow { display:grid; grid-template-columns: 150px 1fr 56px; gap:10px;
+    align-items:center; padding:5px 0; font-size:13px; }
+  .mixrow .name { color:var(--ink); overflow:hidden; text-overflow:ellipsis; }
+  .bars { display:grid; gap:3px; }
+  .bar { height:9px; border-radius:3px; background:var(--line); position:relative; }
+  .bar i { position:absolute; inset:0 auto 0 0; border-radius:3px; display:block; }
+  .bar.set i { background:var(--muted); }
+  .bar.real i { background:var(--self); }
+  .mixrow .pct { text-align:right; color:var(--muted);
+    font-variant-numeric:tabular-nums; font-size:12px; }
+  .mixkey { display:flex; gap:14px; font-size:11.5px; color:var(--muted); margin:8px 0 2px; }
+  .mixkey span { display:inline-flex; align-items:center; gap:5px; }
+  .swatch { width:9px; height:9px; border-radius:2px; display:inline-block; }
+  input[type=range] { width:100%; accent-color:var(--self); }
+  /* Problems. Deliberately loud: every one of these is a reason the loader
+     would refuse the file. */
+  .problems { list-style:none; margin:0; padding:0; font-size:13px; }
+  .problems li { padding:6px 0; border-top:1px solid var(--line); color:var(--other); }
+  .problems li:first-child { border-top:0; }
+  .ok { color:var(--muted); font-size:13px; }
+  .overlap { list-style:none; margin:0; padding:0; font-size:13px; }
+  .overlap li { display:grid; grid-template-columns: 1fr 70px 44px; gap:10px;
+    align-items:center; padding:5px 0; border-top:1px solid var(--line); }
+  .overlap li:first-child { border-top:0; }
+  .overlap .num { text-align:right; font-variant-numeric:tabular-nums; color:var(--muted);
+    font-size:12px; }
+  pre.yaml { background:var(--bg); border:1px solid var(--line); border-radius:8px;
+    padding:12px; overflow:auto; font-size:12px; line-height:1.5; max-height:340px;
+    margin:0; }
+  code { background:var(--line); padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  .actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .note { color:var(--muted); font-size:12px; margin-top:10px; max-width:74ch; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Build a diet <span class="badge">nothing leaves this page</span></h1>
+  <p class="sub">
+    Pick the sources you actually read and say roughly how much each kind of
+    thing matters. This writes a <code>personas.local.yaml</code> you download
+    and drop into the repository. It is gitignored, and this page has no server
+    to send it to.
+  </p>
+  <div id="app"></div>
+</div>
+
+<!-- Generated by `python -m dashboard.export`. A 404 does not throw, so the
+     onerror handler is how a missing file becomes a message rather than a
+     blank page. -->
+<script src="./public/data/catalog.js" onerror="window.__noCatalog=true"></script>
+<script>
+const C = window.PARALLAX_CATALOG;
+const app = document.getElementById("app");
+
+if (!C || window.__noCatalog) {
+  app.innerHTML = `<div class="empty">No catalog yet.<br><br>
+    Run <code>python -m dashboard.export</code> to write
+    <code>dashboard/public/data/catalog.js</code>, then reload.<br><br>
+    It needs no corpus — the catalog is built from the source registry alone.</div>`;
+} else {
+  start();
+}
+
+// ---------------------------------------------------------------- state ----
+// The whole draft, and the only thing persisted. localStorage rather than a
+// server is the point of the page: CLAUDE.md §0 keeps a real person's real
+// consumption out of this project, and the way to honour that is to have
+// nowhere to put it.
+const STORAGE_KEY = "parallax.builder.draft.v1";
+let draft = null;
+
+function blankDraft() {
+  return { id: "", label: "", short_label: "", family: "", description: "",
+           strata: {}, sources: {} };
+}
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return blankDraft();
+    const saved = JSON.parse(raw);
+    // The catalog changes between releases. A draft naming a source that has
+    // since been retired would emit a file the loader refuses, with an error
+    // pointing at the registry rather than at this page — so drop them here,
+    // where the reason can be shown.
+    const known = new Set(C.sources.map(s => s.id));
+    saved.sources = Object.fromEntries(
+      Object.entries(saved.sources || {}).filter(([id]) => known.has(id)));
+    return { ...blankDraft(), ...saved };
+  } catch (e) {
+    return blankDraft();
+  }
+}
+
+function save() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(draft)); } catch (e) {}
+}
+
+// ------------------------------------------------------------ arithmetic ----
+// Effective weight is strata[stratum] × sources[source] — the same product
+// ingestion/config.py:98 computes, and the reason the two bars below differ.
+function effectiveWeights(d) {
+  const out = {};
+  for (const [sid, w] of Object.entries(d.sources)) {
+    const src = sourceById(sid);
+    if (!src) continue;
+    out[sid] = (d.strata[src.stratum] || 0) * w;
+  }
+  return out;
+}
+
+// What a stratum actually comes to, as a share of the whole diet.
+//
+// This is the number the page exists to show. A stratum weight is a *per-source
+// multiplier*, not that stratum's share: config/sources.yaml:104 spells it out —
+// a stratum at 0.10 spread over eight sources outweighs one at 0.36 over two.
+// Setting `podcasts: 0.4` and assuming that means 40% podcasts is the single
+// easiest way to build a persona that does not describe anyone.
+function realizedShares(d) {
+  const eff = effectiveWeights(d);
+  const perStratum = {};
+  let total = 0;
+  for (const [sid, w] of Object.entries(eff)) {
+    const src = sourceById(sid);
+    if (!src || w <= 0) continue;   // aggregate_profile drops w <= 0 entirely
+    perStratum[src.stratum] = (perStratum[src.stratum] || 0) + w;
+    total += w;
+  }
+  const out = {};
+  for (const [st, w] of Object.entries(perStratum)) out[st] = total ? w / total : 0;
+  return out;
+}
+
+// The same weighted cosine dashboard/export.py:104 uses. Registry-only, so it
+// is honest for a draft persona that has never been scored.
+function cosine(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (const [k, v] of Object.entries(a)) { na += v * v; if (k in b) dot += v * b[k]; }
+  for (const v of Object.values(b)) nb += v * v;
+  na = Math.sqrt(na); nb = Math.sqrt(nb);
+  return na && nb ? dot / (na * nb) : 0;
+}
+
+// ------------------------------------------------------------ validation ----
+// Each of these is a condition ingestion/config.py:_build_personas raises on.
+// The page's job is to make an unloadable file impossible to produce, so these
+// are shown live rather than checked at download.
+function problems(d) {
+  const out = [];
+  if (!d.id) out.push("Needs an id.");
+  if (!/^[a-z][a-z0-9_]*$/.test(d.id || "x")) {
+    out.push("The id must be lowercase letters, digits and underscores.");
+  }
+  // _merge_overlay replaces wholesale by id, so reusing a shipped id does not
+  // add a persona — it silently *replaces* that one, and the comparison you
+  // meant to make quietly stops existing.
+  if (d.id && C.personas.some(p => p.id === d.id)) {
+    out.push(`"${d.id}" is already a persona in the registry. Saving this would `
+           + `replace it rather than add yours — pick another id.`);
+  }
+  if (!Object.keys(d.sources).length) out.push("Pick at least one source.");
+  for (const sid of Object.keys(d.sources)) {
+    const src = sourceById(sid);
+    if (!src) { out.push(`${sid} is not in the catalog.`); continue; }
+    // The loader tests membership, not truthiness: a stratum present at 0.0
+    // loads fine and silently contributes nothing. Absent is the error.
+    if (!(src.stratum in d.strata)) {
+      out.push(`${src.name} needs its stratum "${src.stratum}" weighted.`);
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------- YAML output ----
+// Hand-rolled, ~40 lines, because the alternative is a js-yaml tag from a CDN
+// and CLAUDE.md Phase 7 says no new dependencies — D3 on the dashboard is
+// currently the only external thing this project loads at all.
+//
+// The shape is narrow enough to justify it: ids match [a-z][a-z0-9_]*, weights
+// are floats, and three fields are free text.
+function yamlString(s) {
+  return '"' + String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+}
+
+function yamlNumber(v) {
+  const n = Number(v.toFixed(3));
+  return Number.isInteger(n) ? n.toFixed(1) : String(n);
+}
+
+// A folded block, the form the shipped registry uses for descriptions.
+function yamlFolded(text, indent) {
+  const pad = " ".repeat(indent);
+  const words = String(text).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    if (line && (line + " " + w).length > 74) { lines.push(line); line = w; }
+    else line = line ? line + " " + w : w;
+  }
+  if (line) lines.push(line);
+  return ">-\n" + lines.map(l => pad + l).join("\n");
+}
+
+function toYaml(d) {
+  const lines = [];
+  lines.push("# Written by dashboard/builder.html. Gitignored — this describes");
+  lines.push("# real consumption, which CLAUDE.md §0 keeps out of the repository.");
+  lines.push("#");
+  lines.push("# Merged over config/sources.yaml at load, wholesale by id.");
+  lines.push("personas:");
+  lines.push(`  - id: ${d.id}`);
+  if (d.label) lines.push(`    label: ${yamlString(d.label)}`);
+  if (d.short_label) lines.push(`    short_label: ${yamlString(d.short_label)}`);
+  if (d.family) lines.push(`    family: ${d.family}`);
+  if (d.description && d.description.trim()) {
+    lines.push(`    description: ${yamlFolded(d.description.trim(), 6)}`);
+  }
+  // Only strata that carry a selected source. A weight for an empty stratum is
+  // inert, and writing it implies it does something.
+  const used = usedStrata(d);
+  lines.push("    strata:");
+  for (const st of used) lines.push(`      ${st}: ${yamlNumber(d.strata[st] || 0)}`);
+  lines.push("    sources:");
+  for (const sid of Object.keys(d.sources).sort()) {
+    lines.push(`      ${sid}: ${yamlNumber(d.sources[sid])}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------- render ----
+function sourceById(id) { return C.sources.find(s => s.id === id); }
+function stratumById(id) { return (C.strata || []).find(s => s.id === id); }
+
+function usedStrata(d) {
+  const out = new Set();
+  for (const sid of Object.keys(d.sources)) {
+    const src = sourceById(sid);
+    if (src) out.add(src.stratum);
+  }
+  // Registry order, so the emitted file and the page agree on sequence.
+  return (C.strata || []).map(s => s.id).filter(id => out.has(id));
+}
+
+function escapeHtml(s) { const e = document.createElement("div"); e.textContent = s; return e.innerHTML; }
+
+function familyName(fam) {
+  if (fam === "left") return "My side";
+  if (fam === "conservative_evangelical") return "Modeled conservative-evangelical";
+  return String(fam).split("_").join(" ");
+}
+
+function panel(title) {
+  const p = document.createElement("div");
+  p.className = "panel";
+  p.innerHTML = `<h2>${title}</h2>`;
+  app.appendChild(p);
+  return p;
+}
+
+function start() {
+  draft = load();
+  render();
+}
+
+function update(fn) { fn(draft); save(); render(); }
+
+function render() {
+  app.innerHTML = "";
+  identityPanel();
+  sourcesPanel();
+  mixPanel();
+  overlapPanel();
+  outputPanel();
+}
+
+function identityPanel() {
+  const p = panel("Who this is");
+  const families = Object.keys(C.families || {});
+  p.insertAdjacentHTML("beforeend", `
+    <div class="caveat">
+      A persona is named by <strong>media behaviour</strong> — never by who someone
+      is, and never after a real person. "Evening cable, little else" is a persona.
+      A demographic group is not, and neither is anyone in your family.
+    </div>
+    <div class="row">
+      <label class="field"><span>id</span>
+        <input id="f-id" value="${escapeHtml(draft.id)}" placeholder="mine_weeknights" /></label>
+      <label class="field"><span>family (which side it sits on)</span>
+        <select id="f-family">
+          <option value="">—</option>
+          ${families.map(f => `<option value="${escapeHtml(f)}"${f === draft.family ? " selected" : ""}>${escapeHtml(familyName(f))}</option>`).join("")}
+        </select></label>
+    </div>
+    <div class="row">
+      <label class="field"><span>label</span>
+        <input id="f-label" value="${escapeHtml(draft.label)}" placeholder="My actual diet" /></label>
+      <label class="field"><span>short label (charts)</span>
+        <input id="f-short" value="${escapeHtml(draft.short_label)}" placeholder="Mine" /></label>
+    </div>
+    <label class="field"><span>description — what this models, and what it does not</span>
+      <textarea id="f-desc" placeholder="Weeknight cable plus two newsletters; almost no long-form.">${escapeHtml(draft.description)}</textarea></label>
+    <div class="actions">
+      <select id="f-clone" class="field" style="max-width:280px;margin:0">
+        <option value="">Start from a shipped persona…</option>
+        ${C.personas.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.label || x.id)}</option>`).join("")}
+      </select>
+      <button id="f-reset">Clear</button>
+    </div>`);
+
+  const bind = (id, key) => {
+    const el = p.querySelector(id);
+    el.addEventListener("input", () => { draft[key] = el.value; save(); });
+  };
+  bind("#f-id", "id"); bind("#f-label", "label");
+  bind("#f-short", "short_label"); bind("#f-desc", "description");
+  p.querySelector("#f-family").addEventListener("change", e =>
+    update(d => { d.family = e.target.value; }));
+  p.querySelector("#f-clone").addEventListener("change", e => {
+    const src = C.personas.find(x => x.id === e.target.value);
+    if (!src) return;
+    update(d => {
+      // A copy, with a new id — never the shipped id, which would replace it.
+      d.id = "mine_" + src.id;
+      d.label = (src.label || src.id) + " (mine)";
+      d.short_label = src.short_label || "";
+      d.family = src.family || "";
+      d.description = src.description || "";
+      d.strata = { ...src.strata };
+      d.sources = { ...src.sources };
+    });
+  });
+  p.querySelector("#f-reset").addEventListener("click", () => update(d => {
+    Object.assign(d, blankDraft());
+  }));
+  // Re-rendering on every keystroke is unusable, so the preview, the problem
+  // list and the button's enabled state refresh on blur instead. All four
+  // fields, not just the id: the description is the one most likely to be typed
+  // last, immediately before reaching for Download.
+  for (const sel of ["#f-id", "#f-label", "#f-short", "#f-desc"]) {
+    p.querySelector(sel).addEventListener("blur", render);
+  }
+}
+
+function sourcesPanel() {
+  const p = panel(`Sources <span class="badge">${Object.keys(draft.sources).length} picked</span>`);
+  const byStratum = new Map();
+  for (const s of C.sources) {
+    if (!byStratum.has(s.stratum)) byStratum.set(s.stratum, []);
+    byStratum.get(s.stratum).push(s);
+  }
+  for (const st of (C.strata || [])) {
+    const list = byStratum.get(st.id) || [];
+    if (!list.length) continue;
+    const block = document.createElement("div");
+    block.className = "stratum";
+    block.innerHTML = `<h3>${escapeHtml(st.id)}</h3>
+      <p class="sdesc">${escapeHtml(st.description || "")}</p>` +
+      list.map(s => {
+        const on = s.id in draft.sources;
+        // The input sits *inside* the label, which associates the two without
+        // minting an id per source. `<label for="">` associates with nothing:
+        // the name would not be clickable and a screen reader would read the
+        // checkbox unlabelled.
+        return `<div class="src">
+          <label><input type="checkbox" data-src="${escapeHtml(s.id)}"${on ? " checked" : ""} />
+            ${escapeHtml(s.name)}
+            <span class="medium">${escapeHtml(s.medium)}${s.role ? " · " + escapeHtml(s.role) : ""}</span></label>
+          <input type="number" data-weight="${escapeHtml(s.id)}" min="0" max="1" step="0.1"
+                 aria-label="weight for ${escapeHtml(s.name)}"
+                 value="${on ? draft.sources[s.id] : 1}"${on ? "" : " disabled"} />
+        </div>`;
+      }).join("");
+    p.appendChild(block);
+  }
+
+  p.querySelectorAll("[data-src]").forEach(box => {
+    box.addEventListener("change", () => update(d => {
+      const sid = box.dataset.src;
+      const src = sourceById(sid);
+      if (box.checked) {
+        d.sources[sid] = 1.0;
+        // Auto-add the stratum. Without this the commonest first action —
+        // pick a source, hit download — produces a file the loader refuses,
+        // for a reason that is invisible from here.
+        if (!(src.stratum in d.strata)) d.strata[src.stratum] = 0.25;
+      } else {
+        delete d.sources[sid];
+        // Drop a stratum weight only once nothing needs it, so the emitted
+        // file never carries an inert weight.
+        const stillUsed = usedStrata(d);
+        for (const st of Object.keys(d.strata)) {
+          if (!stillUsed.includes(st)) delete d.strata[st];
+        }
+      }
+    }));
+  });
+  p.querySelectorAll("[data-weight]").forEach(inp => {
+    inp.addEventListener("change", () => update(d => {
+      d.sources[inp.dataset.weight] = Math.max(0, Number(inp.value) || 0);
+    }));
+  });
+}
+
+function mixPanel() {
+  const p = panel("How much of each kind");
+  const used = usedStrata(draft);
+  if (!used.length) {
+    p.insertAdjacentHTML("beforeend", `<p class="ok">Pick some sources first.</p>`);
+    return;
+  }
+  const shares = realizedShares(draft);
+  const setTotal = used.reduce((a, st) => a + (draft.strata[st] || 0), 0);
+
+  p.insertAdjacentHTML("beforeend", `
+    <div class="caveat">
+      The slider is a <strong>per-source multiplier</strong>, not that kind's share
+      of the diet. Ten sources at 0.1 outweigh two at 0.36 — so watch the blue bar,
+      not the grey one. The blue bar is what the comparison actually uses.
+    </div>
+    <div class="mixkey">
+      <span><i class="swatch" style="background:var(--muted)"></i> what you set</span>
+      <span><i class="swatch" style="background:var(--self)"></i> share of the diet</span>
+    </div>
+    <div class="mix">${used.map(st => {
+      const set = draft.strata[st] || 0;
+      const real = shares[st] || 0;
+      const setPct = setTotal ? set / setTotal : 0;
+      return `<div class="mixrow">
+        <div class="name" title="${escapeHtml(st)}">${escapeHtml(st)}</div>
+        <div class="bars">
+          <div class="bar set"><i style="width:${(setPct * 100).toFixed(1)}%"></i></div>
+          <div class="bar real"><i style="width:${(real * 100).toFixed(1)}%"></i></div>
+          <input type="range" min="0" max="1" step="0.01" value="${set}" data-stratum="${escapeHtml(st)}" />
+        </div>
+        <div class="pct">${(real * 100).toFixed(0)}%</div>
+      </div>`;
+    }).join("")}</div>
+    <p class="note">
+      These weights are the least-evidenced and most load-bearing part of the whole
+      tool (see <code>LIMITATIONS.md</code>). And they are retroactive: re-weighting
+      changes what the corpus says about this persona on <em>past</em> dates too, so
+      a number that moved because you edited a slider looks exactly like one that
+      moved because the news did.
+    </p>`);
+
+  p.querySelectorAll("[data-stratum]").forEach(sl => {
+    sl.addEventListener("input", () => update(d => {
+      d.strata[sl.dataset.stratum] = Number(sl.value);
+    }));
+  });
+}
+
+function overlapPanel() {
+  const p = panel("How close this is to the shipped personas");
+  const mine = effectiveWeights(draft);
+  if (!Object.keys(mine).length) {
+    p.insertAdjacentHTML("beforeend", `<p class="ok">Pick some sources first.</p>`);
+    return;
+  }
+  const rows = C.personas
+    .map(x => ({ id: x.id, label: x.label || x.id, v: cosine(mine, x.weights || {}) }))
+    .sort((a, b) => b.v - a.v);
+
+  p.insertAdjacentHTML("beforeend", `
+    <ul class="overlap">${rows.map(r => `<li>
+      <span>${escapeHtml(r.label)}</span>
+      <span class="bar real" style="height:9px"><i style="width:${(r.v * 100).toFixed(0)}%"></i></span>
+      <span class="num">${r.v.toFixed(2)}</span>
+    </li>`).join("")}</ul>
+    <p class="note">
+      Source overlap only — how much of the same material, weighted the same way.
+      <strong>Not</strong> a divergence score: this page has the registry but no
+      scores, so it cannot tell you how differently these read. Run the pipeline
+      for that. Two personas over one catalog are correlated by construction, so
+      a high number here is expected rather than a finding.
+    </p>`);
+}
+
+function outputPanel() {
+  const p = panel("The file");
+  const errs = problems(draft);
+  const yaml = errs.length ? "" : toYaml(draft);
+
+  p.insertAdjacentHTML("beforeend", errs.length
+    ? `<ul class="problems">${errs.map(e => `<li>${escapeHtml(e)}</li>`).join("")}</ul>`
+    : `<p class="ok">Ready. This will load.</p>`);
+
+  p.insertAdjacentHTML("beforeend", `
+    <div class="actions" style="margin:12px 0">
+      <button class="primary" id="dl"${errs.length ? " disabled" : ""}>Download personas.local.yaml</button>
+      <button id="copy"${errs.length ? " disabled" : ""}>Copy</button>
+    </div>
+    ${yaml ? `<pre class="yaml">${escapeHtml(yaml)}</pre>` : ""}
+    <p class="note">
+      Save it as <code>config/personas.local.yaml</code>. It is gitignored, and it
+      is merged over the public registry at load — so this adds a persona without
+      touching <code>config/sources.yaml</code>.
+      To compare against it, point <code>compare.reference_pair.mine</code> at
+      <code>${escapeHtml(draft.id || "your-id")}</code> in
+      <code>config/settings.yaml</code>; that part lives in settings, not here.
+    </p>`);
+
+  if (errs.length) return;
+  p.querySelector("#dl").addEventListener("click", () => {
+    // Serialized here rather than reused from the last render. The text fields
+    // update `draft` without re-rendering — re-rendering on every keystroke is
+    // unusable — so a `yaml` captured at render time is one edit stale, and the
+    // file you download is missing the description you just typed.
+    if (problems(draft).length) return;
+    // A Blob and an object URL: the file is assembled in the page and handed to
+    // the browser's download machinery. Nothing is uploaded, because there is
+    // nowhere to upload it to.
+    const blob = new Blob([toYaml(draft)], { type: "text/yaml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "personas.local.yaml";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  });
+  p.querySelector("#copy").addEventListener("click", () => {
+    if (problems(draft).length) return;
+    const el = document.createElement("textarea");
+    el.value = toYaml(draft); document.body.appendChild(el); el.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    el.remove();
+    const b = p.querySelector("#copy");
+    b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy"; }, 1200);
+  });
+}
+</script>
+</body>
+</html>
