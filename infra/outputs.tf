@@ -14,12 +14,12 @@ output "data_bucket" {
 
 output "lexicon_upload_command" {
   description = "The eMFD lexicon is gitignored and not in the image; it comes from here."
-  value       = "aws s3 cp data/emfd_scoring.csv s3://${aws_s3_bucket.data.id}/${var.state_prefix}lexicon/emfd_scoring.csv"
+  value       = "aws s3 cp data/emfd_scoring.csv s3://${aws_s3_bucket.data.id}/${local.state_prefix}lexicon/emfd_scoring.csv"
 }
 
 output "database_download_command" {
   description = "Pull the run's database down to inspect it with `make history`."
-  value       = "aws s3 cp s3://${aws_s3_bucket.data.id}/${var.state_prefix}state/parallax.sqlite ./data/aws-parallax.sqlite"
+  value       = "aws s3 cp s3://${aws_s3_bucket.data.id}/${local.state_prefix}state/parallax.sqlite ./data/aws-parallax.sqlite"
 }
 
 output "secret_set_command" {

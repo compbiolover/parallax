@@ -70,7 +70,7 @@ resource "aws_ecs_task_definition" "task" {
 
     environment = [
       { name = "PARALLAX_STATE_BUCKET", value = aws_s3_bucket.data.id },
-      { name = "PARALLAX_STATE_PREFIX", value = var.state_prefix },
+      { name = "PARALLAX_STATE_PREFIX", value = local.state_prefix },
       { name = "PARALLAX_LEASE_TABLE", value = aws_dynamodb_table.lease.name },
       { name = "PARALLAX_LEASE_ID", value = "daily" },
       { name = "AWS_DEFAULT_REGION", value = var.region },

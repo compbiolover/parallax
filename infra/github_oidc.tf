@@ -3,9 +3,14 @@
 # no long-lived secret in the repository to leak or rotate.
 
 resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+
+  # No thumbprint_list on purpose. Pinning one used to be mandatory and is now a
+  # liability: AWS secures this endpoint against its own trust store, so a
+  # hard-coded certificate thumbprint buys nothing and silently becomes a
+  # time bomb the day GitHub rotates its chain — OIDC starts failing and the
+  # cause is a constant nobody has looked at in a year. Omitted, AWS resolves it.
 }
 
 data "aws_iam_policy_document" "github_assume" {

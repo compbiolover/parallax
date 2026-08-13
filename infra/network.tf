@@ -9,8 +9,11 @@
 #
 # The corollary is the thing that bites people: with no public IP *and* no NAT,
 # a Fargate task cannot reach ECR, and the failure is "CannotPullContainerError"
-# with no mention of networking. `assign_public_ip = true` on the network
-# configuration is load-bearing, not incidental.
+# with no mention of networking. The setting that prevents it is
+# `AssignPublicIp = "ENABLED"` in the state machine's NetworkConfiguration
+# (scheduler.tf) — not anything in this file. `map_public_ip_on_launch` below
+# governs instances in the subnet and does *not* cover a Fargate task, which
+# gets its address from the RunTask call.
 
 resource "aws_vpc" "main" {
   cidr_block           = "10.20.0.0/16"

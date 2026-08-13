@@ -36,3 +36,14 @@ data "aws_region" "current" {}
 data "aws_availability_zones" "available" {
   state = "available"
 }
+
+locals {
+  # deploy/state.py appends a trailing slash if one is missing, so a prefix of
+  # "x" means "x/" at runtime — while every helper command and key built here
+  # would say "xstate/...". The two would disagree about where the database is,
+  # which is a miserable thing to debug for a missing character. Normalized once,
+  # in the same shape the runtime uses.
+  state_prefix = var.state_prefix == "" ? "" : (
+    endswith(var.state_prefix, "/") ? var.state_prefix : "${var.state_prefix}/"
+  )
+}

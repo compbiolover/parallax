@@ -67,7 +67,7 @@ data "aws_iam_policy_document" "task" {
       # realised it would be used.
       "s3:AbortMultipartUpload",
     ]
-    resources = ["${aws_s3_bucket.data.arn}/${var.state_prefix}*"]
+    resources = ["${aws_s3_bucket.data.arn}/${local.state_prefix}*"]
   }
 
   statement {
@@ -112,10 +112,20 @@ resource "aws_iam_role" "states" {
 }
 
 data "aws_iam_policy_document" "states" {
+  # `ecs:RunTask` takes a *task definition* as its resource — the cluster is not
+  # a resource type for this action, it is the `ecs:cluster` condition key. So
+  # the resource list stays task definitions, and the cluster is pinned as a
+  # condition rather than added alongside them, which would match nothing.
   statement {
     sid       = "RunTasks"
     actions   = ["ecs:RunTask"]
     resources = [for t in aws_ecs_task_definition.task : "${replace(t.arn, "/:\\d+$/", "")}:*"]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = [aws_ecs_cluster.main.arn]
+    }
   }
 
   statement {
