@@ -179,6 +179,19 @@ CREATE TABLE IF NOT EXISTS blindspot_themes (
 
 {PODCAST_EPISODES_DDL}
 
+-- One row per source per RSS run: whether the feed answered and whether its
+-- articles could be read. Documents alone cannot say this — GDELT backfill
+-- stores rows under the same source_id, so a dead feed still looks alive there.
+CREATE TABLE IF NOT EXISTS source_runs (
+    source_id TEXT NOT NULL,
+    run_utc   TEXT NOT NULL,
+    status    TEXT NOT NULL,             -- 'ok' | 'unreadable' | 'empty' | 'blocked'
+    items     INTEGER NOT NULL,          -- feed items seen
+    stored    INTEGER NOT NULL,          -- documents new to the store
+    errors    INTEGER NOT NULL,          -- items whose article could not be read
+    PRIMARY KEY (source_id, run_utc)
+);
+
 -- One aggregate snapshot per UTC date. Re-running the daily job on the same
 -- day overwrites that day's row rather than appending, so the series has one
 -- point per day regardless of how many times the pipeline ran.
@@ -790,6 +803,26 @@ class Datastore:
         return {r["status"]: r["n"] for r in self.conn.execute(sql, params)}
 
     # -- provenance metadata --------------------------------------------
+    # -- source health ---------------------------------------------------
+    def record_source_run(
+        self, source_id: str, run_utc: str, status: str, items: int, stored: int, errors: int
+    ) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO source_runs "
+                "(source_id, run_utc, status, items, stored, errors) VALUES (?,?,?,?,?,?)",
+                (source_id, run_utc, status, items, stored, errors),
+            )
+
+    def source_runs_since(self, since: str) -> list[sqlite3.Row]:
+        """Every recorded run on or after ``since``, oldest first per source."""
+        return list(
+            self.conn.execute(
+                "SELECT * FROM source_runs WHERE run_utc >= ? ORDER BY source_id, run_utc",
+                (since,),
+            )
+        )
+
     def set_meta(self, key: str, value: str) -> None:
         with self._tx() as conn:
             conn.execute(

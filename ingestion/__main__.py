@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingestion", description="Parallax Phase 1 pipeline")
     parser.add_argument(
         "command",
-        choices=["run", "backfill", "podcasts", "compare", "labels", "personas"],
+        choices=["run", "backfill", "podcasts", "compare", "labels", "personas", "health"],
         help="what to do",
     )
     parser.add_argument("--db", help="SQLite path (default from settings)")
@@ -314,6 +314,10 @@ def main(argv: list[str] | None = None) -> int:
             _podcasts(store, settings, args, progress)
         elif args.command == "compare":
             _print_compare(store, load_registry(settings=settings))
+        elif args.command == "health":
+            from .health import format_report, health_payload
+
+            print(format_report(health_payload(store, load_registry(settings=settings))))
         elif args.command == "personas":
             _print_personas(load_registry(settings=settings), store, settings)
         elif args.command == "labels":

@@ -248,6 +248,7 @@ def run(
     # supply sources and nothing else — and an unconfigured run needs no scope.
     scope = registry.scope(cfg.ingest_personas) if cfg.ingest_personas else None
     sources = list(registry.ingestable(("rss",), scope))
+    run_utc = _now_iso()
     for position, source in enumerate(sources, start=1):
         before = (stats.stored, stats.fetched, stats.errors)
         started = time.monotonic()
@@ -277,12 +278,32 @@ def run(
                     failed=failed,
                 )
             )
+        fetched, errors = stats.fetched - before[1], stats.errors - before[2]
+        store.record_source_run(
+            source.id,
+            run_utc,
+            _run_status(failed, fetched, errors),
+            items=fetched,
+            stored=stats.stored - before[0],
+            errors=errors,
+        )
 
     if liberty is not None and liberty_texts:
         if progress is not None:
             _announce_liberty(liberty, liberty_texts, progress)
         _score_liberty(store, liberty, liberty_texts, stats)
     return stats
+
+
+def _run_status(failed: bool, fetched: int, errors: int) -> str:
+    """How one source's run went, as ``ingestion.health`` reads it."""
+    if failed:
+        return "unreadable"  # the feed itself did not parse: moved, gone, or refused
+    if fetched == 0:
+        return "empty"
+    if errors >= fetched:
+        return "blocked"  # the feed answers but no article behind it could be read
+    return "ok"
 
 
 def _announce_liberty(tagger, texts: dict[str, str], progress) -> None:

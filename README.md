@@ -151,6 +151,7 @@ no text in it. Only the first of those is fixed by exporting a key.
 | `make digest` | render the email to `data/digest-preview.html` and open it — no credentials needed |
 | `make digest-send` | render and mail the brief |
 | `make history` | print the recorded divergence series |
+| `make sources` | list feeds that stopped loading, got blocked, or went quiet, and how much of each persona they carry |
 | `make personas` | list the persona library: family, sources, and what each one models |
 | `make sensitivity` | move every stratum weight ±50% and report whether the finding survives |
 | `make validate` | score the gold set, report agreement, apply the §5 trigger |
