@@ -60,3 +60,14 @@ def test_no_runs_means_nothing_to_report():
     payload = health_payload(store, registry(mine={"a": 1.0}), NOW)
     assert payload == {"issues": [], "persona_impact": {}}
     assert "healthy" in format_report(payload)
+
+
+def test_parse_feed_tells_an_unreadable_feed_from_an_empty_one():
+    import pytest
+
+    from ingestion.extract import parse_feed
+
+    empty = '<?xml version="1.0"?><rss version="2.0"><channel><title>t</title></channel></rss>'
+    assert parse_feed(empty) == []
+    with pytest.raises(ValueError):
+        parse_feed("<html><body>403 Forbidden</body")

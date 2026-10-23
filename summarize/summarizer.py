@@ -99,6 +99,7 @@ def gather(
                 doc_count=store.doc_count_for_sources(weights, since=since),
                 profile=profiles[persona_id],
                 headlines=store.headlines_for_sources(weights, max_headlines, since=since),
+                period="this week" if since else "across the whole archive",
             )
         )
     comparison = None

@@ -856,11 +856,14 @@ def _foundation_name(f: str) -> str:
 
 
 def _in_sentence(payload: dict, diet_id: str) -> str:
-    """A diet's name mid-sentence: "your diet" for the reader's own side."""
-    if diet_id == payload["weekly"]["pair"][0]:
-        return "your diet"
+    """A diet's name mid-sentence ("My diet" -> "my diet").
+
+    The registry label, not "your diet": the reader can be either side of the
+    pair (digest.own_diet), so naming one as theirs would sometimes be wrong.
+    """
     name = _named(payload, diet_id)
-    return "the" + name[3:] if name.startswith("The ") else name
+    first, _, rest = name.partition(" ")
+    return f"{first.lower()} {rest}" if first in ("The", "My") and rest else name
 
 
 def _moved(weekly: dict) -> list[dict]:

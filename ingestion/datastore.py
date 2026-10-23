@@ -953,10 +953,11 @@ class Datastore:
             sql += " AND e.embedder = ?"
             params = (embedder,)
         if since is not None:
+            # Uncorrelated: one pass over the duplicates, not one per canonical.
             sql += f"""
-                AND ({DOC_DATE_SQL} >= ? OR EXISTS (
-                    SELECT 1 FROM documents x
-                    WHERE x.duplicate_of = d.id AND x.is_duplicate = 1
+                AND ({DOC_DATE_SQL} >= ? OR d.id IN (
+                    SELECT x.duplicate_of FROM documents x
+                    WHERE x.is_duplicate = 1
                       AND COALESCE(x.published_utc, x.fetched_utc) >= ?))
             """
             params += (since, since)

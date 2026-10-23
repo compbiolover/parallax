@@ -668,3 +668,12 @@ def test_headlines_follow_the_window():
     mine = next(c for c in contexts if c.diet_id == "self")
     assert mine.headlines == ["This week's story"]
     store.close()
+
+
+def test_the_archive_fallback_is_not_called_this_week():
+    ctx = [
+        DietContext("self", "My diet", 3, {"care": 1.0}, ["h"], period="across the whole archive")
+    ]
+    prompt = build_user_prompt(ctx, None)
+    assert "this week" not in prompt
+    assert "documents (across the whole archive): 3" in prompt
