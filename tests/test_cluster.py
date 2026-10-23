@@ -512,3 +512,24 @@ def test_an_empty_source_id_is_not_an_outlet():
     assert sources == {"src_self"}
     assert store.duplicate_coverage() == {}
     store.close()
+
+
+def test_iter_embeddings_since_keeps_only_recent_documents():
+    store = Datastore(":memory:")
+    for i, published in enumerate(["2026-10-01T09:00:00+00:00", "2026-10-20T09:00:00+00:00"]):
+        store.upsert_document(
+            doc_id=f"d{i}",
+            diet_id="",
+            source_id="s",
+            stratum_id=None,
+            url=None,
+            title="t",
+            published_utc=published,
+            fetched_utc="2026-10-21T00:00:00+00:00",
+            word_count=10,
+            minhash=None,
+        )
+        store.upsert_embedding(document_id=f"d{i}", vector=[0.0] * 8, embedder="h")
+    assert [r[0] for r in store.iter_embeddings(since="2026-10-16")] == ["d1"]
+    assert len(list(store.iter_embeddings())) == 2
+    store.close()

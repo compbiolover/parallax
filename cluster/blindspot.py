@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 from ingestion.datastore import Datastore
 
@@ -398,6 +399,11 @@ def themes_from_store(
     return group_blindspots(spots, stored, articles_from_store(store, spots, members))
 
 
+# What the daily run and the CLI cluster unless told otherwise: about how long a
+# story stays news. Settings: `cluster.window_days`; 0 clusters the whole store.
+DEFAULT_WINDOW_DAYS = 7
+
+
 def run_clustering(
     store: Datastore,
     members: dict[str, set[str]],
@@ -408,6 +414,7 @@ def run_clustering(
     theme_client: object | None = None,
     claude_themes: bool = True,
     theme_effort: str | None | _Unset = UNSET,
+    window_days: int | None = None,
 ) -> ClusteringOutcome:
     """Cluster, persist the assignment, detect blindspots, and theme them.
 
@@ -415,8 +422,16 @@ def run_clustering(
     Clustering itself is persona-agnostic — every document is embedded once and
     clustered once — but the asymmetry the blindspots measure is a statement
     about two specific personas, so the pair has to be named here.
+
+    ``window_days`` clusters only the trailing days, ending today (UTC). The
+    daily run uses a week: clustering the whole store kept surfacing the same
+    weeks-old stories as blindspots, and a story is news for about that long.
+    ``None`` clusters everything.
     """
-    result = compute_clustering(store, min_cluster_size=min_cluster_size)
+    since = None
+    if window_days:
+        since = (datetime.now(UTC).date() - timedelta(days=window_days - 1)).isoformat()
+    result = compute_clustering(store, min_cluster_size=min_cluster_size, since=since)
 
     # `by_cluster`, not `members`: the parameter above is persona membership, and
     # a local called `members` shadowed it here — so the blindspot detector was

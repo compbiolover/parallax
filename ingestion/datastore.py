@@ -897,7 +897,7 @@ class Datastore:
             )
 
     def iter_embeddings(
-        self, embedder: str | None = None
+        self, embedder: str | None = None, since: str | None = None
     ) -> Iterator[tuple[str, str, str | None, list[int], list[float]]]:
         """Yield (document_id, source_id, title, _, vector) for non-duplicate docs.
 
@@ -908,6 +908,8 @@ class Datastore:
         When ``embedder`` is given, only rows produced by that embedder are
         yielded — embeddings from different embedders live in incompatible vector
         spaces (and often different dimensions), so clustering must not mix them.
+
+        ``since`` (``YYYY-MM-DD``) keeps only documents dated on or after it.
         """
         sql = """
             SELECT e.document_id AS id, d.source_id AS source_id, d.title AS title,
@@ -919,6 +921,9 @@ class Datastore:
         if embedder is not None:
             sql += " AND e.embedder = ?"
             params = (embedder,)
+        clause, window = _date_window(since, None)
+        sql += clause
+        params += window
         for r in self.conn.execute(sql, params):
             yield r["id"], r["source_id"], r["title"], [], json.loads(r["vector"])
 

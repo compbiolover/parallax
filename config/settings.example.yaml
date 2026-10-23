@@ -168,6 +168,9 @@ cluster:
     #   bge: "Represent this sentence for searching relevant passages: "
     #   e5:  "query: "
     query_prefix: ""
+  # Cluster only the trailing days. A week is about how long a story stays news;
+  # clustering the whole store kept surfacing the same old stories. 0 = everything.
+  window_days: 7
   hdbscan:
     min_cluster_size: 2           # small news samples over-assign to noise at higher values
   blindspot:
