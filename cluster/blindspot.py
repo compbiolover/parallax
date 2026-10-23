@@ -399,11 +399,6 @@ def themes_from_store(
     return group_blindspots(spots, stored, articles_from_store(store, spots, members))
 
 
-# What the daily run and the CLI cluster unless told otherwise: about how long a
-# story stays news. Settings: `cluster.window_days`; 0 clusters the whole store.
-DEFAULT_WINDOW_DAYS = 7
-
-
 def run_clustering(
     store: Datastore,
     members: dict[str, set[str]],

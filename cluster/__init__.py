@@ -14,3 +14,9 @@ labels name whatever terms happened to be distinctive. ``themes.py`` groups
 them by subject and direction under a name written for a person, and
 ``titles.py`` cleans the headlines both surfaces show.
 """
+
+# What the daily run and the CLI cluster unless told otherwise: about how long a
+# story stays news. Settings: `cluster.window_days`; 0 clusters the whole store.
+# Here rather than in blindspot.py so the daily runner can read it without
+# importing numpy at load time.
+DEFAULT_WINDOW_DAYS = 7

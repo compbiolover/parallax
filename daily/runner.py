@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cluster.blindspot import DEFAULT_WINDOW_DAYS as CLUSTER_WINDOW_DAYS
+from cluster import DEFAULT_WINDOW_DAYS as CLUSTER_WINDOW_DAYS
 from cluster.themes import UNSET as THEME_EFFORT_UNSET
 from compare.history import DEFAULT_SERIES_LIMIT, DEFAULT_WINDOW_DAYS
 from compare.reference import resolve

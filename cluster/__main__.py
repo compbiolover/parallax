@@ -15,7 +15,8 @@ from compare.reference import resolve
 from ingestion.config import datastore_path, load_registry, load_settings
 from ingestion.datastore import Datastore
 
-from .blindspot import DEFAULT_WINDOW_DAYS, run_clustering
+from . import DEFAULT_WINDOW_DAYS
+from .blindspot import run_clustering
 
 
 def _configured_effort(themes_cfg: dict):
