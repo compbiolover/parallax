@@ -1054,10 +1054,8 @@ def _movement_panel(payload: dict) -> str:
     )
 
 
-def _share_row(label: str, share: float, colour: str, href: str | None = None) -> str:
+def _share_row(label: str, share: float, colour: str) -> str:
     text = _esc(label)
-    if href:
-        text = f'<a href="{_esc(href)}" style="color:{INK};text-decoration:none;">{text}</a>'
     # The label is the real signed share; only the bar is clamped. Stories
     # pulling the other way make the parts run past 100% and the rest negative.
     pct = max(0.0, min(1.0, share)) * 100
