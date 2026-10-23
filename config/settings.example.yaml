@@ -294,6 +294,10 @@ daily:
 # Preview it without any of that:  python3 -m digest --dry-run --open
 digest:
   enabled: false
+  # The day the brief is sent (UTC). A single day is too little news to compare;
+  # the run still ingests daily, because a feed only lists its latest items.
+  # Remove the line to send on every run.
+  weekday: friday
   # Which diet is yours. Your own blindspots lead the email — equal styling is
   # not equal prominence on a phone, where second means scrolled past.
   #

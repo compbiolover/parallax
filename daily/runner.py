@@ -113,6 +113,11 @@ class DailyConfig:
 
     # digest
     own_diet: str | None = None  # whose blindspots lead the email
+    # The day the brief goes out, e.g. "friday". None sends on every run. A day
+    # of news is too thin to compare on its own, so the brief is weekly by
+    # default in settings.example.yaml; ingestion still has to run daily, since
+    # a feed only lists its latest items.
+    digest_weekday: str | None = None
 
     # Built once per run by `_payload`, shared by export and digest so the two
     # cannot describe different dicts. Not configuration — excluded from repr
@@ -153,6 +158,7 @@ class DailyConfig:
             model=(settings.get("summarize", {}) or {}).get("model"),
             summary_effort=(settings.get("summarize", {}) or {}).get("effort"),
             own_diet=dig.get("own_diet"),
+            digest_weekday=dig.get("weekday"),
             reference_mine=ref.get("mine"),
             reference_theirs=ref.get("theirs"),
             summary_personas=_summary_personas(settings),
@@ -393,6 +399,11 @@ def _step_digest(store, cfg: DailyConfig, registry, pair) -> str:
     from digest.render import build_digest
     from digest.send import send
 
+    # `--only digest` is someone asking for the brief now, so it skips the check.
+    weekday = (cfg.digest_weekday or "").strip().lower()
+    today = datetime.now(UTC).strftime("%A").lower()
+    if weekday and weekday != today and cfg.steps != ("digest",):
+        return f"not sent — the brief goes out on {weekday.capitalize()}s"
     digest = build_digest(_payload(store, cfg, registry, pair), own_diet=cfg.own_diet or pair.mine)
     reason = send(digest)
     if reason is None:

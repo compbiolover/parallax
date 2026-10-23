@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import html
 import logging
+import math
 import re
 from dataclasses import dataclass
 
@@ -838,6 +839,421 @@ def _extra_panel(payload: dict) -> str:
 # -- the whole thing --------------------------------------------------------
 
 
+# -- the weekly brief -------------------------------------------------------
+#
+# Rendered when the payload carries `weekly` (see compare/weekly.py). It leads
+# with what changed against each foundation's own recent history, because the
+# all-time numbers above move less every day the corpus grows and a brief built
+# on them says the same thing every morning.
+
+BAND = "#cfd5de"  # a foundation's usual range
+TRACK = "#f1f3f6"
+TRACK_CELLS = 40  # email has no positioning, so a track is a row of narrow cells
+
+
+def _foundation_name(f: str) -> str:
+    return f.capitalize()
+
+
+def _in_sentence(payload: dict, diet_id: str) -> str:
+    """A diet's name mid-sentence: "your diet" for the reader's own side."""
+    if diet_id == payload["weekly"]["pair"][0]:
+        return "your diet"
+    name = _named(payload, diet_id)
+    return "the" + name[3:] if name.startswith("The ") else name
+
+
+def _moved(weekly: dict) -> list[dict]:
+    """Foundations that left their range, the biggest shift first.
+
+    Ranked by distance from the usual value, not by z: shares are zero-sum, so
+    one foundation spiking nudges every other share too, and a share that
+    barely varies gets a large z from a small nudge. The headline should name
+    the foundation that moved, not the one that was pushed.
+    """
+    moved = [e for e in weekly["foundations"] if e.get("moved")]
+    return sorted(moved, key=lambda e: -abs(e["now"] - e["median"]))
+
+
+def _verdict(payload: dict) -> tuple[str, str]:
+    """(headline sentence, the plain-text lede under it) for this week."""
+    weekly = payload["weekly"]
+    mine, theirs = weekly["pair"]
+    n = weekly["baseline_weeks"]
+    moved = _moved(weekly)
+    counts = weekly["counts"]
+    lede = (
+        f"{counts[mine]} articles in {_in_sentence(payload, mine)} and {counts[theirs]} in "
+        f"{_in_sentence(payload, theirs)}, {weekly['week_start']} to {weekly['week_end']}."
+    )
+    if "moved" not in weekly["foundations"][0]:
+        need = weekly.get("baseline_needed", 4)
+        return (
+            f"Still building a baseline: {n} earlier week{'' if n == 1 else 's'} recorded. "
+            f"Usual ranges appear after {need}.",
+            lede,
+        )
+    if not moved:
+        return "A quiet week. Every foundation stayed inside its usual range.", lede
+    sentences = []
+    for e in moved[:2]:
+        toward = mine if e["now"] > e["high"] else theirs
+        sentences.append(
+            f"{_foundation_name(e['foundation'])} shifted toward {_in_sentence(payload, toward)} "
+            f"further than in any of the past {n} weeks."
+        )
+    if len(moved) > 2:
+        sentences.append(f"{len(moved) - 2} more foundation(s) left their usual range.")
+    jsd = weekly["jsd"]
+    if jsd.get("moved"):
+        widest = "widest" if jsd["now"] > jsd["high"] else "narrowest"
+        lede = f"The overall gap is the {widest} in {n + 1} weeks. " + lede
+    return " ".join(sentences), lede
+
+
+def _weekly_subject(payload: dict) -> str:
+    weekly = payload["weekly"]
+    stories = len(payload.get("blindspots") or [])
+    tail = f" · {stories} {'story' if stories == 1 else 'stories'} only one side saw"
+    moved = _moved(weekly)
+    if moved:
+        e = moved[0]
+        toward = weekly["pair"][0] if e["now"] > e["high"] else weekly["pair"][1]
+        head = f"{_foundation_name(e['foundation'])} shifted toward {_in_sentence(payload, toward)}"
+    elif "moved" in weekly["foundations"][0]:
+        head = "Quiet week"
+    else:
+        head = f"Week of {weekly['week_start']}"
+    return f"Parallax · {head}{tail if stories else ''}"
+
+
+def _legend(payload: dict) -> str:
+    colours = _colours(payload)
+    keys = [
+        f'<span style="white-space:nowrap;padding-right:14px;">'
+        f'<span style="display:inline-block;width:10px;height:10px;border-radius:3px;'
+        f'background:{colours.get(d, DIET_A)};vertical-align:-1px;"></span> '
+        f"{_esc(_named(payload, d))}</span>"
+        for d in payload["weekly"]["pair"]
+    ]
+    return (
+        f'<div style="font:13px -apple-system,sans-serif;color:{MUTED};padding-top:10px;">'
+        f"{''.join(keys)}</div>"
+    )
+
+
+def _weekly_head(payload: dict) -> str:
+    sentence, lede = _verdict(payload)
+    return _panel(
+        "This week",
+        f'<div style="font:600 21px/1.3 -apple-system,BlinkMacSystemFont,sans-serif;'
+        f'color:{INK};letter-spacing:-.01em;">{_esc(sentence)}</div>'
+        f'<div style="font:14px/1.5 -apple-system,sans-serif;color:{MUTED};padding-top:8px;">'
+        f"{_esc(lede)}</div>{_legend(payload)}",
+    )
+
+
+def _track(entry: dict, scale: float) -> str:
+    """One foundation's track: usual range as a grey run, this week as a dot."""
+
+    def cell(v: float) -> int:
+        pos = (v + scale) / (2 * scale) * (TRACK_CELLS - 1)
+        return max(0, min(TRACK_CELLS - 1, round(pos)))
+
+    dot, zero = cell(entry["now"]), cell(0.0)
+    lo, hi = (cell(entry["low"]), cell(entry["high"])) if "low" in entry else (-1, -2)
+    cells = []
+    for i in range(TRACK_CELLS):
+        if i == dot:
+            colour = INK if entry.get("moved") else MUTED
+            style = f"background:{colour};border-radius:5px;"
+        elif lo <= i <= hi:
+            style = f"background:{BAND};"
+        else:
+            style = f"background:{TRACK};"
+        if i == zero:
+            style += f"border-left:1px solid {MUTED};"
+        cells.append(
+            f'<td style="{style}width:{100 / TRACK_CELLS:.2f}%;height:10px;'
+            f'font-size:0;line-height:0;">&nbsp;</td>'
+        )
+    return (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="table-layout:fixed;"><tr>{"".join(cells)}</tr></table>'
+    )
+
+
+def _movement_panel(payload: dict) -> str:
+    weekly = payload["weekly"]
+    mine, theirs = weekly["pair"]
+    entries = weekly["foundations"]
+    reach = [abs(e[k]) for e in entries for k in ("now", "low", "high") if k in e]
+    scale = max(0.5, math.ceil(max(reach, default=0.5) * 10) / 10)
+    rows = [
+        f'<tr><td></td><td style="font:11px -apple-system,sans-serif;color:{MUTED};'
+        f'padding-bottom:4px;"><table role="presentation" width="100%" cellpadding="0" '
+        f'cellspacing="0"><tr><td>&larr; {_esc(_named(payload, theirs))} leans</td>'
+        f'<td align="right">{_esc(_named(payload, mine))} leans &rarr;</td></tr></table>'
+        f"</td><td></td></tr>"
+    ]
+    for e in entries:
+        flag = (
+            f'<div style="font:600 11px -apple-system,sans-serif;color:{INK};">Outside range</div>'
+            if e.get("moved")
+            else ""
+        )
+        rows.append(
+            f'<tr><td style="font:14px -apple-system,sans-serif;color:{INK};'
+            f'padding:5px 10px 5px 0;white-space:nowrap;">'
+            f"{_esc(_foundation_name(e['foundation']))}</td>"
+            f'<td style="padding:5px 0;">{_track(e, scale)}</td>'
+            f'<td style="font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:{MUTED};'
+            f'padding:5px 0 5px 10px;text-align:right;white-space:nowrap;">'
+            f"{flag}{_signed(e['now'], 2)}</td></tr>"
+        )
+    n = weekly["baseline_weeks"]
+    note = (
+        f"Grey: the range over the previous {n} weeks. Dot: this week. A dark dot sits "
+        f"outside the range and at least two standard deviations from its usual value."
+        if "low" in entries[0]
+        else "Usual ranges appear once enough earlier weeks are recorded."
+    )
+    return _panel(
+        "What moved",
+        f'<div style="font:14px/1.5 -apple-system,sans-serif;color:{MUTED};padding-bottom:10px;">'
+        f"Each foundation this week against its own recent weeks.</div>"
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="table-layout:fixed;"><colgroup><col width="26%"><col width="56%">'
+        f'<col width="18%"></colgroup>{"".join(rows)}</table>'
+        f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};padding-top:8px;">'
+        f"{note}</div>",
+    )
+
+
+def _share_row(label: str, share: float, colour: str, href: str | None = None) -> str:
+    text = _esc(label)
+    if href:
+        text = f'<a href="{_esc(href)}" style="color:{INK};text-decoration:none;">{text}</a>'
+    pct = max(0.0, min(1.0, share)) * 100
+    return (
+        f'<tr><td style="font:14px/1.35 -apple-system,sans-serif;color:{INK};'
+        f'padding:4px 10px 4px 0;">{text}</td>'
+        f'<td style="padding:4px 0;width:30%;"><table role="presentation" width="100%" '
+        f'cellpadding="0" cellspacing="0"><tr><td style="background:{colour};height:8px;'
+        f'border-radius:4px;width:{pct:.1f}%;font-size:0;line-height:0;">&nbsp;</td>'
+        f'<td style="font-size:0;line-height:0;">&nbsp;</td></tr></table></td>'
+        f'<td style="font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:{MUTED};'
+        f'padding:4px 0 4px 10px;text-align:right;width:40px;">{pct:.0f}%</td></tr>'
+    )
+
+
+def _drivers_panels(payload: dict) -> str:
+    out = []
+    drivers_by = payload["weekly"].get("drivers") or {}
+    # The lead move only: shares are zero-sum, so the others it pushed out of
+    # range are made of the same stories and would repeat this panel.
+    for e in _moved(payload["weekly"])[:1]:
+        foundation = e["foundation"]
+        drivers = drivers_by.get(foundation)
+        if not drivers:
+            continue
+        rows = "".join(
+            _share_row(d["title"] or "Untitled story", d["share"], MUTED) for d in drivers
+        )
+        out.append(
+            _panel(
+                f"Where the {foundation} gap comes from",
+                f'<div style="font:14px/1.5 -apple-system,sans-serif;color:{MUTED};'
+                f"padding-bottom:8px;\">Share of this week's {foundation} gap carried by each "
+                f"story. The shares add up exactly; they are not estimates of cause.</div>"
+                f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
+                f"{rows}</table>",
+            )
+        )
+    return "".join(out)
+
+
+def _framing_side(payload: dict, diet_id: str, side: dict, colour: str) -> str:
+    top = side.get("top") or []
+    peak = max((t["share"] for t in top), default=1.0) or 1.0
+    bars = "".join(
+        f'<tr><td style="font:13px -apple-system,sans-serif;color:{INK};padding:3px 8px 3px 0;'
+        f'white-space:nowrap;">{_esc(_foundation_name(t["foundation"]))}</td>'
+        f'<td style="padding:3px 0;width:100%;"><table role="presentation" width="100%" '
+        f'cellpadding="0" cellspacing="0"><tr><td style="background:{colour};height:8px;'
+        f"border-radius:0 4px 4px 0;width:{100 * t['share'] / peak:.1f}%;font-size:0;"
+        f'line-height:0;">&nbsp;</td><td style="font-size:0;line-height:0;">&nbsp;</td></tr>'
+        f"</table></td>"
+        f'<td style="font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:{MUTED};'
+        f'padding:3px 0 3px 8px;text-align:right;">{100 * t["share"]:.0f}%</td></tr>'
+        for t in top
+    )
+    headline = side.get("headline")
+    link = (
+        f'<div style="font:13px/1.45 -apple-system,sans-serif;color:{MUTED};padding-top:8px;">'
+        f'<a href="{_esc(headline["url"])}" style="color:{INK};">{_esc(headline["title"])}</a>'
+        f"</div>"
+        if headline and headline.get("url")
+        else ""
+    )
+    return (
+        f'<div style="font:600 13px -apple-system,sans-serif;color:{colour};padding-bottom:6px;">'
+        f"{_esc(_named(payload, diet_id))} &middot; {side['docs']} articles</div>"
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0">{bars}</table>'
+        f"{link}"
+    )
+
+
+def _framing_panel(payload: dict) -> str:
+    framings = payload["weekly"].get("framings") or []
+    if not framings:
+        return ""
+    lead, rest = framings[0], framings[1:]
+    colours = _colours(payload)
+    mine, theirs = payload["weekly"]["pair"]
+    cols = "".join(
+        f'<td valign="top" width="50%" style="padding:{pad}">'
+        f"{_framing_side(payload, d, lead['sides'][d], colours.get(d, DIET_A))}</td>"
+        for d, pad in ((mine, "0 10px 0 0;"), (theirs, "0 0 0 10px;"))
+    )
+    also = (
+        f'<div style="font:13px/1.5 -apple-system,sans-serif;color:{MUTED};padding-top:12px;">'
+        f"Also framed differently: {_esc('; '.join(f['title'] for f in rest if f['title']))}"
+        f"</div>"
+        if rest
+        else ""
+    )
+    return _panel(
+        "One story, two framings",
+        f'<div style="font:600 17px/1.35 -apple-system,sans-serif;color:{INK};">'
+        f"{_esc(lead['title'])}</div>"
+        f'<div style="font:14px/1.5 -apple-system,sans-serif;color:{MUTED};padding:4px 0 12px;">'
+        f"Covered by both diets this week. Bars show each side's foundation mix within "
+        f"this story.</div>"
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>{cols}'
+        f"</tr></table>{also}",
+    )
+
+
+def _trend_context(jsd: dict, weeks: int) -> str:
+    if "low" not in jsd:
+        return ""
+    band = f"{jsd['low']:.3f}–{jsd['high']:.3f}"
+    if jsd.get("moved"):
+        word = "Highest" if jsd["now"] > jsd["high"] else "Lowest"
+        return f"{word} in {weeks} weeks, outside the usual {band}."
+    return f"Inside the usual {band}."
+
+
+def _weekly_trend_panel(payload: dict) -> str:
+    jsd = payload["weekly"]["jsd"]
+    series = jsd.get("series") or []
+    peak = max((p["jsd"] for p in series), default=0.0) or 1.0
+    cells = "".join(
+        f'<td style="vertical-align:bottom;padding:0 2px;">'
+        f'<div style="background:{INK if i == len(series) - 1 else BAND};'
+        f'height:{max(2, round(48 * p["jsd"] / peak))}px;border-radius:2px;font-size:0;">'
+        f"&nbsp;</div></td>"
+        for i, p in enumerate(series)
+    )
+    chart = (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="height:48px;margin-top:10px;"><tr>{cells}</tr></table>'
+        f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding-top:6px;">'
+        f"Weeks ending {series[0]['week_end']} to {series[-1]['week_end']}; the dark column "
+        f"is this week.</div>"
+        if len(series) >= 2
+        else ""
+    )
+    return _panel(
+        "Divergence, week by week",
+        f'<div style="font:700 34px/1.1 -apple-system,BlinkMacSystemFont,sans-serif;'
+        f'color:{INK};">{jsd["now"]:.3f}</div>'
+        f'<div style="font:13px -apple-system,sans-serif;color:{MUTED};padding-top:4px;">'
+        f"Jensen-Shannon divergence over the last 7 days. "
+        f"{_esc(_trend_context(jsd, len(series)))}</div>{chart}",
+    )
+
+
+def _health_lines(payload: dict) -> tuple[list[str], list[str]]:
+    """(one line per source issue, one line per affected persona in the pair)."""
+    health = payload.get("source_health") or {}
+    issues = [
+        f"{i['name']}: {i['detail']}" + (f" (last good run {i['last_ok']})" if i["last_ok"] else "")
+        for i in health.get("issues") or []
+    ]
+    impact = health.get("persona_impact") or {}
+    pair = _pair(payload) or ()
+    personas = [
+        f"{_named(payload, p)}: {100 * impact[p]:.0f}% of its weighted diet is affected"
+        for p in pair
+        if p in impact
+    ]
+    return issues, personas
+
+
+def _health_panel(payload: dict) -> str:
+    issues, personas = _health_lines(payload)
+    if not issues:
+        return ""
+    items = "".join(
+        f'<div style="font:14px/1.45 -apple-system,sans-serif;color:{INK};padding:3px 0;">'
+        f"{_esc(line)}</div>"
+        for line in issues
+    )
+    impact = "".join(
+        f'<div style="font:13px/1.45 -apple-system,sans-serif;color:{MUTED};padding-top:4px;">'
+        f"{_esc(line)}</div>"
+        for line in personas
+    )
+    return _panel(
+        "Sources that need a look",
+        f"{items}{impact}"
+        f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};padding-top:8px;">'
+        f"Run <code>make sources</code> for the full list.</div>",
+    )
+
+
+def _weekly_text(payload: dict) -> list[str]:
+    weekly = payload["weekly"]
+    mine, theirs = weekly["pair"]
+    sentence, lede = _verdict(payload)
+    lines = ["", sentence, lede, "", f"WHAT MOVED (positive = {_named(payload, mine)} leans)"]
+    for e in weekly["foundations"]:
+        usual = f"  usual {_signed(e['low'], 2)} to {_signed(e['high'], 2)}" if "low" in e else ""
+        flag = "  OUTSIDE RANGE" if e.get("moved") else ""
+        lines.append(f"  {e['foundation']:<10} {_signed(e['now'], 2)}{usual}{flag}")
+    for e in _moved(weekly)[:1]:
+        foundation, drivers = e["foundation"], (weekly.get("drivers") or {}).get(e["foundation"])
+        if drivers:
+            lines += ["", f"WHERE THE {foundation.upper()} GAP COMES FROM"]
+            lines += [f"  {100 * d['share']:>3.0f}%  {d['title']}" for d in drivers]
+    framings = weekly.get("framings") or []
+    if framings:
+        lead = framings[0]
+        lines += ["", "ONE STORY, TWO FRAMINGS", "", lead["title"]]
+        for d in (mine, theirs):
+            side = lead["sides"][d]
+            top = ", ".join(
+                f"{t['foundation']} {100 * t['share']:.0f}%" for t in side.get("top") or []
+            )
+            lines.append(f"  {_named(payload, d)} ({side['docs']} articles): {top}")
+            if side.get("headline") and side["headline"].get("url"):
+                lines.append(f"    {side['headline']['title']}")
+                lines.append(f"    {side['headline']['url']}")
+    jsd = weekly["jsd"]
+    context = _trend_context(jsd, len(jsd.get("series") or []))
+    lines += ["", f"Divergence this week: {jsd['now']:.3f}. {context}"]
+    return lines
+
+
+def _health_text(payload: dict) -> list[str]:
+    issues, personas = _health_lines(payload)
+    if not issues:
+        return []
+    return ["", "SOURCES THAT NEED A LOOK", *(f"  {x}" for x in issues + personas)]
+
+
 def _caveat_for_email(payload: dict) -> str:
     """The dashboard's caveat, with its one dashboard-specific sentence rewritten.
 
@@ -856,6 +1272,29 @@ def _caveat_for_email(payload: dict) -> str:
             "disagree more, so trust that foundation's number less."
         )
     return caveat
+
+
+def _daily_panels(payload: dict, own_diet: str | None, head: str) -> str:
+    """The all-time layout, for a week too thin to compare on its own."""
+    return "".join(
+        [
+            _panel("Today", head),
+            # Directly under the headline number, because it is the sentence that
+            # says what the number means. It used to sit below every chart, which
+            # asks the reader to interpret the evidence before being told what it
+            # was evidence of.
+            _executive_panel(payload),
+            # Before the foundation charts, because it is the number that explains
+            # why the headline one is small.
+            _agenda_panel(payload),
+            _composition_panel(payload),
+            _log_ratio_panel(payload),
+            _sparkline_panel(payload),
+            _blindspot_panel(payload, own_diet),
+            _summary_panel(payload),
+            _extra_panel(payload),
+        ]
+    )
 
 
 def render_html(payload: dict, own_diet: str | None = None) -> str:
@@ -898,25 +1337,25 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
             f"1 disjoint</div>{movement}{pair_note}</div>"
         )
 
-    panels = "".join(
-        [
-            _panel("Today", head),
-            # Directly under the headline number, because it is the sentence that
-            # says what the number means. It used to sit below every chart, which
-            # asks the reader to interpret the evidence before being told what it
-            # was evidence of.
-            _executive_panel(payload),
-            # Before the foundation charts, because it is the number that explains
-            # why the headline one is small.
-            _agenda_panel(payload),
-            _composition_panel(payload),
-            _log_ratio_panel(payload),
-            _sparkline_panel(payload),
-            _blindspot_panel(payload, own_diet),
-            _summary_panel(payload),
-            _extra_panel(payload),
-        ]
-    )
+    if payload.get("weekly"):
+        panels = "".join(
+            [
+                _weekly_head(payload),
+                _movement_panel(payload),
+                _drivers_panels(payload),
+                _framing_panel(payload),
+                _blindspot_panel(payload, own_diet),
+                _weekly_trend_panel(payload),
+                _executive_panel(payload),
+                _summary_panel(payload),
+                _health_panel(payload),
+                _extra_panel(payload),
+            ]
+        )
+        title = "Parallax weekly brief"
+    else:
+        title = "Parallax daily brief"
+        panels = _daily_panels(payload, own_diet, head) + _health_panel(payload)
 
     caveat = _caveat_for_email(payload)
     generated = (payload.get("generated_utc") or "")[:10]
@@ -933,7 +1372,7 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
     return (
         f'<!DOCTYPE html><html><head><meta charset="utf-8">'
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f"<title>Parallax daily brief</title></head>"
+        f"<title>{title}</title></head>"
         f'<body style="margin:0;padding:0;background:{BG};">'
         f'<div style="display:none;max-height:0;overflow:hidden;opacity:0;">'
         f"{_esc(preheader)}</div>"
@@ -953,6 +1392,8 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
 
 def _preheader(payload: dict) -> str:
     """The one line iOS shows under the subject in the inbox list."""
+    if payload.get("weekly"):
+        return _verdict(payload)[1]
     jsd = _headline(payload)
     if jsd is None:
         return "Not enough scored documents to compare two diets yet."
@@ -1062,6 +1503,8 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
     Not decoration: some clients prefer it, VoiceOver reads it more cleanly,
     and a text part is what keeps the message from looking like bulk mail.
     """
+    if payload.get("weekly"):
+        return _render_weekly_text(payload, own_diet)
     lines = ["PARALLAX — daily brief", ""]
     jsd = _headline(payload)
     if jsd is None:
@@ -1124,6 +1567,36 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
             + (f", {window}-day trailing window recorded alongside" if window else ""),
         ]
 
+    lines += _blindspot_text(payload, own_diet)
+
+    said = [d for d in _pair_diets(payload) if (d.get("summary") or "").strip()]
+    if said:
+        lines += ["", "WHAT EACH DIET SAID"]
+        for diet in said:
+            lines += ["", _diet_label(diet), "", (diet.get("summary") or "").strip()]
+    method = payload.get("summary_method")
+    if method and (said or executive):
+        lines += ["", f"Summaries: {method}."]
+
+    lines += _extra_text(payload)
+    lines += _health_text(payload)
+    return "\n".join(lines + _text_footer(payload))
+
+
+def _text_footer(payload: dict) -> list[str]:
+    lines = []
+    caveat = _caveat_for_email(payload)
+    if caveat:
+        lines += ["", "-- ", caveat]
+    generated = (payload.get("generated_utc") or "")[:10]
+    lines.append(
+        f"Parallax · generated {generated} · both diets run through the identical pipeline."
+    )
+    return lines
+
+
+def _blindspot_text(payload: dict, own_diet: str | None) -> list[str]:
+    lines: list[str] = []
     themes = _themes(payload)
     if themes:
         lines += [
@@ -1162,26 +1635,22 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
             rest = group[MAX_CARDS_PER_DIRECTION:]
             if rest:
                 lines.append(f"    +{_more_themes(rest, escape=False)}")
+    return lines
 
+
+def _render_weekly_text(payload: dict, own_diet: str | None) -> str:
+    """The weekly layout as plain text, in the HTML's order."""
+    lines = ["PARALLAX — weekly brief", *_weekly_text(payload)]
+    lines += _blindspot_text(payload, own_diet)
+    executive = (payload.get("executive_summary") or "").strip()
+    if executive:
+        lines += ["", "THE SHORT VERSION", "", executive]
     said = [d for d in _pair_diets(payload) if (d.get("summary") or "").strip()]
-    if said:
-        lines += ["", "WHAT EACH DIET SAID"]
-        for diet in said:
-            lines += ["", _diet_label(diet), "", (diet.get("summary") or "").strip()]
-    method = payload.get("summary_method")
-    if method and (said or executive):
-        lines += ["", f"Summaries: {method}."]
-
+    for diet in said:
+        lines += ["", _diet_label(diet), "", (diet.get("summary") or "").strip()]
+    lines += _health_text(payload)
     lines += _extra_text(payload)
-
-    caveat = _caveat_for_email(payload)
-    if caveat:
-        lines += ["", "-- ", caveat]
-    generated = (payload.get("generated_utc") or "")[:10]
-    lines.append(
-        f"Parallax · generated {generated} · both diets run through the identical pipeline."
-    )
-    return "\n".join(lines)
+    return "\n".join(lines + _text_footer(payload))
 
 
 def build_digest(payload: dict, own_diet: str | None = None) -> Digest:
@@ -1194,7 +1663,9 @@ def build_digest(payload: dict, own_diet: str | None = None) -> Digest:
     _check_own_diet(payload, own_diet)
     jsd = _headline(payload)
     date = (payload.get("generated_utc") or "")[:10]
-    if jsd is None:
+    if payload.get("weekly"):
+        subject = _weekly_subject(payload)
+    elif jsd is None:
         subject = f"Parallax {date} — not enough data to compare"
     else:
         delta, _, _ = _delta(payload.get("history") or [])

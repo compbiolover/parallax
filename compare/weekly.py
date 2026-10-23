@@ -130,6 +130,7 @@ def weekly_movement(
         "orientation": "mine_first",
         "counts": counts,
         "baseline_weeks": len(prior),
+        "baseline_needed": MIN_BASELINE_WEEKS,
         "foundations": foundations,
         "jsd": jsd,
         "framings": story_framings(week_rows, pair, weights),
