@@ -72,3 +72,11 @@ def test_the_digest_waits_for_its_weekday():
     other = (TODAY + timedelta(days=1)).strftime("%A").lower()
     cfg = DailyConfig(digest_weekday=other)
     assert _step_digest(None, cfg, None, None).startswith("not sent")
+
+
+def test_divergence_outside_its_band_is_not_called_inside():
+    from digest.render import _trend_context
+
+    jsd = {"now": 0.08, "low": 0.0, "high": 0.07, "moved": False}
+    assert "Inside" not in _trend_context(jsd, 9)
+    assert _trend_context(dict(jsd, now=0.05), 9).startswith("Inside")

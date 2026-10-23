@@ -116,3 +116,29 @@ def test_gap_drivers_shares_sum_to_one():
     assert [d["cluster_id"] for d in drivers] == [1, 2, None]
     assert sum(d["share"] for d in drivers) == pytest.approx(1.0)
     assert drivers[0]["share"] == pytest.approx(2 * drivers[1]["share"])
+
+
+def test_leaving_a_perfectly_flat_history_counts_as_a_move():
+    from compare.weekly import _against
+
+    out = _against(0.5, [0.2] * 8)
+    assert out["moved"] and out["z"] is None
+    assert not _against(0.2, [0.2] * 8)["moved"]
+
+
+def test_offsetting_stories_keep_a_signed_remainder():
+    store = Datastore(":memory:")
+    reg, pair = two_personas()
+    # Theirs leans on sanctity in story 1; mine leans on it harder in story 2.
+    for i in range(3):
+        _doc(store, f"a{i}", "s_theirs", END, dict(CALM, sanctity=0.9))
+        _doc(store, f"b{i}", "s_mine", END, dict(CALM, sanctity=0.0))
+    _doc(store, "c0", "s_mine", END, dict(CALM, sanctity=0.6))
+    store.replace_clustering(
+        [(1, "a", 3), (2, "c", 1)], [("a0", 1), ("a1", 1), ("a2", 1), ("c0", 2)]
+    )
+    rows = store.clustered_scores(since=END.isoformat())
+    weights = {p: reg.weights_for(p) for p in pair}
+    drivers = gap_drivers(rows, pair, weights, "sanctity")
+    assert drivers[-1]["cluster_id"] is None and drivers[-1]["share"] < 0
+    assert sum(d["share"] for d in drivers) == pytest.approx(1.0)

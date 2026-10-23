@@ -607,17 +607,20 @@ class Datastore:
             out.append((r["source_id"], a, b))
         return out
 
-    def headlines_for_sources(self, source_ids: Iterable[str], limit: int = 50) -> list[str]:
+    def headlines_for_sources(
+        self, source_ids: Iterable[str], limit: int = 50, since: str | None = None
+    ) -> list[str]:
         """Titles of non-duplicate documents from a set of sources, newest first."""
         where, ids = _source_filter(source_ids)
+        clause, params = _date_window(since, None)
         rows = self.conn.execute(
             f"""
             SELECT d.title AS title FROM documents d
-            WHERE d.is_duplicate = 0 AND d.title IS NOT NULL AND d.title != ''{where}
+            WHERE d.is_duplicate = 0 AND d.title IS NOT NULL AND d.title != ''{where}{clause}
             ORDER BY COALESCE(d.published_utc, d.fetched_utc) DESC
             LIMIT ?
             """,
-            (*ids, limit),
+            (*ids, *params, limit),
         )
         return [r["title"] for r in rows]
 
@@ -934,7 +937,10 @@ class Datastore:
         yielded — embeddings from different embedders live in incompatible vector
         spaces (and often different dimensions), so clustering must not mix them.
 
-        ``since`` (``YYYY-MM-DD``) keeps only documents dated on or after it.
+        ``since`` (``YYYY-MM-DD``) keeps documents dated on or after it, and any
+        older canonical with a near-duplicate copy dated in the window: a wire
+        story rerun this week is this week's coverage even though the copy it
+        collapsed into was first fetched earlier.
         """
         sql = """
             SELECT e.document_id AS id, d.source_id AS source_id, d.title AS title,
@@ -946,9 +952,14 @@ class Datastore:
         if embedder is not None:
             sql += " AND e.embedder = ?"
             params = (embedder,)
-        clause, window = _date_window(since, None)
-        sql += clause
-        params += window
+        if since is not None:
+            sql += f"""
+                AND ({DOC_DATE_SQL} >= ? OR EXISTS (
+                    SELECT 1 FROM documents x
+                    WHERE x.duplicate_of = d.id AND x.is_duplicate = 1
+                      AND COALESCE(x.published_utc, x.fetched_utc) >= ?))
+            """
+            params += (since, since)
         for r in self.conn.execute(sql, params):
             yield r["id"], r["source_id"], r["title"], [], json.loads(r["vector"])
 

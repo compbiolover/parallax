@@ -650,3 +650,21 @@ def test_gather_describes_this_week_when_there_is_one():
     contexts, _ = gather(store, reg, ref)
     assert {c.diet_id: c.doc_count for c in contexts} == {"self": 1, "modeled_ce": 1}
     store.close()
+
+
+def test_headlines_follow_the_window():
+    from datetime import UTC, datetime, timedelta
+
+    from tests.registries import two_personas
+    from tests.test_weekly import CALM, _doc
+
+    store = Datastore(":memory:")
+    reg, ref = two_personas()
+    today = datetime.now(UTC).date()
+    _doc(store, "old", "s_mine", today - timedelta(days=60), CALM, "Archived story")
+    _doc(store, "new", "s_mine", today, CALM, "This week's story")
+    _doc(store, "t", "s_theirs", today, CALM, "Theirs")
+    contexts, _ = gather(store, reg, ref)
+    mine = next(c for c in contexts if c.diet_id == "self")
+    assert mine.headlines == ["This week's story"]
+    store.close()

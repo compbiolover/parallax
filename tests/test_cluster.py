@@ -533,3 +533,30 @@ def test_iter_embeddings_since_keeps_only_recent_documents():
     assert [r[0] for r in store.iter_embeddings(since="2026-10-16")] == ["d1"]
     assert len(list(store.iter_embeddings())) == 2
     store.close()
+
+
+def test_iter_embeddings_since_keeps_an_old_canonical_rerun_this_week():
+    store = Datastore(":memory:")
+    for doc_id, published, dup in [
+        ("canon", "2026-09-01T09:00:00+00:00", None),
+        ("copy", "2026-10-20T09:00:00+00:00", "canon"),
+        ("stale", "2026-09-01T09:00:00+00:00", None),
+    ]:
+        store.upsert_document(
+            doc_id=doc_id,
+            diet_id="",
+            source_id="s",
+            stratum_id=None,
+            url=None,
+            title="t",
+            published_utc=published,
+            fetched_utc=published,
+            word_count=10,
+            minhash=None,
+            is_duplicate=dup is not None,
+            duplicate_of=dup,
+        )
+        if dup is None:
+            store.upsert_embedding(document_id=doc_id, vector=[0.0] * 8, embedder="h")
+    assert [r[0] for r in store.iter_embeddings(since="2026-10-16")] == ["canon"]
+    store.close()

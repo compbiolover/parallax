@@ -894,7 +894,7 @@ def _verdict(payload: dict) -> tuple[str, str]:
             lede,
         )
     if not moved:
-        return "A quiet week. Every foundation stayed inside its usual range.", lede
+        return "A quiet week. No foundation moved beyond its usual week-to-week variation.", lede
     sentences = []
     for e in moved[:2]:
         toward = mine if e["now"] > e["high"] else theirs
@@ -914,7 +914,7 @@ def _verdict(payload: dict) -> tuple[str, str]:
 def _weekly_subject(payload: dict) -> str:
     weekly = payload["weekly"]
     stories = len(payload.get("blindspots") or [])
-    tail = f" · {stories} {'story' if stories == 1 else 'stories'} only one side saw"
+    tail = f" · {stories} {'story' if stories == 1 else 'stories'} covered mostly by one side"
     moved = _moved(weekly)
     if moved:
         e = moved[0]
@@ -1034,6 +1034,8 @@ def _share_row(label: str, share: float, colour: str, href: str | None = None) -
     text = _esc(label)
     if href:
         text = f'<a href="{_esc(href)}" style="color:{INK};text-decoration:none;">{text}</a>'
+    # The label is the real signed share; only the bar is clamped. Stories
+    # pulling the other way make the parts run past 100% and the rest negative.
     pct = max(0.0, min(1.0, share)) * 100
     return (
         f'<tr><td style="font:14px/1.35 -apple-system,sans-serif;color:{INK};'
@@ -1043,7 +1045,7 @@ def _share_row(label: str, share: float, colour: str, href: str | None = None) -
         f'border-radius:4px;width:{pct:.1f}%;font-size:0;line-height:0;">&nbsp;</td>'
         f'<td style="font-size:0;line-height:0;">&nbsp;</td></tr></table></td>'
         f'<td style="font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:{MUTED};'
-        f'padding:4px 0 4px 10px;text-align:right;width:40px;">{pct:.0f}%</td></tr>'
+        f'padding:4px 0 4px 10px;text-align:right;width:48px;">{100 * share:.0f}%</td></tr>'
     )
 
 
@@ -1065,7 +1067,8 @@ def _drivers_panels(payload: dict) -> str:
                 f"Where the {foundation} gap comes from",
                 f'<div style="font:14px/1.5 -apple-system,sans-serif;color:{MUTED};'
                 f"padding-bottom:8px;\">Share of this week's {foundation} gap carried by each "
-                f"story. The shares add up exactly; they are not estimates of cause.</div>"
+                f"story. The shares add up exactly, and stories pulling the other way show as "
+                f"negative; they are not estimates of cause.</div>"
                 f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
                 f"{rows}</table>",
             )
@@ -1139,10 +1142,12 @@ def _trend_context(jsd: dict, weeks: int) -> str:
     if "low" not in jsd:
         return ""
     band = f"{jsd['low']:.3f}–{jsd['high']:.3f}"
+    if jsd["low"] <= jsd["now"] <= jsd["high"]:
+        return f"Inside the usual {band}."
+    word = "Highest" if jsd["now"] > jsd["high"] else "Lowest"
     if jsd.get("moved"):
-        word = "Highest" if jsd["now"] > jsd["high"] else "Lowest"
         return f"{word} in {weeks} weeks, outside the usual {band}."
-    return f"Inside the usual {band}."
+    return f"{word} in {weeks} weeks, just outside the usual {band}; within normal variation."
 
 
 def _weekly_trend_panel(payload: dict) -> str:
@@ -1265,6 +1270,14 @@ def _caveat_for_email(payload: dict) -> str:
     """
     caveat = payload.get("caveat") or ""
     whiskers = "Whiskers on the radar show"
+    if payload.get("weekly"):
+        # This layout prints no scorer spread. Its ranges are past weeks' values,
+        # which say how unusual this week is, not how far to trust the scores.
+        return caveat.split(whiskers)[0].strip() + (
+            " The grey ranges under What moved are the previous weeks' values, "
+            "not measurement uncertainty; how far the scoring methods disagree "
+            "is on the dashboard."
+        )
     if whiskers in caveat:
         caveat = caveat.split(whiskers)[0].strip() + (
             " The range printed next to each foundation is the "

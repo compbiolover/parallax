@@ -147,14 +147,16 @@ def _against(value: float, history: list[float]) -> dict:
     low, high = min(history), max(history)
     mean = statistics.fmean(history)
     sd = statistics.pstdev(history)
-    z = (value - mean) / sd if sd > 0 else 0.0
     outside = value < low or value > high
+    # A perfectly flat history has no spread to measure against: z is None and
+    # leaving the range alone counts as a move, rather than reading as z = 0.
+    z = (value - mean) / sd if sd > 0 else None
     return {
         "low": low,
         "high": high,
         "median": statistics.median(history),
         "z": z,
-        "moved": outside and abs(z) >= Z_MOVED,
+        "moved": outside and (z is None or abs(z) >= Z_MOVED),
     }
 
 
@@ -242,9 +244,8 @@ def gap_drivers(
             )
     parts.sort(key=lambda p: -p["share"])
     top = parts[:MAX_DRIVERS]
-    # Stories pulling the other way can push the listed parts past 100%; then
-    # there is no positive remainder to show.
+    # Signed, and always present, so the parts still sum to the gap: when other
+    # stories pull the other way the listed ones exceed 100% and this goes negative.
     rest = 1 - sum(p["share"] for p in top)
-    if rest > 0:
-        top.append({"cluster_id": None, "title": "Everything else", "share": rest})
+    top.append({"cluster_id": None, "title": "Everything else", "share": rest})
     return top

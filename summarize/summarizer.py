@@ -98,7 +98,7 @@ def gather(
                 short_label=short_labels.get(persona_id, ""),
                 doc_count=store.doc_count_for_sources(weights, since=since),
                 profile=profiles[persona_id],
-                headlines=store.headlines_for_sources(weights, max_headlines),
+                headlines=store.headlines_for_sources(weights, max_headlines, since=since),
             )
         )
     comparison = None
