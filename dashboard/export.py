@@ -28,8 +28,10 @@ from pathlib import Path
 from compare.divergence import index_form, jensen_shannon_divergence, log_ratios
 from compare.history import DEFAULT_SERIES_LIMIT, load_series
 from compare.reference import ReferencePair, resolve
+from compare.weekly import weekly_movement
 from ingestion.config import Registry, datastore_path, load_registry, load_settings
 from ingestion.datastore import Datastore
+from ingestion.health import health_payload
 from ingestion.pipeline import persona_profiles
 from scoring.foundations import CLASSIC_FOUNDATIONS
 from scoring.lexicon import is_demo_lexicon
@@ -237,6 +239,12 @@ def build_payload(
         # that wants to drill into one cluster.
         "blindspot_themes": blindspot_themes,
         "caveat": _caveat(lexicon, has_bands),
+        # The weekly brief's spine: this week against the eight before it, the
+        # stories both sides covered, and which stories make a moved gap.
+        "weekly": weekly_movement(store, registry, pair),
+        # Feeds that stopped loading, got blocked, or went quiet, and how much
+        # of each persona they carry.
+        "source_health": health_payload(store, registry),
     }
 
 

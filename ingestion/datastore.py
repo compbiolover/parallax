@@ -803,6 +803,31 @@ class Datastore:
         return {r["status"]: r["n"] for r in self.conn.execute(sql, params)}
 
     # -- provenance metadata --------------------------------------------
+    def clustered_scores(
+        self, scorer: str = "dictionary", since: str | None = None, until: str | None = None
+    ) -> list[sqlite3.Row]:
+        """Scored canonical documents in a date window, each with its cluster id.
+
+        ``cluster_id`` is NULL for a document the latest clustering did not
+        see, -1 for noise. Unclustered documents are returned too: a story's
+        share of a diet's foundation mix needs the whole mix as denominator.
+        """
+        clause, params = _date_window(since, until)
+        return list(
+            self.conn.execute(
+                f"""
+                SELECT d.id AS id, d.source_id AS source_id, d.title AS title, d.url AS url,
+                       {DOC_DATE_SQL} AS dated, dc.cluster_id AS cluster_id, s.*
+                FROM foundation_scores s
+                JOIN documents d ON d.id = s.document_id
+                LEFT JOIN document_clusters dc ON dc.document_id = d.id
+                WHERE d.is_duplicate = 0 AND s.scorer = ?{clause}
+                ORDER BY dated DESC
+                """,
+                (scorer, *params),
+            )
+        )
+
     # -- source health ---------------------------------------------------
     def record_source_run(
         self, source_id: str, run_utc: str, status: str, items: int, stored: int, errors: int
