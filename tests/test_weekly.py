@@ -142,3 +142,27 @@ def test_offsetting_stories_keep_a_signed_remainder():
     drivers = gap_drivers(rows, pair, weights, "sanctity")
     assert drivers[-1]["cluster_id"] is None and drivers[-1]["share"] < 0
     assert sum(d["share"] for d in drivers) == pytest.approx(1.0)
+
+
+def test_no_drivers_when_the_move_closed_the_gap():
+    store = Datastore(":memory:")
+    reg, pair = two_personas()
+    # Theirs leans on sanctity for 8 weeks, then matches mine: the gap closes.
+    _history(store, CALM)
+    for back in range(1, 9):
+        day = END - timedelta(days=7 * back)
+        for i in range(MIN_WEEK_DOCS):
+            _doc(store, f"x{back}-{i}", "s_theirs", day, dict(CALM, sanctity=0.6))
+    out = weekly_movement(store, reg, pair, end=END)
+    assert any(e["moved"] for e in out["foundations"])
+    assert out["drivers"] == {}
+
+
+def test_framing_headlines_skip_index_pages():
+    from compare.weekly import _headline
+
+    rows = [
+        {"title": "Palestine Articles - Christianity Today", "url": "https://x", "dated": "2026"},
+        {"title": "Chaplaincy bill passes the state senate", "url": "https://y", "dated": "2026"},
+    ]
+    assert _headline(rows)["title"].startswith("Chaplaincy")

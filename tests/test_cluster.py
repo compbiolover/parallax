@@ -560,3 +560,41 @@ def test_iter_embeddings_since_keeps_an_old_canonical_rerun_this_week():
             store.upsert_embedding(document_id=doc_id, vector=[0.0] * 8, embedder="h")
     assert [r[0] for r in store.iter_embeddings(since="2026-10-16")] == ["canon"]
     store.close()
+
+
+def test_an_old_canonical_rerun_credits_only_this_weeks_outlets():
+    from cluster.cluster import compute_clustering
+
+    store = Datastore(":memory:")
+    for doc_id, source, published, dup in [
+        ("canon", "theirs", "2026-09-01T09:00:00+00:00", None),
+        ("copy", "mine", "2026-10-20T09:00:00+00:00", "canon"),
+    ]:
+        store.upsert_document(
+            doc_id=doc_id,
+            diet_id="",
+            source_id=source,
+            stratum_id=None,
+            url=None,
+            title="t",
+            published_utc=published,
+            fetched_utc=published,
+            word_count=10,
+            minhash=None,
+            is_duplicate=dup is not None,
+            duplicate_of=dup,
+        )
+    store.upsert_embedding(document_id="canon", vector=[1.0] * 8, embedder="h")
+    store.set_meta("embedder", "h")
+    result = compute_clustering(store, since="2026-10-16")
+    assert result.coverage == [frozenset({"mine"})]
+    store.close()
+
+
+def test_an_empty_window_keeps_the_last_clustering():
+    store = Datastore(":memory:")
+    store.replace_clustering([(1, "kept", 2)], [])
+    outcome = run_clustering(store, {"a": {"s1"}, "b": {"s2"}}, claude_themes=False, window_days=7)
+    assert outcome.n_docs == 0
+    assert [r["label"] for r in store.cluster_rows()] == ["kept"]
+    store.close()

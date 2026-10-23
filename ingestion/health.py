@@ -23,6 +23,8 @@ FAILING_RUNS = 3
 DROP_SHARE = 0.25
 # ... and only for sources that stored enough before for the ratio to mean anything.
 DROP_MIN_WEEKLY = 5.0
+# Days of history before "a week before" is a baseline at all.
+MIN_BASELINE_DAYS = 14
 LOOKBACK_DAYS = 35
 
 MESSAGES = {
@@ -63,9 +65,11 @@ def source_issues(store, registry, now: datetime | None = None) -> list[SourceIs
             )
             continue
         this_week = sum(r["stored"] for r in rows if r["run_utc"] >= week_ago)
-        before = [r for r in rows if r["run_utc"] < week_ago]
-        if before:
-            span_days = max(7.0, (datetime.fromisoformat(week_ago) - _parse(before[0])).days)
+        # The earliest run is left out: a new source's first run stores the
+        # feed's whole backlog, which reads as a busy week it never had again.
+        before = [r for r in rows if r["run_utc"] < week_ago][1:]
+        span_days = (datetime.fromisoformat(week_ago) - _parse(before[0])).days if before else 0
+        if span_days >= MIN_BASELINE_DAYS:
             weekly = sum(r["stored"] for r in before) / (span_days / 7)
             if weekly >= DROP_MIN_WEEKLY and this_week < DROP_SHARE * weekly:
                 issues.append(

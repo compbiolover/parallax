@@ -15,7 +15,7 @@ from compare.reference import resolve
 from ingestion.config import datastore_path, load_registry, load_settings
 from ingestion.datastore import Datastore
 
-from . import DEFAULT_WINDOW_DAYS
+from . import DEFAULT_WINDOW_DAYS, window_days
 from .blindspot import run_clustering
 
 
@@ -90,11 +90,7 @@ def main(argv: list[str] | None = None) -> int:
             theme_effort=args.theme_effort or _configured_effort(themes_cfg),
             claude_themes=(not args.no_claude_themes) and bool(themes_cfg.get("claude", True)),
             window_days=(
-                args.window_days
-                if args.window_days is not None
-                else int(
-                    (settings.get("cluster", {}) or {}).get("window_days", DEFAULT_WINDOW_DAYS)
-                )
+                args.window_days if args.window_days is not None else window_days(settings)
             ),
         )
         print(

@@ -640,7 +640,9 @@ def _agenda_panel(payload: dict) -> str:
         "the two compared diets moralize in similar language"
         + (f" ({jsd:.3f} here)" if jsd is not None else "")
         + ", and a large attention divergence says they apply it to different "
-        "events. The second is what a reader experiences as a different world."
+        "events. The second is what a reader experiences as a different world. "
+        "The attention number covers the stories clustered this week; the "
+        "foundation divergence covers the whole corpus."
     )
     if agenda.get("thin"):
         note += (
@@ -650,7 +652,7 @@ def _agenda_panel(payload: dict) -> str:
         f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};'
         f'padding-top:10px;">{note}</div>'
     )
-    return _panel("Same day, different agenda", "".join(rows))
+    return _panel("This week's agenda", "".join(rows))
 
 
 def _blindspot_panel(payload: dict, own: str | None) -> str:
@@ -869,13 +871,21 @@ def _in_sentence(payload: dict, diet_id: str) -> str:
 def _moved(weekly: dict) -> list[dict]:
     """Foundations that left their range, the biggest shift first.
 
-    Ranked by distance from the usual value, not by z: shares are zero-sum, so
-    one foundation spiking nudges every other share too, and a share that
-    barely varies gets a large z from a small nudge. The headline should name
-    the foundation that moved, not the one that was pushed.
+    Ranked by how far the foundation's own share moved (``shift``), not by z or
+    by log-ratio distance: shares are zero-sum, so one foundation rising pushes
+    every other share too, and the pushed ones can move further in log space
+    than the one that moved. The headline should name the one that moved.
     """
     moved = [e for e in weekly["foundations"] if e.get("moved")]
-    return sorted(moved, key=lambda e: -abs(e["now"] - e["median"]))
+    return sorted(moved, key=lambda e: -e.get("shift", abs(e["now"] - e["median"])))
+
+
+def _gap_edge(weekly: dict) -> str | None:
+    """'widest' / 'narrowest' when the overall gap left its range, else None."""
+    jsd = weekly["jsd"]
+    if not jsd.get("moved"):
+        return None
+    return "widest" if jsd["now"] > jsd["high"] else "narrowest"
 
 
 def _verdict(payload: dict) -> tuple[str, str]:
@@ -896,22 +906,31 @@ def _verdict(payload: dict) -> tuple[str, str]:
             f"Usual ranges appear after {need}.",
             lede,
         )
+    edge = _gap_edge(weekly)
     if not moved:
+        if edge:
+            return (
+                f"No single foundation left its usual range, but the overall gap is the "
+                f"{edge} in {n + 1} weeks.",
+                lede,
+            )
         return "A quiet week. No foundation moved beyond its usual week-to-week variation.", lede
-    sentences = []
-    for e in moved[:2]:
-        toward = mine if e["now"] > e["high"] else theirs
-        sentences.append(
-            f"{_foundation_name(e['foundation'])} shifted toward {_in_sentence(payload, toward)} "
-            f"further than in any of the past {n} weeks."
+    # The lead move only. Shares are zero-sum, so the other flags are mostly
+    # this one's echo, and naming them as shifts credits the diet that did not move.
+    e = moved[0]
+    toward = mine if e["now"] > e["high"] else theirs
+    sentence = (
+        f"{_foundation_name(e['foundation'])} shifted toward {_in_sentence(payload, toward)} "
+        f"further than in any of the past {n} weeks."
+    )
+    if len(moved) > 1:
+        sentence += (
+            f" {len(moved) - 1} other foundation(s) left their range with it; shares add "
+            f"up to one, so some of that is this shift's echo."
         )
-    if len(moved) > 2:
-        sentences.append(f"{len(moved) - 2} more foundation(s) left their usual range.")
-    jsd = weekly["jsd"]
-    if jsd.get("moved"):
-        widest = "widest" if jsd["now"] > jsd["high"] else "narrowest"
-        lede = f"The overall gap is the {widest} in {n + 1} weeks. " + lede
-    return " ".join(sentences), lede
+    if edge:
+        lede = f"The overall gap is the {edge} in {n + 1} weeks. " + lede
+    return sentence, lede
 
 
 def _weekly_subject(payload: dict) -> str:
@@ -923,6 +942,8 @@ def _weekly_subject(payload: dict) -> str:
         e = moved[0]
         toward = weekly["pair"][0] if e["now"] > e["high"] else weekly["pair"][1]
         head = f"{_foundation_name(e['foundation'])} shifted toward {_in_sentence(payload, toward)}"
+    elif _gap_edge(weekly):
+        head = f"Overall gap {_gap_edge(weekly)} in {weekly['baseline_weeks'] + 1} weeks"
     elif "moved" in weekly["foundations"][0]:
         head = "Quiet week"
     else:
@@ -941,7 +962,7 @@ def _legend(payload: dict) -> str:
     ]
     return (
         f'<div style="font:13px -apple-system,sans-serif;color:{MUTED};padding-top:10px;">'
-        f"{''.join(keys)}</div>"
+        f"{''.join(keys)}{_others_note(payload)}</div>"
     )
 
 
@@ -1070,8 +1091,9 @@ def _drivers_panels(payload: dict) -> str:
                 f"Where the {foundation} gap comes from",
                 f'<div style="font:14px/1.5 -apple-system,sans-serif;color:{MUTED};'
                 f"padding-bottom:8px;\">Share of this week's {foundation} gap carried by each "
-                f"story. The shares add up exactly, and stories pulling the other way show as "
-                f"negative; they are not estimates of cause.</div>"
+                f"story. Stories pulling the other way are folded into Everything else, which "
+                f"can go negative; the parts add up exactly. They are not estimates of cause."
+                f"</div>"
                 f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
                 f"{rows}</table>",
             )
@@ -1095,6 +1117,9 @@ def _framing_side(payload: dict, diet_id: str, side: dict, colour: str) -> str:
         for t in top
     )
     headline = side.get("headline")
+    # Feed-supplied, so only http(s) becomes a link, as in _outlets.
+    if headline and not (headline.get("url") or "").startswith(("http://", "https://")):
+        headline = None
     link = (
         f'<div style="font:13px/1.45 -apple-system,sans-serif;color:{MUTED};padding-top:8px;">'
         f'<a href="{_esc(headline["url"])}" style="color:{INK};">{_esc(headline["title"])}</a>'
@@ -1226,7 +1251,17 @@ def _weekly_text(payload: dict) -> list[str]:
     weekly = payload["weekly"]
     mine, theirs = weekly["pair"]
     sentence, lede = _verdict(payload)
-    lines = ["", sentence, lede, "", f"WHAT MOVED (positive = {_named(payload, mine)} leans)"]
+    pair_line = f"{_named(payload, mine)} vs {_named(payload, theirs)}" + html.unescape(
+        _others_note(payload)
+    )
+    lines = [
+        "",
+        sentence,
+        lede,
+        pair_line,
+        "",
+        f"WHAT MOVED (positive = {_named(payload, mine)} leans)",
+    ]
     for e in weekly["foundations"]:
         usual = f"  usual {_signed(e['low'], 2)} to {_signed(e['high'], 2)}" if "low" in e else ""
         flag = "  OUTSIDE RANGE" if e.get("moved") else ""
@@ -1246,7 +1281,7 @@ def _weekly_text(payload: dict) -> list[str]:
                 f"{t['foundation']} {100 * t['share']:.0f}%" for t in side.get("top") or []
             )
             lines.append(f"  {_named(payload, d)} ({side['docs']} articles): {top}")
-            if side.get("headline") and side["headline"].get("url"):
+            if (side.get("headline") or {}).get("url", "").startswith(("http://", "https://")):
                 lines.append(f"    {side['headline']['title']}")
                 lines.append(f"    {side['headline']['url']}")
     jsd = weekly["jsd"]
@@ -1434,7 +1469,7 @@ def _agenda_text(payload: dict) -> list[str]:
         return []
     lines = [
         "",
-        "SAME DAY, DIFFERENT AGENDA",
+        "THIS WEEK'S AGENDA (stories clustered this week; divergence above is all-time)",
         "",
         f"Attention divergence: {agenda['divergence']:.3f}  "
         f"(across {agenda['total_stories']} stories)",

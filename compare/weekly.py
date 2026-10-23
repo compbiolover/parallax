@@ -29,7 +29,7 @@ from __future__ import annotations
 import statistics
 from datetime import UTC, date, datetime, timedelta
 
-from cluster.titles import clean_title
+from cluster.titles import clean_title, is_boilerplate
 from compare.divergence import jensen_shannon_divergence, log_ratios
 from compare.reference import ReferencePair
 from scoring.aggregate import to_composition
@@ -89,7 +89,7 @@ def weekly_movement(
     rows = store.clustered_scores(scorer, since=oldest, until=until)
     weights = _weights(registry, pair)
 
-    points = []  # newest first: (week_end, log_ratios, jsd, counts)
+    points = []  # newest first: (week_end, log_ratios, jsd, counts, compositions)
     for back in range(weeks + 1):
         lo, hi = _week_bounds(end, back)
         week = [r for r in rows if lo <= r["dated"] < hi]
@@ -106,10 +106,11 @@ def weekly_movement(
                 log_ratios(mine, theirs),
                 jensen_shannon_divergence(mine, theirs),
                 counts,
+                {pair.mine: mine, pair.theirs: theirs},
             )
         )
 
-    week_end, now, jsd_now, counts = points[0]
+    week_end, now, jsd_now, counts, comps = points[0]
     prior = points[1:]
     has_baseline = len(prior) >= MIN_BASELINE_WEEKS
     foundations = []
@@ -117,12 +118,24 @@ def weekly_movement(
         entry = {"foundation": f, "now": now[f]}
         if has_baseline:
             entry.update(_against(now[f], [p[1][f] for p in prior]))
+            # How far the foundation's own share moved, on whichever side moved
+            # more. This, not the log-ratio, says which foundation moved: shares
+            # are zero-sum, and a big share rising pushes every small one further
+            # in log space than it moves itself.
+            entry["shift"] = max(
+                abs(comps[d][f] - statistics.median(p[4][d][f] for p in prior)) for d in pair
+            )
         foundations.append(entry)
     jsd = {"now": jsd_now, "series": [{"week_end": p[0], "jsd": p[2]} for p in reversed(points)]}
     if has_baseline:
         jsd.update(_against(jsd_now, [p[2] for p in prior]))
 
-    week_rows = [r for r in rows if r["dated"] >= _week_bounds(end, 0)[0]]
+    # Only outlets the pair reads: a story's title and framing should not come
+    # from a source neither side counts.
+    read = {s for p in pair for s, w in weights[p].items() if w > 0}
+    week_rows = [
+        r for r in rows if r["dated"] >= _week_bounds(end, 0)[0] and r["source_id"] in read
+    ]
     return {
         "week_start": _week_bounds(end, 0)[0],
         "week_end": week_end,
@@ -137,7 +150,9 @@ def weekly_movement(
         "drivers": {
             e["foundation"]: gap_drivers(week_rows, pair, weights, e["foundation"])
             for e in foundations
-            if e.get("moved")
+            # A gap that widened. One that closed toward parity has almost
+            # nothing left to split, and dividing by it inflates every share.
+            if e.get("moved") and abs(e["now"]) > abs(e["median"])
         },
     }
 
@@ -171,7 +186,7 @@ def _by_story(rows) -> dict[int, list]:
 def _headline(rows) -> dict | None:
     for r in rows:  # newest first
         title = clean_title(r["title"])
-        if title:
+        if title and not is_boilerplate(title):
             return {"title": title, "url": r["url"], "date": (r["dated"] or "")[:10]}
     return None
 

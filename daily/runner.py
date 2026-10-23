@@ -37,10 +37,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cluster import DEFAULT_WINDOW_DAYS as CLUSTER_WINDOW_DAYS
+from cluster import window_days
 from cluster.themes import UNSET as THEME_EFFORT_UNSET
 from compare.history import DEFAULT_SERIES_LIMIT, DEFAULT_WINDOW_DAYS
 from compare.reference import resolve
@@ -145,9 +146,7 @@ class DailyConfig:
             window_days=int(snap.get("window_days", DEFAULT_WINDOW_DAYS)),
             history_limit=int(snap.get("history_limit", DEFAULT_SERIES_LIMIT)),
             claude_themes=bool(themes.get("claude", True)),
-            cluster_window_days=int(
-                (settings.get("cluster", {}) or {}).get("window_days", CLUSTER_WINDOW_DAYS)
-            ),
+            cluster_window_days=window_days(settings),
             theme_model=themes.get("model"),
             # `.get` with a default keeps a stored None: `effort: ~` means
             # "send no effort", which is not the same instruction as leaving
@@ -158,7 +157,7 @@ class DailyConfig:
             model=(settings.get("summarize", {}) or {}).get("model"),
             summary_effort=(settings.get("summarize", {}) or {}).get("effort"),
             own_diet=dig.get("own_diet"),
-            digest_weekday=dig.get("weekday"),
+            digest_weekday=_weekday(dig.get("weekday")),
             reference_mine=ref.get("mine"),
             reference_theirs=ref.get("theirs"),
             summary_personas=_summary_personas(settings),
@@ -390,6 +389,24 @@ def _step_export(store, cfg: DailyConfig, registry, pair) -> str:
     return f"wrote {out} and {catalog.name}"
 
 
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _weekday(value) -> str | None:
+    """`digest.weekday` as a full lower-case day name; "Fri" and "friday" both work.
+
+    Anything else is refused at load, because a misspelled day would otherwise
+    hold the brief back on every run while each run reports success.
+    """
+    if value is None or value == "":
+        return None
+    text = str(value).strip().lower()
+    match = [d for d in WEEKDAYS if len(text) >= 3 and d.startswith(text)]
+    if len(match) != 1:
+        raise ValueError(f"digest.weekday must be a day of the week, got {value!r}")
+    return match[0]
+
+
 def _step_digest(store, cfg: DailyConfig, registry, pair) -> str:
     """Render the brief and mail it.
 
@@ -399,14 +416,20 @@ def _step_digest(store, cfg: DailyConfig, registry, pair) -> str:
     from digest.render import build_digest
     from digest.send import send
 
-    # `--only digest` is someone asking for the brief now, so it skips the check.
-    weekday = (cfg.digest_weekday or "").strip().lower()
-    today = datetime.now(UTC).strftime("%A").lower()
-    if weekday and weekday != today and cfg.steps != ("digest",):
-        return f"not sent — the brief goes out on {weekday.capitalize()}s"
+    # Due on the most recent `weekday`, and sent on the first run on or after it
+    # that has not sent one since, so a Friday missed while the machine slept
+    # goes out on Saturday. `--only digest` is someone asking for it now.
+    due = None
+    if cfg.digest_weekday and cfg.steps != ("digest",):
+        today = datetime.now(UTC).date()
+        due = today - timedelta(days=(today.weekday() - WEEKDAYS.index(cfg.digest_weekday)) % 7)
+        if (store.get_meta("digest_last_sent") or "") >= due.isoformat():
+            return f"not sent — already sent for {cfg.digest_weekday.capitalize()} {due}"
     digest = build_digest(_payload(store, cfg, registry, pair), own_diet=cfg.own_diet or pair.mine)
     reason = send(digest)
     if reason is None:
+        if cfg.digest_weekday:
+            store.set_meta("digest_last_sent", datetime.now(UTC).date().isoformat())
         return f"sent — {digest.subject}"
     # A step failure, not a silent skip: the digest was switched on deliberately,
     # so not sending is the thing you need to be told about — and it says which

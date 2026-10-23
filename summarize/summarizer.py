@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from compare.divergence import jensen_shannon_divergence, log_ratios
+from compare.weekly import MIN_WEEK_DOCS
 from ingestion.datastore import Datastore
 from ingestion.pipeline import persona_profiles
 from scoring.claude_client import NO_TEXT, UNKNOWN, build_client, call_failed
@@ -64,11 +65,15 @@ def gather(
     """
     # This week, not the whole store: an all-time profile barely moves as the
     # corpus grows, so the prose it fed said the same thing every morning. A
-    # store with nothing this recent (a fresh backfill, a test fixture) falls
-    # back to all of it rather than to no summary.
+    # week too thin for the weekly brief to compare (MIN_WEEK_DOCS a side) falls
+    # back to all of it, so the prose and the numbers beside it agree on a period.
     since = (datetime.now(UTC).date() - timedelta(days=SUMMARY_WINDOW_DAYS - 1)).isoformat()
     profiles = persona_profiles(store, registry, since=since)
-    if not all(p in profiles for p in pair):
+    thin = any(
+        store.doc_count_for_sources(registry.weights_for(p), since=since) < MIN_WEEK_DOCS
+        for p in pair
+    )
+    if thin or not all(p in profiles for p in pair):
         since = None
         profiles = persona_profiles(store, registry)
     labels = store.diet_labels()

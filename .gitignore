@@ -21,6 +21,8 @@ models/
 
 # ---- Local config (keep only the *.example.yaml tracked) ----
 config/settings.yaml
+# A real person's real media diet (CLAUDE.md §0). Never committed.
+config/personas.local.yaml
 
 # ---- Dashboard generated data (aggregates only, still not committed) ----
 dashboard/public/data/*

@@ -926,8 +926,8 @@ class Datastore:
 
     def iter_embeddings(
         self, embedder: str | None = None, since: str | None = None
-    ) -> Iterator[tuple[str, str, str | None, list[int], list[float]]]:
-        """Yield (document_id, source_id, title, _, vector) for non-duplicate docs.
+    ) -> Iterator[tuple[str, str, str | None, str, list[float]]]:
+        """Yield (document_id, source_id, title, dated, vector) for non-duplicate docs.
 
         Keyed by source rather than diet: a document belongs to every persona that
         reads its source, so clustering resolves membership per persona afterwards
@@ -942,9 +942,9 @@ class Datastore:
         story rerun this week is this week's coverage even though the copy it
         collapsed into was first fetched earlier.
         """
-        sql = """
+        sql = f"""
             SELECT e.document_id AS id, d.source_id AS source_id, d.title AS title,
-                   e.vector AS vector
+                   {DOC_DATE_SQL} AS dated, e.vector AS vector
             FROM embeddings e JOIN documents d ON d.id = e.document_id
             WHERE d.is_duplicate = 0
         """
@@ -962,7 +962,7 @@ class Datastore:
             """
             params += (since, since)
         for r in self.conn.execute(sql, params):
-            yield r["id"], r["source_id"], r["title"], [], json.loads(r["vector"])
+            yield r["id"], r["source_id"], r["title"], r["dated"], json.loads(r["vector"])
 
     def embedder_names(self) -> list[str]:
         """Distinct embedder names present in the embeddings table."""
@@ -1020,8 +1020,8 @@ class Datastore:
         """
         return list(
             self.conn.execute(
-                """
-                SELECT d.id AS id, d.title AS title,
+                f"""
+                SELECT d.id AS id, d.title AS title, {DOC_DATE_SQL} AS dated,
                        d.url AS url, d.source_id AS source_id
                 FROM document_clusters dc JOIN documents d ON d.id = dc.document_id
                 WHERE dc.cluster_id = ?
@@ -1079,7 +1079,7 @@ class Datastore:
             )
         )
 
-    def duplicate_coverage(self) -> dict[str, set[str]]:
+    def duplicate_coverage(self, since: str | None = None) -> dict[str, set[str]]:
         """``{canonical_document_id: {source_id, ...}}`` for collapsed near-duplicates.
 
         Deduplication is right for scoring and wrong for coverage, and the two need
@@ -1092,10 +1092,16 @@ class Datastore:
         One level deep by construction: the near-duplicate index is seeded only
         from non-duplicates (:meth:`iter_minhash_signatures` filters them), so
         ``duplicate_of`` always names a canonical and never another duplicate.
+
+        ``since`` counts only copies dated on or after it, so a clustering window
+        credits the outlets that ran the story inside it.
         """
+        clause, params = _date_window(since, None)
         rows = self.conn.execute(
-            "SELECT duplicate_of AS canonical, source_id FROM documents "
-            "WHERE is_duplicate = 1 AND duplicate_of IS NOT NULL AND source_id != ''"
+            "SELECT d.duplicate_of AS canonical, d.source_id AS source_id FROM documents d "
+            "WHERE d.is_duplicate = 1 AND d.duplicate_of IS NOT NULL AND d.source_id != ''"
+            + clause,
+            params,
         )
         out: dict[str, set[str]] = {}
         for row in rows:

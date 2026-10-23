@@ -20,3 +20,9 @@ them by subject and direction under a name written for a person, and
 # Here rather than in blindspot.py so the daily runner can read it without
 # importing numpy at load time.
 DEFAULT_WINDOW_DAYS = 7
+
+
+def window_days(settings: dict) -> int:
+    """`cluster.window_days`; a key with no value means the default, 0 means all."""
+    value = (settings.get("cluster", {}) or {}).get("window_days")
+    return DEFAULT_WINDOW_DAYS if value is None else int(value)

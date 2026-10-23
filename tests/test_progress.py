@@ -154,7 +154,8 @@ def test_counts_are_per_source_deltas_not_running_totals(monkeypatch):
         summary = " ".join(["word"] * 80)
 
     monkeypatch.setattr(
-        "ingestion.pipeline._document_text", lambda item, cfg, robots, limiter: item.summary
+        "ingestion.pipeline._document_text",
+        lambda item, cfg, robots, limiter, stats=None: item.summary,
     )
     events = _run_with(monkeypatch, [_source("a"), _source("b")], lambda *a, **k: [_Item()])
 

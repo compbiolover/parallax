@@ -297,14 +297,19 @@ def blindspots_from_store(
     if len(pair) != 2:
         raise ValueError(f"blindspots need exactly two personas, got {pair}")
     a, b = pair
-    collapsed = store.duplicate_coverage()
+    since = store.get_meta("cluster_since") or None
+    collapsed = store.duplicate_coverage(since)
     out: list[Blindspot] = []
     for row in store.cluster_rows():
         cid = row["cluster_id"]
         if cid == -1:
             continue
         cluster = store.cluster_members(cid)
-        carried = {m["id"]: {m["source_id"]} | collapsed.get(m["id"], set()) for m in cluster}
+        carried = {
+            m["id"]: ({m["source_id"]} if since is None or m["dated"] >= since else set())
+            | collapsed.get(m["id"], set())
+            for m in cluster
+        }
         in_a = [m for m in cluster if carried[m["id"]] & members[a]]
         in_b = [m for m in cluster if carried[m["id"]] & members[b]]
         counts = {a: len(in_a), b: len(in_b)}
@@ -427,6 +432,10 @@ def run_clustering(
     if window_days:
         since = (datetime.now(UTC).date() - timedelta(days=window_days - 1)).isoformat()
     result = compute_clustering(store, min_cluster_size=min_cluster_size, since=since)
+    if not result.n_docs:
+        # Nothing in the window (ingestion down for a week, say): keep the last
+        # clustering and its named themes rather than replacing them with nothing.
+        return ClusteringOutcome(0, 0, 0, [], sorted(members))
 
     # `by_cluster`, not `members`: the parameter above is persona membership, and
     # a local called `members` shadowed it here — so the blindspot detector was
@@ -444,6 +453,8 @@ def run_clustering(
         if result.labels[i] != -1
     ]
     store.replace_clustering(cluster_rows, assignments)
+    # Read back by blindspots_from_store, so coverage is dated the same way there.
+    store.set_meta("cluster_since", since or "")
 
     blindspots = detect_blindspots(result, members, dominance, min_blindspot_size, labels=labels)
     themes = _theme_blindspots(

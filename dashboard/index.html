@@ -661,7 +661,7 @@ function liberty(app, d, colors, onRef) {
 function agenda(app, d, onRef) {
   const a = d.agenda;
   if (!a || !a.total_stories || (a.pair || []).length !== 2) return;
-  const p = panel(app, "Same day, different agenda");
+  const p = panel(app, "This week's agenda");
   p.style.marginTop = "18px";
   p.innerHTML += `<div class="jsd"><div class="num">${a.divergence.toFixed(3)}</div>
     <div class="scale">Attention divergence across ${a.total_stories} story clusters</div></div>`;

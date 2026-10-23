@@ -71,3 +71,35 @@ def test_parse_feed_tells_an_unreadable_feed_from_an_empty_one():
     assert parse_feed(empty) == []
     with pytest.raises(ValueError):
         parse_feed("<html><body>403 Forbidden</body")
+
+
+def test_a_paywall_behind_a_descriptive_feed_is_blocked():
+    # Every article page failed, though the feed's summaries stood in for them.
+    assert _run_status(False, 10, 0, unread=10) == "blocked"
+    assert _run_status(False, 10, 0, unread=3) == "ok"
+
+
+def test_a_new_sources_backlog_is_not_a_baseline():
+    store = Datastore(":memory:")
+    reg = registry(mine={"a": 1.0})
+    # First run stores 25 (the backlog), then about one every other day.
+    _runs(store, "a", ["ok"] * 14, stored=0)
+    store.record_source_run("a", (NOW - timedelta(days=13)).isoformat(), "ok", 25, 25, 0)
+    assert source_issues(store, reg, NOW) == []
+
+
+def test_parse_feed_accepts_an_empty_feed_served_as_html(monkeypatch):
+    import feedparser
+
+    from ingestion.extract import parse_feed
+
+    real = feedparser.parse
+
+    def as_html(url, agent=None):
+        parsed = real(url)
+        parsed["bozo"] = 1  # what a text/html content type does to a valid feed
+        return parsed
+
+    monkeypatch.setattr(feedparser, "parse", as_html)
+    empty = '<?xml version="1.0"?><rss version="2.0"><channel><title>t</title></channel></rss>'
+    assert parse_feed(empty) == []

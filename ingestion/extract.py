@@ -42,9 +42,12 @@ def parse_feed(url: str, user_agent: str = DEFAULT_UA) -> list[FeedItem]:
     rather than as a feed that loads and lists nothing.
     """
     parsed = feedparser.parse(url, agent=user_agent)
-    status = parsed.get("status", 200)
-    if not parsed.entries and (status >= 400 or parsed.get("bozo")):
-        raise ValueError(f"feed unreadable (HTTP {status}): {parsed.get('bozo_exception', '')}")
+    # `version` is empty when no feed format was recognized at all; a valid empty
+    # feed served with an HTML content type still has one, and still bozo=1.
+    status = parsed.get("status")
+    if not parsed.entries and ((status or 0) >= 400 or not parsed.get("version")):
+        where = f"HTTP {status}" if status else "no response"
+        raise ValueError(f"feed unreadable ({where}): {parsed.get('bozo_exception', '')}")
     items: list[FeedItem] = []
     for e in parsed.entries:
         items.append(
