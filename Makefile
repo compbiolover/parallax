@@ -3,7 +3,7 @@
 # the already-built artifact and refuses to run the recipe ("`digest' is up to
 # date"). Add new targets here as well as below; tests/test_makefile.py checks.
 .PHONY: help daily daily-fast dashboard history personas sensitivity validate audit-lexicon \
-        digest digest-send podcasts register-probe check-claude check-secrets \
+        digest digest-send podcasts sources register-probe check-claude check-secrets \
         test lint
 .DEFAULT_GOAL := help
 
@@ -26,6 +26,9 @@ dashboard:  ## Serve the dashboard at http://localhost:8000
 
 history:  ## Print the recorded snapshot series (JSD over time)
 	$(PY) -m compare.history
+
+sources:  ## Report feeds that stopped loading, got blocked, or went quiet
+	$(PY) -m ingestion health
 
 personas:  ## List the persona library: family, sources, and what each models
 	$(PY) -m ingestion personas

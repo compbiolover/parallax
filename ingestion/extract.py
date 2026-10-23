@@ -35,8 +35,19 @@ class FeedItem:
 
 
 def parse_feed(url: str, user_agent: str = DEFAULT_UA) -> list[FeedItem]:
-    """Fetch and parse an RSS/Atom feed into items."""
+    """Fetch and parse an RSS/Atom feed into items.
+
+    feedparser never raises: an HTTP error or an unparseable body comes back as
+    an empty result. Raised here so the run records the feed as unreadable
+    rather than as a feed that loads and lists nothing.
+    """
     parsed = feedparser.parse(url, agent=user_agent)
+    # `version` is empty when no feed format was recognized at all; a valid empty
+    # feed served with an HTML content type still has one, and still bozo=1.
+    status = parsed.get("status")
+    if not parsed.entries and ((status or 0) >= 400 or not parsed.get("version")):
+        where = f"HTTP {status}" if status else "no response"
+        raise ValueError(f"feed unreadable ({where}): {parsed.get('bozo_exception', '')}")
     items: list[FeedItem] = []
     for e in parsed.entries:
         items.append(

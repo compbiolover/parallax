@@ -629,3 +629,60 @@ def test_the_system_prompt_forbids_describing_a_persona_as_a_person():
     assert "do not rank" in lowered
     for forbidden in ("beliefs", "motives", "intelligence", "sincerity"):
         assert forbidden in lowered, forbidden
+
+
+def test_gather_describes_this_week_when_there_is_one():
+    """An all-time profile barely moves, so the prose fed on it never changed."""
+    from datetime import UTC, datetime, timedelta
+
+    from tests.registries import two_personas
+    from tests.test_weekly import CALM, MIN_WEEK_DOCS, _doc
+
+    store = Datastore(":memory:")
+    reg, ref = two_personas()
+    today = datetime.now(UTC).date()
+    old = today - timedelta(days=60)
+    for i in range(5):
+        _doc(store, f"old-m{i}", "s_mine", old, CALM)
+        _doc(store, f"old-t{i}", "s_theirs", old, CALM)
+    for i in range(MIN_WEEK_DOCS):
+        _doc(store, f"new-m{i}", "s_mine", today, dict(CALM, care=0.9))
+        _doc(store, f"new-t{i}", "s_theirs", today, CALM)
+    contexts, _ = gather(store, reg, ref)
+    assert {c.diet_id: c.doc_count for c in contexts} == {
+        "self": MIN_WEEK_DOCS,
+        "modeled_ce": MIN_WEEK_DOCS,
+    }
+    # One article short of a comparable week, and it describes the archive instead.
+    store.conn.execute("DELETE FROM documents WHERE id = 'new-m0'")
+    contexts, _ = gather(store, reg, ref)
+    assert {c.period for c in contexts} == {"across the whole archive"}
+    store.close()
+
+
+def test_headlines_follow_the_window():
+    from datetime import UTC, datetime, timedelta
+
+    from tests.registries import two_personas
+    from tests.test_weekly import CALM, MIN_WEEK_DOCS, _doc
+
+    store = Datastore(":memory:")
+    reg, ref = two_personas()
+    today = datetime.now(UTC).date()
+    _doc(store, "old", "s_mine", today - timedelta(days=60), CALM, "Archived story")
+    for i in range(MIN_WEEK_DOCS):
+        _doc(store, f"new{i}", "s_mine", today, CALM, "This week's story")
+        _doc(store, f"t{i}", "s_theirs", today, CALM, "Theirs")
+    contexts, _ = gather(store, reg, ref)
+    mine = next(c for c in contexts if c.diet_id == "self")
+    assert "Archived story" not in mine.headlines
+    store.close()
+
+
+def test_the_archive_fallback_is_not_called_this_week():
+    ctx = [
+        DietContext("self", "My diet", 3, {"care": 1.0}, ["h"], period="across the whole archive")
+    ]
+    prompt = build_user_prompt(ctx, None)
+    assert "this week" not in prompt
+    assert "documents (across the whole archive): 3" in prompt

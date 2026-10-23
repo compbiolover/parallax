@@ -47,6 +47,7 @@ def compute_clustering(
     min_cluster_size: int = 2,
     svd_components: int = 30,
     random_state: int = 42,
+    since: str | None = None,
 ) -> ClusterResult:
     """Load embeddings and cluster them. Returns per-document labels.
 
@@ -54,16 +55,21 @@ def compute_clustering(
     clustered — vectors from different embedders live in incompatible spaces.
     If the datastore mixes embedders and none is recorded as active, a clear
     error is raised rather than crashing deep in numpy on ragged vectors.
+
+    ``since`` (``YYYY-MM-DD``) clusters only documents dated on or after it.
     """
     active = store.get_meta("embedder")
     # Only canonical documents carry embeddings, so a wire story that ran in six
     # outlets is clustered once. This restores the other five for coverage.
-    collapsed = store.duplicate_coverage()
+    # Under a window, only copies dated inside it count, the canonical included:
+    # an outlet that ran a story weeks ago did not cover it this week.
+    collapsed = store.duplicate_coverage(since)
     ids, sources, coverage, titles, vectors = [], [], [], [], []
-    for doc_id, source_id, title, _unused, vec in store.iter_embeddings(embedder=active):
+    for doc_id, source_id, title, dated, vec in store.iter_embeddings(embedder=active, since=since):
         ids.append(doc_id)
         sources.append(source_id)
-        coverage.append(frozenset({source_id} | collapsed.get(doc_id, set())))
+        own = {source_id} if since is None or dated >= since else set()
+        coverage.append(frozenset(own | collapsed.get(doc_id, set())))
         titles.append(title)
         vectors.append(vec)
 

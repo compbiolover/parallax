@@ -17,9 +17,10 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from compare.divergence import jensen_shannon_divergence, log_ratios
+from compare.weekly import MIN_WEEK_DOCS
 from ingestion.datastore import Datastore
 from ingestion.pipeline import persona_profiles
 from scoring.claude_client import NO_TEXT, UNKNOWN, build_client, call_failed
@@ -34,6 +35,10 @@ from .prompts import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-opus-5"
+
+
+# The same week the clustering and the weekly comparison use.
+SUMMARY_WINDOW_DAYS = 7
 
 
 @dataclass
@@ -58,7 +63,19 @@ def gather(
     diet"), recorded at ingestion. Passing the machine id as the label is what
     put "modeled_ce" and "the self diet" in prose written for a person to read.
     """
-    profiles = persona_profiles(store, registry)
+    # This week, not the whole store: an all-time profile barely moves as the
+    # corpus grows, so the prose it fed said the same thing every morning. A
+    # week too thin for the weekly brief to compare (MIN_WEEK_DOCS a side) falls
+    # back to all of it, so the prose and the numbers beside it agree on a period.
+    since = (datetime.now(UTC).date() - timedelta(days=SUMMARY_WINDOW_DAYS - 1)).isoformat()
+    profiles = persona_profiles(store, registry, since=since)
+    thin = any(
+        store.doc_count_for_sources(registry.weights_for(p), since=since) < MIN_WEEK_DOCS
+        for p in pair
+    )
+    if thin or not all(p in profiles for p in pair):
+        since = None
+        profiles = persona_profiles(store, registry)
     labels = store.diet_labels()
     short_labels = store.diet_short_labels()
     # The reference pair by default, not every persona. One call carries every
@@ -84,9 +101,10 @@ def gather(
                 diet_id=persona_id,
                 label=labels.get(persona_id) or persona_id,
                 short_label=short_labels.get(persona_id, ""),
-                doc_count=store.doc_count_for_sources(weights),
+                doc_count=store.doc_count_for_sources(weights, since=since),
                 profile=profiles[persona_id],
-                headlines=store.headlines_for_sources(weights, max_headlines),
+                headlines=store.headlines_for_sources(weights, max_headlines, since=since),
+                period="this week" if since else "across the whole archive",
             )
         )
     comparison = None

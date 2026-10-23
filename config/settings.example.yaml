@@ -168,6 +168,9 @@ cluster:
     #   bge: "Represent this sentence for searching relevant passages: "
     #   e5:  "query: "
     query_prefix: ""
+  # Cluster only the trailing days. A week is about how long a story stays news;
+  # clustering the whole store kept surfacing the same old stories. 0 = everything.
+  window_days: 7
   hdbscan:
     min_cluster_size: 2           # small news samples over-assign to noise at higher values
   blindspot:
@@ -291,6 +294,10 @@ daily:
 # Preview it without any of that:  python3 -m digest --dry-run --open
 digest:
   enabled: false
+  # The day the brief is sent (UTC). A single day is too little news to compare;
+  # the run still ingests daily, because a feed only lists its latest items.
+  # Remove the line to send on every run.
+  weekday: friday
   # Which diet is yours. Your own blindspots lead the email — equal styling is
   # not equal prominence on a phone, where second means scrolled past.
   #

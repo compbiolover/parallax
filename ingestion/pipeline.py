@@ -138,6 +138,9 @@ class RunStats:
     near_duplicates: int = 0
     skipped_short: int = 0
     errors: int = 0
+    # Items whose article page could not be read, whether or not the feed's own
+    # summary stood in. A paywall with descriptive feeds shows up only here.
+    unread: int = 0
     liberty_scored: int = 0
     per_source: dict[str, int] = field(default_factory=dict)
 
@@ -180,7 +183,9 @@ def _cluster_text(item: FeedItem, text: str) -> str:
     return f"{title} {text[:300]}".strip()
 
 
-def _document_text(item: FeedItem, cfg: PipelineConfig, robots, limiter) -> str | None:
+def _document_text(
+    item: FeedItem, cfg: PipelineConfig, robots, limiter, stats: RunStats | None = None
+) -> str | None:
     body: str | None = None
     if item.link:
         try:
@@ -193,6 +198,8 @@ def _document_text(item: FeedItem, cfg: PipelineConfig, robots, limiter) -> str 
             )
         except Exception:
             body = None
+        if not body and stats is not None:
+            stats.unread += 1
     if not body and item.summary:
         body = strip_html(item.summary)
     if not body:
@@ -248,8 +255,9 @@ def run(
     # supply sources and nothing else — and an unconfigured run needs no scope.
     scope = registry.scope(cfg.ingest_personas) if cfg.ingest_personas else None
     sources = list(registry.ingestable(("rss",), scope))
+    run_utc = _now_iso()
     for position, source in enumerate(sources, start=1):
-        before = (stats.stored, stats.fetched, stats.errors)
+        before = (stats.stored, stats.fetched, stats.errors, stats.unread)
         started = time.monotonic()
         failed = _ingest_source(
             source,
@@ -277,12 +285,32 @@ def run(
                     failed=failed,
                 )
             )
+        fetched, errors = stats.fetched - before[1], stats.errors - before[2]
+        store.record_source_run(
+            source.id,
+            run_utc,
+            _run_status(failed, fetched, errors, stats.unread - before[3]),
+            items=fetched,
+            stored=stats.stored - before[0],
+            errors=errors,
+        )
 
     if liberty is not None and liberty_texts:
         if progress is not None:
             _announce_liberty(liberty, liberty_texts, progress)
         _score_liberty(store, liberty, liberty_texts, stats)
     return stats
+
+
+def _run_status(failed: bool, fetched: int, errors: int, unread: int = 0) -> str:
+    """How one source's run went, as ``ingestion.health`` reads it."""
+    if failed:
+        return "unreadable"  # the feed itself did not parse: moved, gone, or refused
+    if fetched == 0:
+        return "empty"
+    if errors >= fetched or unread >= fetched:
+        return "blocked"  # the feed answers but no article behind it could be read
+    return "ok"
 
 
 def _announce_liberty(tagger, texts: dict[str, str], progress) -> None:
@@ -586,7 +614,7 @@ def _ingest_source(
 
     for item in items[: cfg.max_items_per_feed]:
         stats.fetched += 1
-        text = _document_text(item, cfg, robots, limiter)
+        text = _document_text(item, cfg, robots, limiter, stats)
         if text is None:
             stats.errors += 1
             continue

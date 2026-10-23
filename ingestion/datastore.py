@@ -179,6 +179,19 @@ CREATE TABLE IF NOT EXISTS blindspot_themes (
 
 {PODCAST_EPISODES_DDL}
 
+-- One row per source per RSS run: whether the feed answered and whether its
+-- articles could be read. Documents alone cannot say this — GDELT backfill
+-- stores rows under the same source_id, so a dead feed still looks alive there.
+CREATE TABLE IF NOT EXISTS source_runs (
+    source_id TEXT NOT NULL,
+    run_utc   TEXT NOT NULL,
+    status    TEXT NOT NULL,             -- 'ok' | 'unreadable' | 'empty' | 'blocked'
+    items     INTEGER NOT NULL,          -- feed items seen
+    stored    INTEGER NOT NULL,          -- documents new to the store
+    errors    INTEGER NOT NULL,          -- items whose article could not be read
+    PRIMARY KEY (source_id, run_utc)
+);
+
 -- One aggregate snapshot per UTC date. Re-running the daily job on the same
 -- day overwrites that day's row rather than appending, so the series has one
 -- point per day regardless of how many times the pipeline ran.
@@ -594,17 +607,20 @@ class Datastore:
             out.append((r["source_id"], a, b))
         return out
 
-    def headlines_for_sources(self, source_ids: Iterable[str], limit: int = 50) -> list[str]:
+    def headlines_for_sources(
+        self, source_ids: Iterable[str], limit: int = 50, since: str | None = None
+    ) -> list[str]:
         """Titles of non-duplicate documents from a set of sources, newest first."""
         where, ids = _source_filter(source_ids)
+        clause, params = _date_window(since, None)
         rows = self.conn.execute(
             f"""
             SELECT d.title AS title FROM documents d
-            WHERE d.is_duplicate = 0 AND d.title IS NOT NULL AND d.title != ''{where}
+            WHERE d.is_duplicate = 0 AND d.title IS NOT NULL AND d.title != ''{where}{clause}
             ORDER BY COALESCE(d.published_utc, d.fetched_utc) DESC
             LIMIT ?
             """,
-            (*ids, limit),
+            (*ids, *params, limit),
         )
         return [r["title"] for r in rows]
 
@@ -790,6 +806,51 @@ class Datastore:
         return {r["status"]: r["n"] for r in self.conn.execute(sql, params)}
 
     # -- provenance metadata --------------------------------------------
+    def clustered_scores(
+        self, scorer: str = "dictionary", since: str | None = None, until: str | None = None
+    ) -> list[sqlite3.Row]:
+        """Scored canonical documents in a date window, each with its cluster id.
+
+        ``cluster_id`` is NULL for a document the latest clustering did not
+        see, -1 for noise. Unclustered documents are returned too: a story's
+        share of a diet's foundation mix needs the whole mix as denominator.
+        """
+        clause, params = _date_window(since, until)
+        return list(
+            self.conn.execute(
+                f"""
+                SELECT d.id AS id, d.source_id AS source_id, d.title AS title, d.url AS url,
+                       {DOC_DATE_SQL} AS dated, dc.cluster_id AS cluster_id, s.*
+                FROM foundation_scores s
+                JOIN documents d ON d.id = s.document_id
+                LEFT JOIN document_clusters dc ON dc.document_id = d.id
+                WHERE d.is_duplicate = 0 AND s.scorer = ?{clause}
+                ORDER BY dated DESC
+                """,
+                (scorer, *params),
+            )
+        )
+
+    # -- source health ---------------------------------------------------
+    def record_source_run(
+        self, source_id: str, run_utc: str, status: str, items: int, stored: int, errors: int
+    ) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO source_runs "
+                "(source_id, run_utc, status, items, stored, errors) VALUES (?,?,?,?,?,?)",
+                (source_id, run_utc, status, items, stored, errors),
+            )
+
+    def source_runs_since(self, since: str) -> list[sqlite3.Row]:
+        """Every recorded run on or after ``since``, oldest first per source."""
+        return list(
+            self.conn.execute(
+                "SELECT * FROM source_runs WHERE run_utc >= ? ORDER BY source_id, run_utc",
+                (since,),
+            )
+        )
+
     def set_meta(self, key: str, value: str) -> None:
         with self._tx() as conn:
             conn.execute(
@@ -864,9 +925,9 @@ class Datastore:
             )
 
     def iter_embeddings(
-        self, embedder: str | None = None
-    ) -> Iterator[tuple[str, str, str | None, list[int], list[float]]]:
-        """Yield (document_id, source_id, title, _, vector) for non-duplicate docs.
+        self, embedder: str | None = None, since: str | None = None
+    ) -> Iterator[tuple[str, str, str | None, str, list[float]]]:
+        """Yield (document_id, source_id, title, dated, vector) for non-duplicate docs.
 
         Keyed by source rather than diet: a document belongs to every persona that
         reads its source, so clustering resolves membership per persona afterwards
@@ -875,10 +936,15 @@ class Datastore:
         When ``embedder`` is given, only rows produced by that embedder are
         yielded — embeddings from different embedders live in incompatible vector
         spaces (and often different dimensions), so clustering must not mix them.
+
+        ``since`` (``YYYY-MM-DD``) keeps documents dated on or after it, and any
+        older canonical with a near-duplicate copy dated in the window: a wire
+        story rerun this week is this week's coverage even though the copy it
+        collapsed into was first fetched earlier.
         """
-        sql = """
+        sql = f"""
             SELECT e.document_id AS id, d.source_id AS source_id, d.title AS title,
-                   e.vector AS vector
+                   {DOC_DATE_SQL} AS dated, e.vector AS vector
             FROM embeddings e JOIN documents d ON d.id = e.document_id
             WHERE d.is_duplicate = 0
         """
@@ -886,8 +952,17 @@ class Datastore:
         if embedder is not None:
             sql += " AND e.embedder = ?"
             params = (embedder,)
+        if since is not None:
+            # Uncorrelated: one pass over the duplicates, not one per canonical.
+            sql += f"""
+                AND ({DOC_DATE_SQL} >= ? OR d.id IN (
+                    SELECT x.duplicate_of FROM documents x
+                    WHERE x.is_duplicate = 1
+                      AND COALESCE(x.published_utc, x.fetched_utc) >= ?))
+            """
+            params += (since, since)
         for r in self.conn.execute(sql, params):
-            yield r["id"], r["source_id"], r["title"], [], json.loads(r["vector"])
+            yield r["id"], r["source_id"], r["title"], r["dated"], json.loads(r["vector"])
 
     def embedder_names(self) -> list[str]:
         """Distinct embedder names present in the embeddings table."""
@@ -945,8 +1020,8 @@ class Datastore:
         """
         return list(
             self.conn.execute(
-                """
-                SELECT d.id AS id, d.title AS title,
+                f"""
+                SELECT d.id AS id, d.title AS title, {DOC_DATE_SQL} AS dated,
                        d.url AS url, d.source_id AS source_id
                 FROM document_clusters dc JOIN documents d ON d.id = dc.document_id
                 WHERE dc.cluster_id = ?
@@ -1004,7 +1079,7 @@ class Datastore:
             )
         )
 
-    def duplicate_coverage(self) -> dict[str, set[str]]:
+    def duplicate_coverage(self, since: str | None = None) -> dict[str, set[str]]:
         """``{canonical_document_id: {source_id, ...}}`` for collapsed near-duplicates.
 
         Deduplication is right for scoring and wrong for coverage, and the two need
@@ -1017,10 +1092,16 @@ class Datastore:
         One level deep by construction: the near-duplicate index is seeded only
         from non-duplicates (:meth:`iter_minhash_signatures` filters them), so
         ``duplicate_of`` always names a canonical and never another duplicate.
+
+        ``since`` counts only copies dated on or after it, so a clustering window
+        credits the outlets that ran the story inside it.
         """
+        clause, params = _date_window(since, None)
         rows = self.conn.execute(
-            "SELECT duplicate_of AS canonical, source_id FROM documents "
-            "WHERE is_duplicate = 1 AND duplicate_of IS NOT NULL AND source_id != ''"
+            "SELECT d.duplicate_of AS canonical, d.source_id AS source_id FROM documents d "
+            "WHERE d.is_duplicate = 1 AND d.duplicate_of IS NOT NULL AND d.source_id != ''"
+            + clause,
+            params,
         )
         out: dict[str, set[str]] = {}
         for row in rows:
