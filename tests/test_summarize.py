@@ -629,3 +629,24 @@ def test_the_system_prompt_forbids_describing_a_persona_as_a_person():
     assert "do not rank" in lowered
     for forbidden in ("beliefs", "motives", "intelligence", "sincerity"):
         assert forbidden in lowered, forbidden
+
+
+def test_gather_describes_this_week_when_there_is_one():
+    """An all-time profile barely moves, so the prose fed on it never changed."""
+    from datetime import UTC, datetime, timedelta
+
+    from tests.registries import two_personas
+    from tests.test_weekly import CALM, _doc
+
+    store = Datastore(":memory:")
+    reg, ref = two_personas()
+    today = datetime.now(UTC).date()
+    old = today - timedelta(days=60)
+    for i in range(5):
+        _doc(store, f"old-m{i}", "s_mine", old, CALM)
+        _doc(store, f"old-t{i}", "s_theirs", old, CALM)
+    _doc(store, "new-m", "s_mine", today, dict(CALM, care=0.9))
+    _doc(store, "new-t", "s_theirs", today, CALM)
+    contexts, _ = gather(store, reg, ref)
+    assert {c.diet_id: c.doc_count for c in contexts} == {"self": 1, "modeled_ce": 1}
+    store.close()

@@ -220,6 +220,13 @@ they are the same noisy estimates, dated. Read movement, not decimals.
   rows incomparable with newer ones, and nothing currently detects that. After changing a
   scorer, treat the series as starting over — or rebuild it with
   `python3 -m compare.history --backfill N --overwrite`.
+- **The weekly "what moved" call is a screen, not a test.** A foundation is flagged when
+  this week sits outside its range over the previous eight weeks *and* two standard
+  deviations from their mean. Eight points make a thin baseline, the five checks are not
+  corrected for multiplicity, and shares are zero-sum: one foundation spiking pushes the
+  others out of range with it, which is why the brief names the biggest move rather than
+  every flag. The story shares under "where the gap comes from" are exact arithmetic over
+  the week's documents, not causal attributions.
 - **The corpus is not a stable panel.** Sources are added and feeds break. A move in
   either series can reflect a change in what was collected rather than a change in how
   either diet framed anything. The source registry is versioned so this is at least

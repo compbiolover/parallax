@@ -349,8 +349,20 @@ would not verify.
 ```yaml
 digest:
   enabled: true
+  weekday: friday     # the day it goes out; remove to send on every run
   own_diet: self      # defaults to compare.reference_pair.mine; puts your blindspots first
 ```
+
+**It is a weekly brief.** One day of news is too thin to compare, and the all-time
+numbers move less the longer the project runs, so the email leads with this week against
+the eight before it: which foundations left their usual range, the stories behind the
+biggest move, and one story both diets covered with each side's foundation mix inside it.
+Blindspots come from the week's clusters only. A week too thin to compare falls back to
+the all-time layout. `make daily` should still run every day: a feed lists only its
+latest items, so a skipped day is a gap in the data.
+
+If a feed stops loading, gets blocked, or goes quiet, the brief says so and names the
+share of each persona it carries. `make sources` prints the full list.
 
 The email is about the reference pair and no more, and says how many personas it left out.
 It has no picker, phone height is the scarce resource, and a brief nobody finishes is one

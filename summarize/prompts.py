@@ -108,24 +108,24 @@ def build_user_prompt(
             note += " This is a DEMO lexicon — treat differences as illustrative."
         parts.append(note + "\n")
     parts += [
-        "Summarize today's coverage for each media diet below, then write a "
+        "Summarize this week's coverage for each media diet below, then write a "
         "cross-diet executive summary.\n",
         "For EACH diet, write one short paragraph headed exactly "
         "`## <label> [<id>]`, using the diet's label and id verbatim from the "
         "data blocks below. The bracketed id is how the section is matched back "
         "to the diet, so it must be exact. Say what that diet morally emphasized "
-        "today and why a thoughtful person holding those foundations would see it "
+        "this week and why a thoughtful person holding those foundations would see it "
         "that way.\n",
         "Then write the executive summary, headed exactly `## Executive`, in "
         "two or three short paragraphs. Open with one sentence a reader could "
-        "stop after: how far apart the two compared diets are today and on what. Then "
+        "stop after: how far apart the two compared diets are this week and on what. Then "
         "what each foregrounds that the other does not. Close on what the "
         "numbers cannot support, in plain words rather than a hedge stacked on "
         "a hedge.\n",
     ]
     for ctx in contexts:
         parts.append(f"\n### DATA — {ctx.label} [{ctx.diet_id}]")
-        parts.append(f"documents today: {ctx.doc_count}")
+        parts.append(f"documents this week: {ctx.doc_count}")
         parts.append(f"foundation emphasis (composition): {_fmt_profile(ctx.profile)}")
         if ctx.headlines:
             shown = ctx.headlines[:max_headlines]
