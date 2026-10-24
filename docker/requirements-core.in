@@ -1,0 +1,4 @@
+# pyproject's build backend, plus editables for its editable build, so
+# parallax itself installs with --no-build-isolation from pinned wheels.
+hatchling
+editables

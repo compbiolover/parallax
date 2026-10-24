@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # The image locks in docker/, bumped within pyproject's ranges (lockfile-only:
+  # the ranges are a deliberate choice). The cooldown holds a release back for a
+  # week; malicious releases are usually pulled within hours.
+  - package-ecosystem: "pip"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+    versioning-strategy: "lockfile-only"
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]

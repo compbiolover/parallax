@@ -37,9 +37,9 @@ jobs:
         # day it is needed.
         directory: [infra, infra/bootstrap]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3.1.2
         with:
           terraform_version: "1.9.8"
           terraform_wrapper: false
@@ -62,7 +62,7 @@ jobs:
     # people copy around. Terraform cannot catch this, so grep can.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: No secret-version resources
         run: |
           set -eu
