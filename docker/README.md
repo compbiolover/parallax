@@ -59,6 +59,21 @@ produced by an instrument that was never validated. Set
 `PARALLAX_REQUIRE_LEXICON=1` and the entrypoint refuses to start without the
 real file. Leave it unset for steps that never touch a lexicon.
 
+## Pinned dependencies
+
+Neither image resolves anything at build time. `docker/requirements-core.txt`
+and `docker/requirements-scored.txt` pin every package by version and hash, for
+the image's own target (Python 3.11, x86-64 Linux), and are installed with
+`--require-hashes`. A release that appears on PyPI between two builds cannot get
+in, malicious or not. Parallax and eMFDscore then install with `--no-index`, so
+a `pyproject.toml` that needs something the lock lacks fails the build rather
+than quietly fetching it.
+
+After changing a dependency in `pyproject.toml` (or `EMFDSCORE_REF`), rerun the
+`uv pip compile` command at the top of each lock. Dependabot bumps both weekly
+within pyproject's ranges, a week after a release, and `images.yml` rebuilds on
+any change to them.
+
 ## Model weights
 
 `scored` bakes in the five Mformer classifiers and their shared tokenizer via

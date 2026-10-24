@@ -1,0 +1,9 @@
+# pyproject's build backend, plus editables for its editable build, so
+# parallax itself installs with --no-build-isolation from pinned wheels.
+hatchling
+editables
+# eMFDscore's dependencies at the commit the Dockerfile installs (EMFDSCORE_REF).
+# The package itself is left out with --no-emit-package: pip cannot hash a git
+# URL. Its setup.py builds with setuptools.
+emfdscore @ git+https://github.com/medianeuroscience/emfdscore.git@5523d76c25afa65a59ca00e44efe45885499b116
+setuptools

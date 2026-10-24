@@ -45,19 +45,29 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# ------------------------------------------------------------ torch cache -----
-# Its own stage so the largest download in the build does not depend on a source
-# file. Installed from the CPU index: the default PyPI wheel bundles the CUDA
-# runtime at ~2.5 GB, and there is no GPU anywhere in this design — that would be
-# 2.3 GB pulled on every task start to be never used.
-FROM base AS torch-cpu
-RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu "torch>=2.2"
+# Every dependency below comes from a hash-pinned lock in docker/, compiled with
+# the command in each file's header, so a build never takes whatever PyPI is
+# serving that day. Each project then installs with --no-index: offline, so it
+# fails if pyproject (or eMFDscore) needs something its lock lacks.
+
+# ------------------------------------------------------------ scored deps -----
+# Its own stage so the largest download in the build depends on the lock alone,
+# not on a source file. torch is pinned to the CPU build (the lock names the CPU
+# index): the default PyPI wheel bundles the CUDA runtime at ~2.5 GB, and there
+# is no GPU anywhere in this design — that would be 2.3 GB pulled on every task
+# start to be never used.
+FROM base AS scored-deps
+COPY docker/requirements-scored.txt docker/
+RUN pip install --require-hashes -r docker/requirements-scored.txt
 
 # ---------------------------------------------------------------- core --------
 FROM base AS core
 
+COPY docker/requirements-core.txt docker/
+RUN pip install --require-hashes -r docker/requirements-core.txt
+
 COPY . .
-RUN pip install -e ".[llm,aws]" \
+RUN pip install --no-index --no-build-isolation -e ".[llm,aws]" \
  && chmod +x scripts/parallax-entrypoint.sh \
  && ln -s /app/scripts/parallax-entrypoint.sh /usr/local/bin/parallax-entrypoint \
  && mkdir -p /app/data \
@@ -68,20 +78,21 @@ ENTRYPOINT ["parallax-entrypoint"]
 CMD ["--help"]
 
 # --------------------------------------------------------------- scored -------
-FROM torch-cpu AS scored
+FROM scored-deps AS scored
 
 COPY . .
 
-# torch is already satisfied from the stage above, so this resolves the rest.
-RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
-        -e ".[llm,scoring,embeddings,aws]"
+RUN pip install --no-index --no-build-isolation -e ".[llm,scoring,embeddings,aws]"
 
 # eMFDscore is not on PyPI and is not a declared dependency. Pinned to a commit
 # rather than a branch, because an unpinned scorer changes what the numbers mean
 # between two builds of the same source and nothing downstream would report it.
-# Override the ARG to move it deliberately; do not point it at a branch.
+# Override the ARG to move it deliberately; do not point it at a branch. Its
+# dependencies come from the lock, resolved at this commit, so move the commit
+# in docker/requirements-scored.in too and recompile.
 ARG EMFDSCORE_REF=5523d76c25afa65a59ca00e44efe45885499b116
-RUN pip install "git+https://github.com/medianeuroscience/emfdscore.git@${EMFDSCORE_REF}"
+RUN pip install --no-index --no-build-isolation \
+        "git+https://github.com/medianeuroscience/emfdscore.git@${EMFDSCORE_REF}"
 
 # Bake the five Mformer models plus the shared tokenizer in. They are ~500 MB,
 # they never change for a given revision, and downloading them at task start puts
