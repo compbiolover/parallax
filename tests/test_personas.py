@@ -84,8 +84,15 @@ def test_the_migrated_personas_reproduce_the_version_2_diet_weights(persona_id):
     silently break the continuity of the whole divergence series."""
     resolved = load_registry().weights_for(persona_id)
     expected = V2_WEIGHTS[persona_id]
-    assert set(resolved) == set(expected)
-    assert _normalized(resolved) == pytest.approx(_normalized(expected), rel=1e-12)
+    # A source added after v2 is a deliberate content change, not a migration
+    # regression: v5 retired three national_dailies feeds that stored nothing
+    # and added two whose article bodies read. What this test still guards is
+    # the thing a migration can break by accident, which is the ratios *among*
+    # v2's sources. The step that v5's additions put in the divergence series
+    # is recorded against `version: 5` in config/sources.yaml.
+    assert set(expected) <= set(resolved), f"v2 sources dropped: {set(expected) - set(resolved)}"
+    common = {sid: resolved[sid] for sid in expected}
+    assert _normalized(common) == pytest.approx(_normalized(expected), rel=1e-12)
 
 
 def test_splitting_the_podcast_stratum_did_not_halve_its_sources():
