@@ -138,7 +138,10 @@ def extract_article(
     html = _fetch(url, user_agent=user_agent, timeout=timeout)
     if html is None:
         return None
-    return trafilatura.extract(html, url=url, favor_precision=True)
+    # Precision mode returns nothing for some layouts (PBS NewsHour); retry plain.
+    return trafilatura.extract(html, url=url, favor_precision=True) or trafilatura.extract(
+        html, url=url
+    )
 
 
 def _fetch(url: str, *, user_agent: str, timeout: int) -> str | None:
