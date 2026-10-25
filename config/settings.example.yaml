@@ -152,7 +152,23 @@ scoring:
 # --- Clustering / blindspot engine (Phase 2) -------------------------------
 cluster:
   embedder:
-    kind: hashing                 # hashing (built-in, no deps) | sentence-transformers
+    # hashing (built-in, no deps) | sentence-transformers
+    #
+    # `hashing` is the default so a fresh clone runs with no extra install, and
+    # it is the wrong choice for real use. Benchmarked in LIMITATIONS.md, the
+    # neural path roughly TRIPLES cluster coherence (0.121 -> 0.366) and cuts
+    # noise by a third; on the hashing embedder a day's clusters group stories
+    # by shared keywords, which the story review reports in its own titles.
+    #
+    #   pip install ".[embeddings]"
+    #   # set kind: sentence-transformers here, then:
+    #   python3 -m ingestion reembed
+    #
+    # Switching is not free: vectors from two embedders are incompatible, so
+    # `reembed` rebuilds the whole corpus from stored titles and forgets every
+    # story thread (a centroid is in its embedder's space). See LIMITATIONS.md,
+    # "Changing an instrument mid-corpus blends two of them".
+    kind: hashing
     dim: 512                      # hashing dimensionality
     # sentence-transformers model (used when kind: sentence-transformers).
     # Benchmarked on 396 stories / 151 same-story pairs (see LIMITATIONS.md):

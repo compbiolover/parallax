@@ -193,11 +193,72 @@ def _podcasts(store: Datastore, settings: dict, args, progress) -> None:
         print(f"  {source_id:32} {n}")
 
 
+# Vectors per write. Large enough that the model's own batching does the work,
+# small enough that a run killed halfway leaves a store that is merely mixed
+# rather than half-written: `iter_embeddings` filters on the active embedder, so
+# an interrupted re-embed clusters on whatever finished and says so.
+REEMBED_BATCH = 256
+
+
+def _reembed(store, settings: dict) -> int:
+    """Rebuild every embedding with the configured embedder.
+
+    Needed whenever `cluster.embedder` changes: vectors from two embedders live
+    in incompatible spaces, and `LIMITATIONS.md` ("Changing an instrument
+    mid-corpus blends two of them") says the corpus has to be rebuilt rather
+    than mixed. Re-embeds from stored titles, which is what the embedder was
+    given in the first place — raw text is discarded at ingestion, so this is
+    the one part of the pipeline that can be redone without re-fetching.
+    """
+    embedder, name = build_embedder(settings)
+    rows = list(store.iter_embeddable())
+    if not rows:
+        print("No documents with titles to embed.")
+        return 0
+    before = store.embedder_names()
+    print(f"Re-embedding {len(rows)} document(s) with {name}.")
+    if before and before != [name]:
+        print(f"  Replacing vectors from: {', '.join(before)}")
+    batch: list[tuple[str, list[float]]] = []
+    done = 0
+    for doc_id, title in rows:
+        batch.append((doc_id, embedder.embed(title)))
+        if len(batch) >= REEMBED_BATCH:
+            store.replace_embeddings(batch, name)
+            done += len(batch)
+            batch = []
+            print(f"  {done}/{len(rows)}", end="\r", flush=True)
+    if batch:
+        store.replace_embeddings(batch, name)
+        done += len(batch)
+    dropped = store.drop_embeddings(keep_embedder=name)
+    store.set_meta("embedder", name)
+    # A thread's centroid is in the old embedder's space, so nothing in the
+    # table can be matched against again. Timelines restart from the next run.
+    threads = store.drop_story_threads()
+    print(f"  {done}/{len(rows)} embedded.")
+    if dropped:
+        print(f"  Dropped {dropped} vector(s) from other embedders.")
+    if threads:
+        print(f"  Forgot {threads} story thread(s): centroids are embedder-specific.")
+    print("Run `python -m cluster run` to rebuild the clustering.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingestion", description="Parallax Phase 1 pipeline")
     parser.add_argument(
         "command",
-        choices=["run", "backfill", "podcasts", "compare", "labels", "personas", "health"],
+        choices=[
+            "run",
+            "backfill",
+            "reembed",
+            "podcasts",
+            "compare",
+            "labels",
+            "personas",
+            "health",
+        ],
         help="what to do",
     )
     parser.add_argument("--db", help="SQLite path (default from settings)")
@@ -310,6 +371,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
             _print_stats(stats)
             print(f"\nDatastore: {store.counts()}")
+        elif args.command == "reembed":
+            return _reembed(store, settings)
         elif args.command == "podcasts":
             _podcasts(store, settings, args, progress)
         elif args.command == "compare":

@@ -334,6 +334,19 @@ diet spent the day on. Its limits:
   | hashing (default) | 0.121 | +0.048 | 39% | 7 (some spurious) |
   | all-MiniLM-L6-v2 | **0.366** | **+0.293** | **26%** | 8 (cleaner; nuclear-deal story 3→4) |
 
+  **Confirmed on the live corpus, 2026-10-25.** Switching from `hashing(d=512)` to
+  `thenlper/gte-small` and re-embedding all 22,597 documents, on the identical day's
+  document set: noise fell from 331 of 678 (49%) to 260 (38%), and clusters went from 128
+  to 149. The change is plainest in what the labels say. Before: `doj charges · england ·
+  california`, `harlem · birthrates really · defeat`. After: `france · protests · riots`,
+  `ramaswamy · ad · vivek`, `wnba · finals · woman`. The story review stopped describing
+  its own inputs as grab bags and started naming stories ("Gunmen kill seven at Orthodox
+  funeral in Jordan"). Measured in its own space the clustering scores a mean intra-cluster
+  cosine of 0.828 against a random-pair baseline of 0.708, a lift of +0.120 — *not*
+  comparable to the +0.293 in the table above, which was measured in MiniLM space: gte-small
+  has a much higher isotropic baseline, which compresses the lift. The noise reduction is
+  the apples-to-apples number.
+
   Sentence-transformers roughly **tripled cluster coherence and cut noise by a third**,
   and recovered a story the hashing embedder missed — worth the heavier `torch` dependency
   for real use. The residual loose size-2 clusters are a *data-volume* problem (more sources

@@ -1019,6 +1019,59 @@ class Datastore:
         for r in self.conn.execute(sql, params):
             yield r["id"], r["source_id"], r["title"], r["dated"], json.loads(r["vector"])
 
+    def iter_embeddable(self) -> Iterator[tuple[str, str]]:
+        """``(document_id, title)`` for every non-duplicate document with a title.
+
+        What re-embedding can work from. Raw article text is discarded at
+        ingestion by design (``CLAUDE.md`` §0), so the title is all that
+        survives — which is exactly what ``_cluster_text`` embeds in the first
+        place, for documents whose title is four words or more. Shorter titles
+        were originally embedded with a body lead that is gone, so those few
+        are re-embedded from the title alone.
+        """
+        rows = self.conn.execute(
+            "SELECT id, title FROM documents "
+            "WHERE is_duplicate = 0 AND title IS NOT NULL AND TRIM(title) != ''"
+        )
+        for row in rows:
+            yield row["id"], row["title"]
+
+    def replace_embeddings(self, rows: list[tuple[str, list[float]]], embedder: str) -> None:
+        """Write a batch of vectors under one embedder name."""
+        with self._tx() as conn:
+            conn.executemany(
+                """
+                INSERT INTO embeddings (document_id, dim, vector, embedder)
+                VALUES (?,?,?,?)
+                ON CONFLICT(document_id) DO UPDATE SET
+                    dim=excluded.dim, vector=excluded.vector, embedder=excluded.embedder
+                """,
+                [(doc_id, len(vec), json.dumps(vec), embedder) for doc_id, vec in rows],
+            )
+
+    def drop_embeddings(self, keep_embedder: str | None = None) -> int:
+        """Delete every embedding, or all but one embedder's.
+
+        Vectors from two embedders live in incompatible spaces, so a switch
+        leaves the old ones as dead weight that ``iter_embeddings`` has to
+        filter around for the life of the store.
+        """
+        with self._tx() as conn:
+            if keep_embedder is None:
+                cur = conn.execute("DELETE FROM embeddings")
+            else:
+                cur = conn.execute("DELETE FROM embeddings WHERE embedder != ?", (keep_embedder,))
+            return cur.rowcount
+
+    def drop_story_threads(self) -> int:
+        """Forget every thread. A thread's centroid is in its embedder's space,
+        so after a switch nothing in the table can be matched against again."""
+        with self._tx() as conn:
+            cur = conn.execute("DELETE FROM story_threads")
+            conn.execute("DELETE FROM thread_days")
+            conn.execute("DELETE FROM thread_documents")
+            return cur.rowcount
+
     def embedder_names(self) -> list[str]:
         """Distinct embedder names present in the embeddings table."""
         rows = self.conn.execute("SELECT DISTINCT embedder FROM embeddings ORDER BY embedder")
