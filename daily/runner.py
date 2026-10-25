@@ -40,10 +40,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from cluster import DEFAULT_MIN_WORDS as CLUSTER_MIN_WORDS
+from cluster import DEFAULT_CLUSTER_STUBS, window_days
 from cluster import DEFAULT_WINDOW_DAYS as CLUSTER_WINDOW_DAYS
-from cluster import min_words as cluster_min_words
-from cluster import window_days
+from cluster import cluster_stubs as cluster_stubs_setting
 from cluster.themes import UNSET as THEME_EFFORT_UNSET
 from compare.history import DEFAULT_SERIES_LIMIT, DEFAULT_WINDOW_DAYS
 from compare.reference import resolve
@@ -91,7 +90,7 @@ class DailyConfig:
     dominance: float = 0.75
     min_blindspot_size: int = 2
     cluster_window_days: int = CLUSTER_WINDOW_DAYS
-    cluster_min_words: int = CLUSTER_MIN_WORDS
+    cluster_stubs: bool = DEFAULT_CLUSTER_STUBS
     claude_themes: bool = True  # name blindspot themes with Claude
     theme_model: str | None = None  # None -> cluster.themes default
     # UNSET -> cluster.themes default; None -> send no effort at all
@@ -150,7 +149,7 @@ class DailyConfig:
             history_limit=int(snap.get("history_limit", DEFAULT_SERIES_LIMIT)),
             claude_themes=bool(themes.get("claude", True)),
             cluster_window_days=window_days(settings),
-            cluster_min_words=cluster_min_words(settings),
+            cluster_stubs=cluster_stubs_setting(settings),
             theme_model=themes.get("model"),
             # `.get` with a default keeps a stored None: `effort: ~` means
             # "send no effort", which is not the same instruction as leaving
@@ -307,7 +306,7 @@ def _step_cluster(store, cfg: DailyConfig, registry, pair) -> str:
         theme_effort=cfg.theme_effort,
         claude_themes=cfg.claude_themes,
         window_days=cfg.cluster_window_days,
-        min_words=cfg.cluster_min_words,
+        exclude_stubs=not cfg.cluster_stubs,
     )
     return (
         f"{outcome.n_docs} docs -> {outcome.n_clusters} clusters "

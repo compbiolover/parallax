@@ -347,3 +347,40 @@ def test_cli_listing_does_not_need_a_loadable_registry(tmp_path, monkeypatch, ca
     # And the writers still fail loudly, rather than inventing a pair.
     with pytest.raises(ValueError, match="duplicate persona id"):
         history_module.main(["--db", str(db), "--record"])
+
+
+def test_a_snapshot_records_how_its_documents_were_weighted():
+    """The series outlives the method: quarter-weighting headlines moved the
+    trailing-window JSD from 0.0045 to 0.0020 on unchanged data, and without a
+    marker that step reads as the diets converging."""
+    from compare.history import LIVE, WEIGHTING_BASIS, Basis, Snapshot
+
+    basis = Basis(jsd=0.1, pair=["self", "modeled_ce"])
+    snap = Snapshot(
+        snapshot_date="2026-10-25",
+        generated_utc="2026-10-25T00:00:00+00:00",
+        window_days=7,
+        source=LIVE,
+        cumulative=basis,
+        window=basis,
+    )
+    assert snap.to_payload()["basis"] == WEIGHTING_BASIS
+
+
+def test_basis_changes_at_finds_the_splice():
+    from compare.history import basis_changes_at
+
+    series = [
+        {"date": "2026-10-01", "basis": None},
+        {"date": "2026-10-02", "basis": None},
+        {"date": "2026-10-25", "basis": "depth-v1"},
+        {"date": "2026-10-26", "basis": "depth-v1"},
+    ]
+    assert basis_changes_at(series) == "2026-10-25"
+
+
+def test_a_series_on_one_basis_has_no_splice():
+    from compare.history import basis_changes_at
+
+    assert basis_changes_at([{"date": "d", "basis": "depth-v1"}]) is None
+    assert basis_changes_at([]) is None

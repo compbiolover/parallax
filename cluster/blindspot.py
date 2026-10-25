@@ -454,7 +454,7 @@ def run_clustering(
     claude_themes: bool = True,
     theme_effort: str | None | _Unset = UNSET,
     window_days: int | None = None,
-    min_words: int = 0,
+    exclude_stubs: bool = False,
 ) -> ClusteringOutcome:
     """Cluster, persist the assignment, detect blindspots, and theme them.
 
@@ -468,18 +468,20 @@ def run_clustering(
     weeks-old stories as blindspots, and a story is news for about that long.
     ``None`` clusters everything.
 
-    ``min_words`` keeps headline-only documents out of the clustering. They are
-    still counted as coverage everywhere else; what they stop doing is defining
-    what a story is. ``0``, the default here, clusters everything — the daily
-    run and the CLI pass `cluster.min_words`, following `window_days`: a policy
-    about real corpora belongs in settings, not in a library default a test
-    corpus has to work around.
+    ``exclude_stubs`` keeps headline-only documents out of the clustering.
+    What they stop doing is defining what a story is; which *coverage* numbers
+    they still appear in is spelled out in LIMITATIONS.md, because the honest
+    answer is "the corpus-derived ones, not the clustering-derived ones".
+    ``False``, the default here, clusters everything — the daily run and the
+    CLI pass `cluster.cluster_stubs`, following `window_days`: a policy about
+    real corpora belongs in settings, not in a library default a test corpus
+    has to work around.
     """
     since = None
     if window_days:
         since = (datetime.now(UTC).date() - timedelta(days=window_days - 1)).isoformat()
     result = compute_clustering(
-        store, min_cluster_size=min_cluster_size, since=since, min_words=min_words
+        store, min_cluster_size=min_cluster_size, since=since, exclude_stubs=exclude_stubs
     )
     if not result.n_docs:
         # Nothing in the window (ingestion down for a week, say): keep the last

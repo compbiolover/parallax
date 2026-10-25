@@ -343,3 +343,52 @@ def test_pruning_keeps_a_threads_earlier_days(tmp_path):
 
     timeline = store.thread_timeline(thread_id)
     assert [r["day"] for r in timeline] == ["2026-10-20"], "day one survives"
+
+
+def test_pruning_removes_the_thread_row_not_just_its_day(tmp_path):
+    """An orphaned thread stays in story_thread_rows(), which `track` reads as
+    both `existing` (so a dead story stays matchable and resurrects with a gap)
+    and `taken` (so its slug stays reserved)."""
+    store = _store(tmp_path)
+    _run(
+        store, _result([0], [[1.0, 0.0]], doc_ids=["a0"]), day="2026-10-20", labels={0: "Pensions"}
+    )
+    assert len(store.story_thread_rows()) == 1
+    second = _result([0], [[0.0, 1.0]], doc_ids=["b0"])
+    _run(store, second, day="2026-10-20", labels={0: "Storm"})
+    titles = [r["title"] for r in store.story_thread_rows()]
+    assert titles == ["Storm"], "the orphaned thread row must go, not just its day"
+
+
+def test_pruning_spares_threads_this_run_never_looked_at(tmp_path):
+    """The sweep is scoped to what this day orphaned. An unscoped one also
+    deleted any thread with no day row for any other reason."""
+    store = _store(tmp_path)
+    _run(
+        store, _result([0], [[1.0, 0.0]], doc_ids=["a0"]), day="2026-10-20", labels={0: "Pensions"}
+    )
+    # A thread with no thread_days row at all, as a future caller might create.
+    store.upsert_story_thread(
+        thread_id="orphan-by-design",
+        title="Not yet dated",
+        centroid="[0.0, 1.0]",
+        dim=2,
+        embedder="test-embedder",
+        day="2026-10-20",
+    )
+    _run(
+        store, _result([0], [[1.0, 0.0]], doc_ids=["a0"]), day="2026-10-20", labels={0: "Pensions"}
+    )
+    assert "orphan-by-design" in {r["thread_id"] for r in store.story_thread_rows()}
+
+
+def test_pruning_with_nothing_to_keep_is_a_no_op(tmp_path):
+    """`NOT IN ('')` matches every row, so the unguarded version would delete
+    the day's whole timeline and then every thread in the store."""
+    store = _store(tmp_path)
+    _run(
+        store, _result([0], [[1.0, 0.0]], doc_ids=["a0"]), day="2026-10-20", labels={0: "Pensions"}
+    )
+    assert store.prune_thread_day("2026-10-20", []) == 0
+    assert len(store.story_thread_rows()) == 1
+    assert store.thread_timeline(store.story_thread_rows()[0]["thread_id"])

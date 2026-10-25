@@ -15,6 +15,7 @@ from ingestion.__main__ import build_reporter, format_progress
 from ingestion.config import Source
 from ingestion.datastore import Datastore
 from ingestion.pipeline import PipelineConfig, SourceProgress, run
+from scoring.depth import SUMMARY
 
 
 def _source(sid="fox_news", stratum="national_cable") -> Source:
@@ -155,7 +156,8 @@ def test_counts_are_per_source_deltas_not_running_totals(monkeypatch):
 
     monkeypatch.setattr(
         "ingestion.pipeline._document_text",
-        lambda item, cfg, robots, limiter, stats=None: item.summary,
+        # (text, ingest_kind) since provenance is recorded at ingestion.
+        lambda item, cfg, robots, limiter, stats=None: (item.summary, SUMMARY),
     )
     events = _run_with(monkeypatch, [_source("a"), _source("b")], lambda *a, **k: [_Item()])
 

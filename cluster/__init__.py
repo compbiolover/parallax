@@ -28,19 +28,22 @@ def window_days(settings: dict) -> int:
     return DEFAULT_WINDOW_DAYS if value is None else int(value)
 
 
-# A document shorter than this is a headline, not a story. GDELT backfill
-# stores titles without bodies (the free endpoint throttles to ~1 request/5s,
-# so fetching them all turns a 40-minute run into an overnight one), and on a
-# real corpus those stubs outnumber the full articles — 978 against 750 on
-# 2026-10-25. Clustering them together groups stories by shared keywords
-# rather than by subject, which the story review reported in its own titles
-# ("a sports-tagged cluster mixing WNBA, voting, and revenue"). Stubs still
-# count as coverage everywhere coverage is counted; they just stop defining
-# what a story is. Settings: `cluster.min_words`; 0 clusters everything.
-DEFAULT_MIN_WORDS = 120
+# Whether headline-only documents may form clusters. They cannot usefully: a
+# cluster built from titles groups stories by shared keywords rather than by
+# subject, which the story review reported in its own titles ("a sports-tagged
+# cluster mixing WNBA, voting, and revenue"). They keep their quarter
+# weight in every corpus-derived number and count for nothing in the
+# clustering-derived ones (blindspot counts, per-thread diet counts,
+# attention shares). LIMITATIONS.md names them, because the difference is
+# not visible on the surfaces that print them.
+#
+# A boolean, not a word-count floor. The floor it replaces excluded 1,297
+# documents that had real text, because "short" and "headline" are different
+# questions and only `ingest_kind` answers the second one.
+DEFAULT_CLUSTER_STUBS = False
 
 
-def min_words(settings: dict) -> int:
-    """`cluster.min_words`; a key with no value means the default, 0 means all."""
-    value = (settings.get("cluster", {}) or {}).get("min_words")
-    return DEFAULT_MIN_WORDS if value is None else int(value)
+def cluster_stubs(settings: dict) -> bool:
+    """`cluster.cluster_stubs`; a key with no value means the default."""
+    value = (settings.get("cluster", {}) or {}).get("cluster_stubs")
+    return DEFAULT_CLUSTER_STUBS if value is None else bool(value)

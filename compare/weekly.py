@@ -33,6 +33,7 @@ from cluster.titles import clean_title, is_boilerplate
 from compare.divergence import jensen_shannon_divergence, log_ratios
 from compare.reference import ReferencePair
 from scoring.aggregate import to_composition
+from scoring.depth import depth_weight
 from scoring.foundations import CLASSIC_FOUNDATIONS
 
 WEEKS = 8
@@ -56,7 +57,10 @@ def _mix(rows, weights: dict[str, float]) -> tuple[dict[str, float], float, int]
     totals = dict.fromkeys(CLASSIC_FOUNDATIONS, 0.0)
     n = 0
     for row in rows:
-        w = weights.get(row["source_id"], 0.0)
+        # Same depth rule as the dashboard profile. Without it the weekly
+        # brief — the part that actually gets emailed — reported log-ratios
+        # the dashboard contradicted (care +0.196 against +0.139).
+        w = weights.get(row["source_id"], 0.0) * depth_weight(row["ingest_kind"], row["word_count"])
         if w <= 0:
             continue
         n += 1

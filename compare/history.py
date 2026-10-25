@@ -102,9 +102,35 @@ class Snapshot:
         """The JSON blob persisted in ``snapshots.payload``."""
         return {
             "source": self.source,
+            "basis": WEIGHTING_BASIS,
             "cumulative": asdict(self.cumulative),
             "window": asdict(self.window),
         }
+
+
+# How the documents behind a snapshot were weighted. Recorded per row because
+# the series outlives the method: rows written before 2026-10-25 counted a
+# GDELT headline exactly like a 1,100-word feature, and the change to a
+# quarter weight moved the trailing-window JSD from 0.0045 to 0.0020 on
+# unchanged data. Without a marker that step reads as the diets converging.
+#
+# A row with no `basis` key is pre-depth-weighting, which is what
+# `basis_changes_at` reports.
+WEIGHTING_BASIS = "depth-v1"
+
+
+def basis_changes_at(series: list[dict]) -> str | None:
+    """The first date whose basis differs from the series' oldest, if any.
+
+    Read this before drawing a trend across it: a step at that date is the
+    instrument, not the corpus. CLAUDE.md §5 asks for exactly this kind of
+    provenance alongside a number.
+    """
+    seen = [(p.get("date"), p.get("basis")) for p in series]
+    if not seen:
+        return None
+    first = seen[0][1]
+    return next((d for d, b in seen if b != first), None)
 
 
 def _day_after(day: str) -> str:
@@ -296,6 +322,9 @@ def load_series(store, limit: int | None = DEFAULT_SERIES_LIMIT) -> list[dict]:
                 "generated_utc": row["generated_utc"],
                 "window_days": row["window_days"],
                 "source": payload.get("source", LIVE),
+                # None on rows written before depth weighting existed, which
+                # is what makes the change visible instead of silent.
+                "basis": payload.get("basis"),
                 "jsd_cumulative": row["jsd_cumulative"],
                 "jsd_window": row["jsd_window"],
                 "cumulative": payload.get("cumulative"),

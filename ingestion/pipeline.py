@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from cluster.embed import Embedder, HashingEmbedder
 from scoring.aggregate import aggregate_profile, to_composition
+from scoring.depth import BODY, SUMMARY, TITLE_ONLY, row_weights
 from scoring.dictionary import DictionaryScorer, DocumentScore
 from scoring.lexicon import build_lexicon
 
@@ -185,7 +186,14 @@ def _cluster_text(item: FeedItem, text: str) -> str:
 
 def _document_text(
     item: FeedItem, cfg: PipelineConfig, robots, limiter, stats: RunStats | None = None
-) -> str | None:
+) -> tuple[str, str] | None:
+    """``(text, ingest_kind)`` for one feed item, or ``None`` if nothing read.
+
+    The kind is returned rather than inferred later because this is the only
+    place that knows it. Inferring it from word count instead got 1,297
+    documents wrong: a 90-word RSS summary from PBS NewsHour and a 12-word
+    GDELT headline are both "short", and only one of them is a headline.
+    """
     body: str | None = None
     if item.link:
         try:
@@ -200,11 +208,15 @@ def _document_text(
             body = None
         if not body and stats is not None:
             stats.unread += 1
+    kind = BODY
     if not body and item.summary:
+        # The publisher's own blurb, not the article. Shorter than a body and
+        # longer than a headline, and it is real editorial text either way.
         body = strip_html(item.summary)
+        kind = SUMMARY
     if not body:
         return None
-    return f"{item.title}\n\n{body}".strip()
+    return f"{item.title}\n\n{body}".strip(), kind
 
 
 def run(
@@ -440,9 +452,11 @@ def backfill(
                     rate_limiter=limiter,
                 )
                 text = f"{art.title}\n\n{body}".strip() if body else art.title
+                ingest_kind = BODY if body else TITLE_ONLY
                 min_words = cfg.min_words
             else:
                 text = art.title
+                ingest_kind = TITLE_ONLY
                 min_words = 3  # title-only: don't skip on the short-doc guard
             _ingest_one(
                 store,
@@ -457,6 +471,7 @@ def backfill(
                 text=text,
                 cluster_text=art.title,
                 min_words=min_words,
+                ingest_kind=ingest_kind,
                 transformer=transformer,
             )
     return stats
@@ -614,10 +629,11 @@ def _ingest_source(
 
     for item in items[: cfg.max_items_per_feed]:
         stats.fetched += 1
-        text = _document_text(item, cfg, robots, limiter, stats)
-        if text is None:
+        read = _document_text(item, cfg, robots, limiter, stats)
+        if read is None:
             stats.errors += 1
             continue
+        text, ingest_kind = read
         _ingest_one(
             store,
             source,
@@ -631,6 +647,7 @@ def _ingest_source(
             text=text,
             cluster_text=_cluster_text(item, text),
             min_words=cfg.min_words,
+            ingest_kind=ingest_kind,
             transformer=transformer,
             liberty_texts=liberty_texts,
         )
@@ -651,6 +668,7 @@ def _ingest_one(
     text: str,
     cluster_text: str,
     min_words: int,
+    ingest_kind: str = BODY,
     transformer: object | None = None,
     liberty_texts: dict[str, str] | None = None,
 ) -> None:
@@ -688,6 +706,7 @@ def _ingest_one(
         minhash=signature_list(mh),
         is_duplicate=is_dup,
         duplicate_of=dup_of,
+        ingest_kind=ingest_kind,
     )
     store.upsert_scores(
         document_id=doc_id,
@@ -739,29 +758,6 @@ def _ingest_one(
         stats.per_source[source.id] = stats.per_source.get(source.id, 0) + 1
 
 
-# A headline and a 1,100-word feature are not one document each.
-#
-# GDELT backfill stores titles without bodies, and on a real corpus they
-# outnumber the full articles (978 against 750 on 2026-10-25). Counted equally
-# they dominate the profile, and a 12-word stub is a bad place to measure moral
-# emphasis: length normalization fixes the arithmetic, not the fact that there
-# is almost no moral vocabulary in a headline to find. Worse, extraction depth
-# is not random — paywalled outlets and the ones trafilatura cannot parse yield
-# stubs — so equal weighting lets *which outlets the scraper can read* act on
-# the comparison as if it were a finding.
-#
-# So a stub counts, at a quarter. Not zero: a headline is real evidence that an
-# outlet ran something, and dropping it would bias the corpus the other way, in
-# favour of whoever publishes in a format we happen to parse.
-STUB_WORDS = 120
-STUB_WEIGHT = 0.25
-
-
-def depth_weight(word_count: int | None) -> float:
-    """How much one document counts, by how much of it we actually have."""
-    return STUB_WEIGHT if (word_count or 0) < STUB_WORDS else 1.0
-
-
 def persona_profiles(
     store: Datastore,
     registry: Registry,
@@ -799,10 +795,7 @@ def persona_profiles(
             )
             for row in rows
         ]
-        weights = [
-            weights_by_source.get(row["source_id"], 0.0) * depth_weight(row["word_count"])
-            for row in rows
-        ]
+        weights = row_weights(rows, weights_by_source)
         if scores:
             profiles[persona_id] = to_composition(aggregate_profile(scores, weights))
     return profiles

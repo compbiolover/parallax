@@ -38,7 +38,10 @@ llm = [
 # scikit-learn (SVD+HDBSCAN) is a core dependency, so the blindspot engine needs
 # nothing extra; this only adds neural sentence embeddings.
 embeddings = [
-  "sentence-transformers>=3.0",
+  # Upper bound deliberate: the clustering numbers in LIMITATIONS.md were
+  # measured on 6.2.0, and >=3.0 alone let the project cross three major
+  # versions and find out from a deprecation warning on stdout.
+  "sentence-transformers>=3.0,<7",
 ]
 # Phase 3 — transformer tagger (Mformer) + compositional stats.
 scoring = [
