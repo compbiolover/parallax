@@ -122,6 +122,9 @@ class RateLimiter:
         self._last[host] = clock()
 
 
+PRECISION_SKIP_HOSTS = {"www.pbs.org"}
+
+
 def extract_article(
     url: str,
     *,
@@ -138,7 +141,10 @@ def extract_article(
     html = _fetch(url, user_agent=user_agent, timeout=timeout)
     if html is None:
         return None
-    # Precision mode returns nothing for some layouts (PBS NewsHour); retry plain.
+    # Precision mode returns nothing for PBS NewsHour and logs a "discarding data"
+    # warning each time, so those hosts go straight to the default pass.
+    if urlsplit(url).hostname in PRECISION_SKIP_HOSTS:
+        return trafilatura.extract(html, url=url)
     return trafilatura.extract(html, url=url, favor_precision=True) or trafilatura.extract(
         html, url=url
     )
