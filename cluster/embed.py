@@ -102,7 +102,12 @@ class SentenceTransformerEmbedder:
         self.query_prefix = query_prefix
         self.revision = revision
         self._model = SentenceTransformer(model, revision=revision)
-        self.dim = int(self._model.get_sentence_embedding_dimension())
+        # Renamed in sentence-transformers 6.x; the old name still works but
+        # warns on every construction, which is once per pipeline step.
+        dim_of = getattr(
+            self._model, "get_embedding_dimension", self._model.get_sentence_embedding_dimension
+        )
+        self.dim = int(dim_of())
 
     @property
     def name(self) -> str:
