@@ -46,7 +46,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_THEME_MODEL = "claude-sonnet-5"
+DEFAULT_THEME_MODEL = "claude-sonnet-5-5"
 
 
 class _Unset:

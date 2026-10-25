@@ -34,7 +34,7 @@ from .prompts import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = "claude-opus-5-5"
 
 
 # The same week the clustering and the weekly comparison use.

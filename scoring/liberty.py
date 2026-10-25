@@ -45,7 +45,7 @@ from .claude_client import build_client
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_EFFORT = "low"
 
 # Enough article to judge framing without paying for the whole piece. Liberty
