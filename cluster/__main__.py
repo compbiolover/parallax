@@ -15,7 +15,7 @@ from compare.reference import resolve
 from ingestion.config import datastore_path, load_registry, load_settings
 from ingestion.datastore import Datastore
 
-from . import DEFAULT_WINDOW_DAYS, window_days
+from . import DEFAULT_WINDOW_DAYS, cluster_stubs, window_days
 from .blindspot import run_clustering
 
 
@@ -45,6 +45,12 @@ def main(argv: list[str] | None = None) -> int:
         help="min share of one diet for a cluster to be a blindspot",
     )
     parser.add_argument("--min-blindspot-size", type=int, default=2)
+    parser.add_argument(
+        "--cluster-stubs",
+        action="store_true",
+        default=None,
+        help="also let headline-only documents form clusters (default: they cannot)",
+    )
     parser.add_argument(
         "--window-days",
         type=int,
@@ -91,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
             claude_themes=(not args.no_claude_themes) and bool(themes_cfg.get("claude", True)),
             window_days=(
                 args.window_days if args.window_days is not None else window_days(settings)
+            ),
+            exclude_stubs=not (
+                args.cluster_stubs if args.cluster_stubs is not None else cluster_stubs(settings)
             ),
         )
         print(

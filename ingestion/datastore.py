@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scoring.depth import LEGACY_STUB_WORDS, TITLE_ONLY
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -104,7 +106,12 @@ CREATE TABLE IF NOT EXISTS documents (
     -- lets one document count differently for two readers of the same source.
     weight        REAL NOT NULL DEFAULT 1.0,
     is_duplicate  INTEGER NOT NULL DEFAULT 0,
-    duplicate_of  TEXT                   -- id of the canonical document, if dup
+    duplicate_of  TEXT,                  -- id of the canonical document, if dup
+    -- How the text was obtained: 'body' | 'summary' | 'title_only'. The
+    -- question every weighting decision actually wants, recorded by the only
+    -- step that can answer it. Inferring it from word_count instead put 1,297
+    -- RSS-summary documents in the same bucket as GDELT headlines.
+    ingest_kind   TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_diet ON documents(diet_id);
@@ -368,11 +375,24 @@ class Datastore:
             ("foundation_scores", "proportionality", "REAL"),
             ("podcast_episodes", "audio_url", "TEXT"),
             ("story_threads", "review_title", "TEXT"),
+            ("documents", "ingest_kind", "TEXT"),
         ]
         for table, column, decl in added:
             cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
             if cols and column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+                if (table, column) == ("documents", "ingest_kind"):
+                    # Rows stored before the column existed. The truth is gone
+                    # (raw text is discarded), so this is the word-count proxy
+                    # `is_stub` falls back to, applied once rather than on
+                    # every read: a document whose body is barely longer than
+                    # its own headline was a headline. Everything ingested
+                    # since records the real answer.
+                    self.conn.execute(
+                        "UPDATE documents SET ingest_kind = "
+                        "CASE WHEN word_count < 30 THEN 'title_only' ELSE 'body' END "
+                        "WHERE ingest_kind IS NULL"
+                    )
 
         # After the ALTERs above, so it works on an upgraded store as well as a
         # fresh one. Idempotent, so running it on both is free.
@@ -419,6 +439,7 @@ class Datastore:
         minhash: list[int] | None,
         is_duplicate: bool = False,
         duplicate_of: str | None = None,
+        ingest_kind: str | None = None,
         # Legacy columns. Both are written blank/neutral on new rows and read by
         # nothing; see the DDL comments on `documents`.
         diet_id: str = "",
@@ -429,8 +450,8 @@ class Datastore:
                 """
                 INSERT INTO documents (id, diet_id, source_id, stratum_id, url,
                     title, published_utc, fetched_utc, word_count, minhash,
-                    weight, is_duplicate, duplicate_of)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    weight, is_duplicate, duplicate_of, ingest_kind)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                     is_duplicate=excluded.is_duplicate,
                     duplicate_of=excluded.duplicate_of
@@ -449,6 +470,7 @@ class Datastore:
                     weight,
                     int(is_duplicate),
                     duplicate_of,
+                    ingest_kind,
                 ),
             )
 
@@ -537,7 +559,8 @@ class Datastore:
         return list(
             self.conn.execute(
                 f"""
-                SELECT d.source_id AS source_id, s.*
+                SELECT d.source_id AS source_id, d.word_count AS word_count,
+                       d.ingest_kind AS ingest_kind, s.*
                 FROM foundation_scores s
                 JOIN documents d ON d.id = s.document_id
                 WHERE d.is_duplicate = 0 AND s.scorer = ?{where}{clause}
@@ -617,8 +640,8 @@ class Datastore:
         scorer_a: str,
         scorer_b: str,
         foundations: list[str] | None = None,
-    ) -> list[tuple[str, dict[str, float], dict[str, float]]]:
-        """Per non-duplicate document, ``(source_id, scorer_a_map, scorer_b_map)``
+    ) -> list[tuple[str, str | None, dict[str, float], dict[str, float]]]:
+        """Per non-duplicate document, ``(source_id, ingest_kind, a_map, b_map)``
         — only for documents scored by *both*. Pairing keeps the two taggers on the
         same document population (backfill writes dictionary rows but no transformer
         rows), which both the confidence band and the disagreement share rely on.
@@ -636,7 +659,7 @@ class Datastore:
         where, ids = _source_filter(source_ids)
         rows = self.conn.execute(
             f"""
-            SELECT d.source_id AS source_id,
+            SELECT d.source_id AS source_id, d.ingest_kind AS ingest_kind,
                    {", ".join(f"a.{c} AS a_{c}" for c in founds)},
                    {", ".join(f"b.{c} AS b_{c}" for c in founds)}
             FROM foundation_scores a
@@ -652,7 +675,7 @@ class Datastore:
         for r in rows:
             a = {c: (r[f"a_{c}"] if r[f"a_{c}"] is not None else 0.0) for c in founds}
             b = {c: (r[f"b_{c}"] if r[f"b_{c}"] is not None else 0.0) for c in founds}
-            out.append((r["source_id"], a, b))
+            out.append((r["source_id"], r["ingest_kind"], a, b))
         return out
 
     def headlines_for_sources(
@@ -868,6 +891,7 @@ class Datastore:
             self.conn.execute(
                 f"""
                 SELECT d.id AS id, d.source_id AS source_id, d.title AS title, d.url AS url,
+                       d.word_count AS word_count, d.ingest_kind AS ingest_kind,
                        {DOC_DATE_SQL} AS dated, dc.cluster_id AS cluster_id, s.*
                 FROM foundation_scores s
                 JOIN documents d ON d.id = s.document_id
@@ -973,7 +997,10 @@ class Datastore:
             )
 
     def iter_embeddings(
-        self, embedder: str | None = None, since: str | None = None
+        self,
+        embedder: str | None = None,
+        since: str | None = None,
+        exclude_stubs: bool = False,
     ) -> Iterator[tuple[str, str, str | None, str, list[float]]]:
         """Yield (document_id, source_id, title, dated, vector) for non-duplicate docs.
 
@@ -989,6 +1016,13 @@ class Datastore:
         older canonical with a near-duplicate copy dated in the window: a wire
         story rerun this week is this week's coverage even though the copy it
         collapsed into was first fetched earlier.
+
+        ``exclude_stubs`` drops headline-only documents (``ingest_kind`` of
+        ``title_only``, falling back to a word count for rows written before
+        that column). GDELT backfill stores headlines without bodies, and on a
+        real corpus those outnumber the full articles: clustering them
+        together groups stories by shared keywords rather than by subject.
+        See `cluster.cluster_stubs`.
         """
         sql = f"""
             SELECT e.document_id AS id, d.source_id AS source_id, d.title AS title,
@@ -1000,6 +1034,25 @@ class Datastore:
         if embedder is not None:
             sql += " AND e.embedder = ?"
             params = (embedder,)
+        if exclude_stubs:
+            # A canonical is kept when it has text OR when any near-duplicate
+            # collapsed into it does. Dedup picks the canonical by arrival
+            # order, never by length, so a GDELT headline that landed first
+            # can be the canonical for a syndicated story with full copies
+            # behind it. Dropping it would take the whole story out of the
+            # clustering, which is the opposite of what excluding headlines
+            # is for.
+            stub = (
+                "CASE WHEN {t}.ingest_kind IS NOT NULL AND {t}.ingest_kind != ''"
+                " THEN {t}.ingest_kind = ? ELSE {t}.word_count < ? END"
+            )
+            sql += (
+                f" AND NOT ({stub.format(t='d')}"
+                "      AND NOT EXISTS (SELECT 1 FROM documents x"
+                "                       WHERE x.duplicate_of = d.id"
+                f"                        AND NOT ({stub.format(t='x')})))"
+            )
+            params += (TITLE_ONLY, LEGACY_STUB_WORDS, TITLE_ONLY, LEGACY_STUB_WORDS)
         if since is not None:
             # Uncorrelated: one pass over the duplicates, not one per canonical.
             sql += f"""
@@ -1011,6 +1064,89 @@ class Datastore:
             params += (since, since)
         for r in self.conn.execute(sql, params):
             yield r["id"], r["source_id"], r["title"], r["dated"], json.loads(r["vector"])
+
+    def iter_embeddable(self) -> Iterator[tuple[str, str]]:
+        """``(document_id, title)`` for every non-duplicate document with a title.
+
+        What re-embedding can work from. Raw article text is discarded at
+        ingestion by design (``CLAUDE.md`` §0), so the title is all that
+        survives — which is exactly what ``_cluster_text`` embeds in the first
+        place, for documents whose title is four words or more. Shorter titles
+        were originally embedded with a body lead that is gone, so those few
+        are re-embedded from the title alone.
+        """
+        rows = self.conn.execute(
+            "SELECT id, title FROM documents "
+            "WHERE is_duplicate = 0 AND title IS NOT NULL AND TRIM(title) != ''"
+        )
+        for row in rows:
+            yield row["id"], row["title"]
+
+    def replace_embeddings(self, rows: list[tuple[str, list[float]]], embedder: str) -> None:
+        """Write a batch of vectors under one embedder name."""
+        with self._tx() as conn:
+            conn.executemany(
+                """
+                INSERT INTO embeddings (document_id, dim, vector, embedder)
+                VALUES (?,?,?,?)
+                ON CONFLICT(document_id) DO UPDATE SET
+                    dim=excluded.dim, vector=excluded.vector, embedder=excluded.embedder
+                """,
+                [(doc_id, len(vec), json.dumps(vec), embedder) for doc_id, vec in rows],
+            )
+
+    def drop_embeddings(self, keep_embedder: str | None = None) -> int:
+        """Delete every embedding, or all but one embedder's.
+
+        Vectors from two embedders live in incompatible spaces, so a switch
+        leaves the old ones as dead weight that ``iter_embeddings`` has to
+        filter around for the life of the store.
+        """
+        with self._tx() as conn:
+            if keep_embedder is None:
+                cur = conn.execute("DELETE FROM embeddings")
+            else:
+                cur = conn.execute("DELETE FROM embeddings WHERE embedder != ?", (keep_embedder,))
+            return cur.rowcount
+
+    def activate_embedder(self, name: str) -> tuple[int, int]:
+        """Switch the store to ``name`` in one transaction.
+
+        Three writes have to land together or not at all: drop the vectors
+        from other embedders, record the new active name, and forget the
+        clustering and the threads derived from the old space. Done as
+        separate transactions, a kill in the gaps left the store with every
+        vector renamed and `meta.embedder` still naming the old one — after
+        which `iter_embeddings` matched only the rows that had *not* been
+        converted, so the next run clustered a fraction of the corpus, or
+        nothing at all, and the brief quietly republished the previous day's
+        blindspots as current.
+
+        The clustering goes with the threads. A centroid in the old space is
+        unmatchable, and so is a cluster: gone beats wrong, and the next
+        `cluster run` rebuilds both.
+        """
+        with self._tx() as conn:
+            cur = conn.execute("DELETE FROM embeddings WHERE embedder != ?", (name,))
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('embedder', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (name,),
+            )
+            threads = conn.execute("DELETE FROM story_threads").rowcount
+            conn.execute("DELETE FROM clusters")
+            conn.execute("DELETE FROM document_clusters")
+            conn.execute("DELETE FROM blindspot_themes")
+            conn.execute("DELETE FROM meta WHERE key = 'cluster_since'")
+            return cur.rowcount, threads
+
+    def drop_story_threads(self) -> int:
+        """Forget every thread. A thread's centroid is in its embedder's space,
+        so after a switch nothing in the table can be matched against again."""
+        # thread_days and thread_documents are ON DELETE CASCADE with
+        # foreign keys enabled, so one DELETE empties all three.
+        with self._tx() as conn:
+            return conn.execute("DELETE FROM story_threads").rowcount
 
     def embedder_names(self) -> list[str]:
         """Distinct embedder names present in the embeddings table."""
@@ -1131,6 +1267,54 @@ class Datastore:
                 "UPDATE thread_days SET note=? WHERE thread_id=? AND day=?",
                 (note, thread_id, day),
             )
+
+    def prune_thread_day(self, day: str, keep: list[str]) -> int:
+        """Drop ``day``'s timeline rows for threads this run did not touch.
+
+        A cluster run is authoritative for the day it runs on, the way
+        ``replace_clustering`` is for the clustering. Without this, running the
+        pipeline twice in one day leaves the first run's rows behind: the
+        second run deletes every ``thread_documents`` row and writes only its
+        own, so a thread it did not match keeps a ``thread_days`` row saying it
+        had nine documents and has none to show. It then leads the brief as a
+        story with no headlines, which is exactly how this was found.
+
+        Threads left with no days at all are removed too — a thread is its
+        timeline, and one with an empty timeline is not a story that happened.
+        """
+        if not keep:
+            # Never reached from `track`, which returns before calling this
+            # when it has no clusters. Guarded anyway because the SQL below
+            # would read `NOT IN ('')` as "every row": it would delete the
+            # day's whole timeline and then every thread in the store, one
+            # early return away from live.
+            return 0
+        with self._tx() as conn:
+            placeholders = ",".join("?" * len(keep))
+            orphaned = [
+                r["thread_id"]
+                for r in conn.execute(
+                    f"SELECT thread_id FROM thread_days "
+                    f"WHERE day = ? AND thread_id NOT IN ({placeholders})",
+                    (day, *keep),
+                )
+            ]
+            cur = conn.execute(
+                f"DELETE FROM thread_days WHERE day = ? AND thread_id NOT IN ({placeholders})",
+                (day, *keep),
+            )
+            # Only threads this run actually orphaned. An unscoped sweep would
+            # also delete any thread that has no day row for some other reason
+            # — one a future caller creates before its first day, say — and
+            # cascade that into thread_documents.
+            if orphaned:
+                marks = ",".join("?" * len(orphaned))
+                conn.execute(
+                    f"DELETE FROM story_threads WHERE thread_id IN ({marks}) "
+                    f"AND thread_id NOT IN (SELECT thread_id FROM thread_days)",
+                    orphaned,
+                )
+            return cur.rowcount
 
     def replace_thread_documents(self, assignments: list[tuple[str, str]]) -> None:
         with self._tx() as conn:

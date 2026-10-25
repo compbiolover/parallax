@@ -55,6 +55,7 @@ def compute_clustering(
     svd_components: int = 30,
     random_state: int = 42,
     since: str | None = None,
+    exclude_stubs: bool = False,
 ) -> ClusterResult:
     """Load embeddings and cluster them. Returns per-document labels.
 
@@ -64,6 +65,20 @@ def compute_clustering(
     error is raised rather than crashing deep in numpy on ragged vectors.
 
     ``since`` (``YYYY-MM-DD``) clusters only documents dated on or after it.
+
+    ``exclude_stubs`` leaves headline-only documents out: a title cannot
+    define a story. It defaults to off at this level and is applied by
+    :func:`cluster.blindspot.run_clustering`, which is where a policy about
+    real corpora belongs; callers clustering a hand-built set get every
+    document they put in.
+
+    What a headline still counts for, precisely: it carries its quarter weight
+    in every corpus-derived number (the foundation profile, doc counts), and
+    it carries NOTHING in the clustering-derived ones — blindspot counts,
+    per-thread diet counts, attention shares — because those are computed over
+    the clustered set. An earlier version of this docstring claimed it counted
+    "everywhere coverage is counted", which was not true of three surfaces.
+    LIMITATIONS.md names them.
     """
     active = store.get_meta("embedder")
     # Only canonical documents carry embeddings, so a wire story that ran in six
@@ -72,7 +87,8 @@ def compute_clustering(
     # an outlet that ran a story weeks ago did not cover it this week.
     collapsed = store.duplicate_coverage(since)
     ids, sources, coverage, titles, vectors = [], [], [], [], []
-    for doc_id, source_id, title, dated, vec in store.iter_embeddings(embedder=active, since=since):
+    rows = store.iter_embeddings(embedder=active, since=since, exclude_stubs=exclude_stubs)
+    for doc_id, source_id, title, dated, vec in rows:
         ids.append(doc_id)
         sources.append(source_id)
         own = {source_id} if since is None or dated >= since else set()

@@ -334,6 +334,19 @@ diet spent the day on. Its limits:
   | hashing (default) | 0.121 | +0.048 | 39% | 7 (some spurious) |
   | all-MiniLM-L6-v2 | **0.366** | **+0.293** | **26%** | 8 (cleaner; nuclear-deal story 3→4) |
 
+  **Confirmed on the live corpus, 2026-10-25.** Switching from `hashing(d=512)` to
+  `thenlper/gte-small` and re-embedding all 22,597 documents, on the identical day's
+  document set: noise fell from 331 of 678 (49%) to 260 (38%), and clusters went from 128
+  to 149. The change is plainest in what the labels say. Before: `doj charges · england ·
+  california`, `harlem · birthrates really · defeat`. After: `france · protests · riots`,
+  `ramaswamy · ad · vivek`, `wnba · finals · woman`. The story review stopped describing
+  its own inputs as grab bags and started naming stories ("Gunmen kill seven at Orthodox
+  funeral in Jordan"). Measured in its own space the clustering scores a mean intra-cluster
+  cosine of 0.828 against a random-pair baseline of 0.708, a lift of +0.120 — *not*
+  comparable to the +0.293 in the table above, which was measured in MiniLM space: gte-small
+  has a much higher isotropic baseline, which compresses the lift. The noise reduction is
+  the apples-to-apples number.
+
   Sentence-transformers roughly **tripled cluster coherence and cut noise by a third**,
   and recovered a story the hashing embedder missed — worth the heavier `torch` dependency
   for real use. The residual loose size-2 clusters are a *data-volume* problem (more sources
@@ -433,6 +446,68 @@ diet spent the day on. Its limits:
   — but it can still take a title-cased second clause for a publisher's name, and it never
   removes the last headline in a cluster even when every candidate looks like boilerplate.
   Nothing here touches scoring, embedding, or clustering, all of which ran before it.
+
+## Headlines and articles are not the same evidence
+
+GDELT backfill stores titles without bodies (`backfill.extract_bodies: false`, because the
+free endpoint throttles to ~1 request/5s). Store-wide that is 9,692 headline-only documents
+against 13,223 with text, at a mean of 12 words against 932.
+
+`documents.ingest_kind` records how each document's text was obtained — `body` (the article,
+extracted), `summary` (the feed's own blurb, when extraction failed or was refused) or
+`title_only` (GDELT, which fetches no page). Two mechanisms key on it:
+
+- **A headline cannot define a story.** `cluster.cluster_stubs: false` keeps `title_only`
+  documents out of the clustering. A cluster built from titles groups coverage by shared
+  keywords rather than by subject, which the story review reported in its own section
+  titles ("a sports-tagged cluster mixing WNBA, voting, and revenue").
+- **A headline is still evidence an outlet ran something.** It carries a quarter weight in
+  the foundation profile (`scoring/depth.py`). Not zero: dropping it would bias the corpus
+  toward whoever publishes in a format the extractor handles, which is the same bias in the
+  other direction.
+
+**This was first implemented as a 120-word floor, and that was wrong.** Measured on the live
+corpus, 1,297 documents with real text fell below it — 421 from PBS NewsHour and 338 from
+The Hill, both outlets where `trafilatura` returns nothing and the stored text is the RSS
+summary. The floor demoted by 4x, and excluded from clustering, exactly the outlets the
+weighting exists to protect, and did so asymmetrically (roughly 759 on the author's side
+against 262 on the modeled side). "Short" and "headline" are different questions, and only
+provenance answers the second. The word count survives only as a fallback for rows written
+before the column existed, which the migration backfills once.
+
+**What a headline counts for, precisely.** It carries its quarter weight in every
+*corpus-derived* number: the foundation profile, the JSD, the log-ratios, document counts.
+It counts for nothing in the *clustering-derived* ones: blindspot counts, per-thread diet
+counts, and attention shares, all of which are computed over the clustered set. Those two
+families of number appear side by side on the dashboard and in the brief with nothing
+marking which denominator they came from. One case is handled rather than merely documented:
+a `title_only` canonical whose near-duplicates have text is kept, because dedup picks the
+canonical by arrival order and would otherwise take a whole syndicated story out of the
+clustering.
+
+**The asymmetry is real and is not removed by applying the rule evenly.** On the week of
+2026-10-19 the author's own diet was 500 of 652 documents headline-only (77%) and the
+modeled diet 7 of 151 (5%), so quarter-weighting reduces one side's evidence base fifteen
+times harder than the other's. CLAUDE.md §0 asks for the identical pipeline on every
+persona, and that is satisfied; it does not follow that the *effect* is symmetric. An
+earlier version of this section claimed the bias was "roughly symmetric", on the strength
+of an all-time measurement that does not hold on the window the brief actually reports.
+
+Length normalization does not substitute for either mechanism. It fixes the arithmetic, not
+the fact that a 12-word headline contains almost no moral vocabulary to measure.
+
+## The recorded divergence series changes instrument on 2026-10-25
+
+Depth weighting resolves at aggregation, so every snapshot written from that date is
+depth-weighted while the 35 rows before it are not. On unchanged data the trailing-window
+JSD moves from 0.0045 to 0.0020 and the all-time JSD from 0.00074 to 0.00056 — a step that
+reads as the diets converging and is entirely the method.
+
+Snapshots now record `basis` in their payload (`compare/history.py`), and
+`basis_changes_at()` returns the date where it changes, so the splice is visible rather than
+inferred. Rows with no `basis` predate the change. `backfill_series(overwrite=True)` would
+re-weight only the dates it rewrites and splice a third time; treat the series as starting
+over at the marker, or rebuild all of it.
 
 ## Story threads carry an identity the clustering does not
 

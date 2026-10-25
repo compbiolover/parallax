@@ -28,6 +28,8 @@ from .pipeline import (
     run,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def format_progress(event: SourceProgress) -> str:
     """One line per source, written as it finishes.
@@ -193,11 +195,95 @@ def _podcasts(store: Datastore, settings: dict, args, progress) -> None:
         print(f"  {source_id:32} {n}")
 
 
+# Titles per encode call. The model batches internally, which is where the
+# order of magnitude is: 8.1 ms per title one at a time against 0.9 ms
+# batched, so a 22,597-document re-embed is 20 seconds rather than 3 minutes.
+# It is also the write granularity, so a kill mid-run loses at most this many
+# encodes rather than all of them.
+REEMBED_BATCH = 256
+
+
+def _reembed(store, settings: dict) -> int:
+    """Rebuild every embedding with the configured embedder.
+
+    Needed whenever `cluster.embedder` changes: vectors from two embedders
+    live in incompatible spaces, and `LIMITATIONS.md` ("Changing an instrument
+    mid-corpus blends two of them") says the corpus has to be rebuilt rather
+    than mixed. Re-embeds from stored titles, which is what the embedder was
+    given in the first place \u2014 raw text is discarded at ingestion, so this is
+    the one part of the pipeline that can be redone without re-fetching.
+    """
+    embedder, name = build_embedder(settings)
+    before = store.embedder_names()
+    if before == [name] and store.get_meta("embedder") == name:
+        # Nothing to convert, and the switch below would still wipe every
+        # story thread \u2014 including per-day notes that cost a model call and
+        # cannot be rebuilt, because the text they describe is gone.
+        print(f"Already embedded with {name}; nothing to do.")
+        print("Pass a different `cluster.embedder` in settings to switch.")
+        return 0
+
+    rows = list(store.iter_embeddable())
+    if not rows:
+        print("No documents with titles to embed.")
+        return 0
+    print(f"Re-embedding {len(rows)} document(s) with {name}.")
+    if before:
+        print(f"  Replacing vectors from: {', '.join(before)}")
+
+    done = failed = 0
+    for start in range(0, len(rows), REEMBED_BATCH):
+        chunk = rows[start : start + REEMBED_BATCH]
+        try:
+            vectors = embedder.embed_many([title for _, title in chunk])
+        except Exception as exc:  # noqa: BLE001 - one bad batch must not end the run
+            # Skip and keep going, the way ingestion does. A one-shot
+            # transition over 22,597 documents should not be ended by a single
+            # pathological title or a transient model error.
+            logger.warning(
+                "embedding failed for a batch of %d (%s: %s) \u2014 skipped",
+                len(chunk),
+                type(exc).__name__,
+                exc,
+            )
+            failed += len(chunk)
+            continue
+        store.replace_embeddings(
+            [(doc_id, vec) for (doc_id, _), vec in zip(chunk, vectors, strict=True)], name
+        )
+        done += len(chunk)
+        print(f"  {done}/{len(rows)}", end="\r", flush=True)
+
+    if not done:
+        print("\nNothing embedded; leaving the store on its current embedder.")
+        return 1
+    dropped, threads = store.activate_embedder(name)
+    print(f"  {done}/{len(rows)} embedded.")
+    if failed:
+        print(f"  {failed} document(s) could not be embedded and keep no vector.")
+    if dropped:
+        print(f"  Dropped {dropped} vector(s) from other embedders.")
+    if threads:
+        print(f"  Forgot {threads} story thread(s): centroids are embedder-specific.")
+    print("  Cleared the clustering: it was built in the old vector space.")
+    print("Run `python -m cluster run` to rebuild it.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingestion", description="Parallax Phase 1 pipeline")
     parser.add_argument(
         "command",
-        choices=["run", "backfill", "podcasts", "compare", "labels", "personas", "health"],
+        choices=[
+            "run",
+            "backfill",
+            "reembed",
+            "podcasts",
+            "compare",
+            "labels",
+            "personas",
+            "health",
+        ],
         help="what to do",
     )
     parser.add_argument("--db", help="SQLite path (default from settings)")
@@ -310,6 +396,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
             _print_stats(stats)
             print(f"\nDatastore: {store.counts()}")
+        elif args.command == "reembed":
+            return _reembed(store, settings)
         elif args.command == "podcasts":
             _podcasts(store, settings, args, progress)
         elif args.command == "compare":

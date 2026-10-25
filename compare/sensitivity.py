@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 from scoring.aggregate import aggregate_profile, to_composition
+from scoring.depth import row_weights
 from scoring.dictionary import DocumentScore
 from scoring.foundations import CLASSIC_FOUNDATIONS
 
@@ -159,7 +160,10 @@ def _profile(rows: list, weights: dict[str, float]) -> dict[str, float] | None:
         )
         for row in rows
     ]
-    applied = [weights.get(row["source_id"], 0.0) for row in rows]
+    # row_weights, not a second copy: when the depth factor lived only in
+    # persona_profiles this baseline was computed on a profile no surface
+    # published, and it flipped the sign on the authority log-ratio.
+    applied = row_weights(rows, weights)
     if not any(w > 0 for w in applied):
         return None
     return to_composition(aggregate_profile(scores, applied))

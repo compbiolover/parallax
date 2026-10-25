@@ -26,3 +26,24 @@ def window_days(settings: dict) -> int:
     """`cluster.window_days`; a key with no value means the default, 0 means all."""
     value = (settings.get("cluster", {}) or {}).get("window_days")
     return DEFAULT_WINDOW_DAYS if value is None else int(value)
+
+
+# Whether headline-only documents may form clusters. They cannot usefully: a
+# cluster built from titles groups stories by shared keywords rather than by
+# subject, which the story review reported in its own titles ("a sports-tagged
+# cluster mixing WNBA, voting, and revenue"). They keep their quarter
+# weight in every corpus-derived number and count for nothing in the
+# clustering-derived ones (blindspot counts, per-thread diet counts,
+# attention shares). LIMITATIONS.md names them, because the difference is
+# not visible on the surfaces that print them.
+#
+# A boolean, not a word-count floor. The floor it replaces excluded 1,297
+# documents that had real text, because "short" and "headline" are different
+# questions and only `ingest_kind` answers the second one.
+DEFAULT_CLUSTER_STUBS = False
+
+
+def cluster_stubs(settings: dict) -> bool:
+    """`cluster.cluster_stubs`; a key with no value means the default."""
+    value = (settings.get("cluster", {}) or {}).get("cluster_stubs")
+    return DEFAULT_CLUSTER_STUBS if value is None else bool(value)

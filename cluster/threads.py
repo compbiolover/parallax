@@ -312,6 +312,9 @@ def track(
         out.append(ThreadMatch(thread_id, titles[thread_id], sims[thread_id], is_new[thread_id]))
 
     store.replace_thread_documents(assignments)
+    # This run owns today. Anything else dated today is from an earlier run
+    # whose clusters no longer exist.
+    store.prune_thread_day(day, [m.thread_id for m in out])
     carried = sum(1 for m in out if not m.is_new)
     logger.info("story threads: %d carried forward, %d new", carried, len(out) - carried)
     return out

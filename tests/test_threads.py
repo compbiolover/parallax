@@ -307,3 +307,88 @@ def test_match_returns_thread_match_objects():
     out = match({0: [1.0, 0.0]}, [_thread("a", [1.0, 0.0])], "2026-10-25")
     assert isinstance(out[0], ThreadMatch)
     assert out[0].similarity > 0.99
+
+
+def test_a_second_run_the_same_day_drops_threads_it_did_not_match(tmp_path):
+    """Two runs in one day left the first run's timeline rows behind: the
+    second deletes every thread_documents row and writes only its own, so an
+    unmatched thread kept a row claiming coverage it had nothing to show for,
+    and led the brief as a story with no headlines."""
+    store = _store(tmp_path)
+    morning = _result([0, 0], [[1.0, 0.0], [0.99, 0.1]], doc_ids=["a0", "a1"])
+    _run(store, morning, day="2026-10-20", labels={0: "Pensions"})
+    assert len(store.threads_active_on("2026-10-20")) == 1
+
+    # Afternoon: a different corpus, nothing like the morning's story.
+    afternoon = _result([0, 0], [[0.0, 1.0], [0.1, 0.99]], doc_ids=["b0", "b1"])
+    _run(store, afternoon, day="2026-10-20", labels={0: "Hurricane"})
+
+    active = store.threads_active_on("2026-10-20")
+    assert [r["title"] for r in active] == ["Hurricane"]
+    for row in active:
+        assert store.thread_members(row["thread_id"]), "an active thread has documents"
+
+
+def test_pruning_keeps_a_threads_earlier_days(tmp_path):
+    """Only the day being rerun is authoritative; history is not rewritten."""
+    store = _store(tmp_path)
+    day_one = _result([0], [[1.0, 0.0]], doc_ids=["a0"])
+    _run(store, day_one, day="2026-10-20", labels={0: "Pensions"})
+    thread_id = store.story_thread_rows()[0]["thread_id"]
+    _run(
+        store, _result([0], [[1.0, 0.0]], doc_ids=["a0"]), day="2026-10-21", labels={0: "Pensions"}
+    )
+    # A rerun of day two that finds something else entirely.
+    _run(store, _result([0], [[0.0, 1.0]], doc_ids=["b0"]), day="2026-10-21", labels={0: "Storm"})
+
+    timeline = store.thread_timeline(thread_id)
+    assert [r["day"] for r in timeline] == ["2026-10-20"], "day one survives"
+
+
+def test_pruning_removes_the_thread_row_not_just_its_day(tmp_path):
+    """An orphaned thread stays in story_thread_rows(), which `track` reads as
+    both `existing` (so a dead story stays matchable and resurrects with a gap)
+    and `taken` (so its slug stays reserved)."""
+    store = _store(tmp_path)
+    _run(
+        store, _result([0], [[1.0, 0.0]], doc_ids=["a0"]), day="2026-10-20", labels={0: "Pensions"}
+    )
+    assert len(store.story_thread_rows()) == 1
+    second = _result([0], [[0.0, 1.0]], doc_ids=["b0"])
+    _run(store, second, day="2026-10-20", labels={0: "Storm"})
+    titles = [r["title"] for r in store.story_thread_rows()]
+    assert titles == ["Storm"], "the orphaned thread row must go, not just its day"
+
+
+def test_pruning_spares_threads_this_run_never_looked_at(tmp_path):
+    """The sweep is scoped to what this day orphaned. An unscoped one also
+    deleted any thread with no day row for any other reason."""
+    store = _store(tmp_path)
+    _run(
+        store, _result([0], [[1.0, 0.0]], doc_ids=["a0"]), day="2026-10-20", labels={0: "Pensions"}
+    )
+    # A thread with no thread_days row at all, as a future caller might create.
+    store.upsert_story_thread(
+        thread_id="orphan-by-design",
+        title="Not yet dated",
+        centroid="[0.0, 1.0]",
+        dim=2,
+        embedder="test-embedder",
+        day="2026-10-20",
+    )
+    _run(
+        store, _result([0], [[1.0, 0.0]], doc_ids=["a0"]), day="2026-10-20", labels={0: "Pensions"}
+    )
+    assert "orphan-by-design" in {r["thread_id"] for r in store.story_thread_rows()}
+
+
+def test_pruning_with_nothing_to_keep_is_a_no_op(tmp_path):
+    """`NOT IN ('')` matches every row, so the unguarded version would delete
+    the day's whole timeline and then every thread in the store."""
+    store = _store(tmp_path)
+    _run(
+        store, _result([0], [[1.0, 0.0]], doc_ids=["a0"]), day="2026-10-20", labels={0: "Pensions"}
+    )
+    assert store.prune_thread_day("2026-10-20", []) == 0
+    assert len(store.story_thread_rows()) == 1
+    assert store.thread_timeline(store.story_thread_rows()[0]["thread_id"])

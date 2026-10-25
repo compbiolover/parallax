@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from scoring.aggregate import to_composition
+from scoring.depth import depth_weight
 from scoring.foundations import CLASSIC_FOUNDATIONS
 
 
@@ -91,7 +92,12 @@ def persona_band(
     rows = store.paired_scores_for_sources(
         weights, dict_scorer, transformer_scorer, list(foundations)
     )
-    pairs = [(weights.get(source_id, 0.0), a, b) for source_id, a, b in rows]
+    # Depth-weighted like every other aggregation. The band's `point` is what
+    # the radar and the email plot in preference to `profile`, so leaving it
+    # unweighted made this PR's change a no-op on the surfaces people read.
+    pairs = [
+        (weights.get(source_id, 0.0) * depth_weight(kind), a, b) for source_id, kind, a, b in rows
+    ]
     if not pairs:
         return None
 
