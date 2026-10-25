@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS blindspot_themes (
 CREATE TABLE IF NOT EXISTS source_runs (
     source_id TEXT NOT NULL,
     run_utc   TEXT NOT NULL,
-    status    TEXT NOT NULL,             -- 'ok' | 'unreadable' | 'empty' | 'blocked'
+    status    TEXT NOT NULL,             -- 'ok' | 'unreadable' | 'empty' | 'blocked' | 'summary'
     items     INTEGER NOT NULL,          -- feed items seen
     stored    INTEGER NOT NULL,          -- documents new to the store
     errors    INTEGER NOT NULL,          -- items whose article could not be read
