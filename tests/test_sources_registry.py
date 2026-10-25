@@ -106,6 +106,35 @@ def test_every_catalog_source_is_read_by_someone():
     assert not orphans, f"catalog sources no persona reads: {orphans}"
 
 
+def test_every_weighted_stratum_has_a_live_source():
+    """A stratum can be emptied without anything failing.
+
+    Personas weight strata, and a source is deactivated by nulling its url
+    (the house way to retire a dead feed and keep its rationale). Do both and
+    a persona keeps a weight pointing at nothing: the stratum silently drops
+    out of that diet's profile while the registry still reads as coverage.
+    Nulling NYT, WaPo and Politico at once did exactly this to left_wonk and
+    left_moderate_dem.
+    """
+    reg = _load()
+    live = {
+        src["id"]
+        for src in reg["catalog"]
+        if (src.get("ingest") or {}).get("url") or (src.get("ingest") or {}).get("type") != "rss"
+    }
+    catalog_stratum = {src["id"]: src.get("stratum") for src in reg["catalog"]}
+    empty = []
+    for persona in reg["personas"]:
+        for stratum, weight in (persona.get("strata") or {}).items():
+            if not weight:
+                continue
+            if not any(
+                sid in live and catalog_stratum.get(sid) == stratum for sid in persona["sources"]
+            ):
+                empty.append(f"{persona['id']}/{stratum}")
+    assert not empty, f"weighted strata with no live source: {empty}"
+
+
 # -- subscriber feeds -------------------------------------------------------
 
 
