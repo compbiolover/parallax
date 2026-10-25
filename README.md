@@ -44,10 +44,12 @@ interesting ones and the least certain; both have their own section below.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install --upgrade pip                 # the bundled pip is usually out of date
-pip install -e ".[dev,llm,scoring]"       # ~a few hundred MB: torch lives in `scoring`
+pip install -e ".[dev,llm,scoring,embeddings]"  # ~a few hundred MB: torch lives in `scoring`; embeddings = sentence-transformers
 pre-commit install                        # secret scanning
 cp config/settings.example.yaml config/settings.yaml
 ```
+
+For the real eMFD lexicon, download `emfd_scoring.csv` from the [eMFDscore dictionaries folder](https://github.com/medianeuroscience/emfdscore/tree/master/emfdscore/dictionaries) and place it in `data/` (see [Using the real eMFD lexicon](#using-the-real-emfd-lexicon)).
 
 Then:
 
