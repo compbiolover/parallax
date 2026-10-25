@@ -318,6 +318,14 @@ daily:
 # Preview it without any of that:  python3 -m digest --dry-run --open
 digest:
   enabled: false
+  # Per-section switches for the email (the dashboard is unaffected). All
+  # default to on; set false to leave a section out of the brief.
+  sections:
+    blindspots: true       # "Blindspots by theme", daily and weekly
+    fairness_split: true   # "Fairness: equality vs proportionality"
+    liberty: true          # "Liberty / oppression" block
+    jsd: true              # the divergence number, its movement and over-time chart
+    foundation_charts: true  # per-diet foundation bars and the over/under-indexing chart
   # The day the brief is sent (UTC). A single day is too little news to compare;
   # the run still ingests daily, because a feed only lists its latest items.
   # Remove the line to send on every run.
