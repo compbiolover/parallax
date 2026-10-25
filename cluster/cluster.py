@@ -55,6 +55,7 @@ def compute_clustering(
     svd_components: int = 30,
     random_state: int = 42,
     since: str | None = None,
+    min_words: int = 0,
 ) -> ClusterResult:
     """Load embeddings and cluster them. Returns per-document labels.
 
@@ -64,6 +65,15 @@ def compute_clustering(
     error is raised rather than crashing deep in numpy on ragged vectors.
 
     ``since`` (``YYYY-MM-DD``) clusters only documents dated on or after it.
+
+    ``min_words`` excludes headline-only documents, which are what defines a
+    *story* here. It defaults to off at this level and is applied by
+    :func:`cluster.blindspot.run_clustering`, which is where a policy about
+    real corpora belongs; callers clustering a hand-built set get every
+    document they put in. They still count everywhere coverage is counted — a headline
+    is real evidence that an outlet ran something — so this narrows what can
+    form a cluster, not what the corpus contains. ``0`` clusters everything,
+    which is the pre-2026-10 behaviour.
     """
     active = store.get_meta("embedder")
     # Only canonical documents carry embeddings, so a wire story that ran in six
@@ -72,7 +82,8 @@ def compute_clustering(
     # an outlet that ran a story weeks ago did not cover it this week.
     collapsed = store.duplicate_coverage(since)
     ids, sources, coverage, titles, vectors = [], [], [], [], []
-    for doc_id, source_id, title, dated, vec in store.iter_embeddings(embedder=active, since=since):
+    rows = store.iter_embeddings(embedder=active, since=since, min_words=min_words)
+    for doc_id, source_id, title, dated, vec in rows:
         ids.append(doc_id)
         sources.append(source_id)
         own = {source_id} if since is None or dated >= since else set()

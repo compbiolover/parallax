@@ -26,3 +26,21 @@ def window_days(settings: dict) -> int:
     """`cluster.window_days`; a key with no value means the default, 0 means all."""
     value = (settings.get("cluster", {}) or {}).get("window_days")
     return DEFAULT_WINDOW_DAYS if value is None else int(value)
+
+
+# A document shorter than this is a headline, not a story. GDELT backfill
+# stores titles without bodies (the free endpoint throttles to ~1 request/5s,
+# so fetching them all turns a 40-minute run into an overnight one), and on a
+# real corpus those stubs outnumber the full articles — 978 against 750 on
+# 2026-10-25. Clustering them together groups stories by shared keywords
+# rather than by subject, which the story review reported in its own titles
+# ("a sports-tagged cluster mixing WNBA, voting, and revenue"). Stubs still
+# count as coverage everywhere coverage is counted; they just stop defining
+# what a story is. Settings: `cluster.min_words`; 0 clusters everything.
+DEFAULT_MIN_WORDS = 120
+
+
+def min_words(settings: dict) -> int:
+    """`cluster.min_words`; a key with no value means the default, 0 means all."""
+    value = (settings.get("cluster", {}) or {}).get("min_words")
+    return DEFAULT_MIN_WORDS if value is None else int(value)

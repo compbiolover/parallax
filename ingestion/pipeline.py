@@ -739,6 +739,29 @@ def _ingest_one(
         stats.per_source[source.id] = stats.per_source.get(source.id, 0) + 1
 
 
+# A headline and a 1,100-word feature are not one document each.
+#
+# GDELT backfill stores titles without bodies, and on a real corpus they
+# outnumber the full articles (978 against 750 on 2026-10-25). Counted equally
+# they dominate the profile, and a 12-word stub is a bad place to measure moral
+# emphasis: length normalization fixes the arithmetic, not the fact that there
+# is almost no moral vocabulary in a headline to find. Worse, extraction depth
+# is not random — paywalled outlets and the ones trafilatura cannot parse yield
+# stubs — so equal weighting lets *which outlets the scraper can read* act on
+# the comparison as if it were a finding.
+#
+# So a stub counts, at a quarter. Not zero: a headline is real evidence that an
+# outlet ran something, and dropping it would bias the corpus the other way, in
+# favour of whoever publishes in a format we happen to parse.
+STUB_WORDS = 120
+STUB_WEIGHT = 0.25
+
+
+def depth_weight(word_count: int | None) -> float:
+    """How much one document counts, by how much of it we actually have."""
+    return STUB_WEIGHT if (word_count or 0) < STUB_WORDS else 1.0
+
+
 def persona_profiles(
     store: Datastore,
     registry: Registry,
@@ -776,7 +799,10 @@ def persona_profiles(
             )
             for row in rows
         ]
-        weights = [weights_by_source.get(row["source_id"], 0.0) for row in rows]
+        weights = [
+            weights_by_source.get(row["source_id"], 0.0) * depth_weight(row["word_count"])
+            for row in rows
+        ]
         if scores:
             profiles[persona_id] = to_composition(aggregate_profile(scores, weights))
     return profiles

@@ -173,6 +173,13 @@ cluster:
   window_days: 7
   hdbscan:
     min_cluster_size: 2           # small news samples over-assign to noise at higher values
+    # Documents shorter than this do not form clusters. GDELT backfill stores
+    # headlines without bodies, and on a real corpus they outnumber the full
+    # articles, which groups stories by shared keywords instead of by subject.
+    # They still count as coverage everywhere coverage is counted — this is
+    # about what defines a story, not about what the corpus contains.
+    # 0 clusters everything (the behaviour before 2026-10-25).
+    min_words: 120
   blindspot:
     coverage_asymmetry_threshold: 0.75  # one diet's share of a cluster to call it a blindspot
   # A cluster is the unit blindspots are *measured* on — two to five stories,

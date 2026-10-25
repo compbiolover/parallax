@@ -537,7 +537,7 @@ class Datastore:
         return list(
             self.conn.execute(
                 f"""
-                SELECT d.source_id AS source_id, s.*
+                SELECT d.source_id AS source_id, d.word_count AS word_count, s.*
                 FROM foundation_scores s
                 JOIN documents d ON d.id = s.document_id
                 WHERE d.is_duplicate = 0 AND s.scorer = ?{where}{clause}
@@ -973,7 +973,7 @@ class Datastore:
             )
 
     def iter_embeddings(
-        self, embedder: str | None = None, since: str | None = None
+        self, embedder: str | None = None, since: str | None = None, min_words: int = 0
     ) -> Iterator[tuple[str, str, str | None, str, list[float]]]:
         """Yield (document_id, source_id, title, dated, vector) for non-duplicate docs.
 
@@ -989,6 +989,11 @@ class Datastore:
         older canonical with a near-duplicate copy dated in the window: a wire
         story rerun this week is this week's coverage even though the copy it
         collapsed into was first fetched earlier.
+
+        ``min_words`` drops documents shorter than it. GDELT backfill stores
+        headlines without bodies, and on a real corpus those outnumber the
+        full articles: clustering them together groups stories by shared
+        keywords rather than by subject. See `cluster.min_words`.
         """
         sql = f"""
             SELECT e.document_id AS id, d.source_id AS source_id, d.title AS title,
@@ -1000,6 +1005,8 @@ class Datastore:
         if embedder is not None:
             sql += " AND e.embedder = ?"
             params = (embedder,)
+        if min_words > 0:
+            sql += f" AND d.word_count >= {int(min_words)}"
         if since is not None:
             # Uncorrelated: one pass over the duplicates, not one per canonical.
             sql += f"""
@@ -1131,6 +1138,32 @@ class Datastore:
                 "UPDATE thread_days SET note=? WHERE thread_id=? AND day=?",
                 (note, thread_id, day),
             )
+
+    def prune_thread_day(self, day: str, keep: list[str]) -> int:
+        """Drop ``day``'s timeline rows for threads this run did not touch.
+
+        A cluster run is authoritative for the day it runs on, the way
+        ``replace_clustering`` is for the clustering. Without this, running the
+        pipeline twice in one day leaves the first run's rows behind: the
+        second run deletes every ``thread_documents`` row and writes only its
+        own, so a thread it did not match keeps a ``thread_days`` row saying it
+        had nine documents and has none to show. It then leads the brief as a
+        story with no headlines, which is exactly how this was found.
+
+        Threads left with no days at all are removed too — a thread is its
+        timeline, and one with an empty timeline is not a story that happened.
+        """
+        with self._tx() as conn:
+            placeholders = ",".join("?" * len(keep)) if keep else "''"
+            cur = conn.execute(
+                f"DELETE FROM thread_days WHERE day = ? AND thread_id NOT IN ({placeholders})",
+                (day, *keep),
+            )
+            conn.execute(
+                "DELETE FROM story_threads WHERE thread_id NOT IN "
+                "(SELECT DISTINCT thread_id FROM thread_days)"
+            )
+            return cur.rowcount
 
     def replace_thread_documents(self, assignments: list[tuple[str, str]]) -> None:
         with self._tx() as conn:

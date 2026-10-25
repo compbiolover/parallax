@@ -307,3 +307,39 @@ def test_match_returns_thread_match_objects():
     out = match({0: [1.0, 0.0]}, [_thread("a", [1.0, 0.0])], "2026-10-25")
     assert isinstance(out[0], ThreadMatch)
     assert out[0].similarity > 0.99
+
+
+def test_a_second_run_the_same_day_drops_threads_it_did_not_match(tmp_path):
+    """Two runs in one day left the first run's timeline rows behind: the
+    second deletes every thread_documents row and writes only its own, so an
+    unmatched thread kept a row claiming coverage it had nothing to show for,
+    and led the brief as a story with no headlines."""
+    store = _store(tmp_path)
+    morning = _result([0, 0], [[1.0, 0.0], [0.99, 0.1]], doc_ids=["a0", "a1"])
+    _run(store, morning, day="2026-10-20", labels={0: "Pensions"})
+    assert len(store.threads_active_on("2026-10-20")) == 1
+
+    # Afternoon: a different corpus, nothing like the morning's story.
+    afternoon = _result([0, 0], [[0.0, 1.0], [0.1, 0.99]], doc_ids=["b0", "b1"])
+    _run(store, afternoon, day="2026-10-20", labels={0: "Hurricane"})
+
+    active = store.threads_active_on("2026-10-20")
+    assert [r["title"] for r in active] == ["Hurricane"]
+    for row in active:
+        assert store.thread_members(row["thread_id"]), "an active thread has documents"
+
+
+def test_pruning_keeps_a_threads_earlier_days(tmp_path):
+    """Only the day being rerun is authoritative; history is not rewritten."""
+    store = _store(tmp_path)
+    day_one = _result([0], [[1.0, 0.0]], doc_ids=["a0"])
+    _run(store, day_one, day="2026-10-20", labels={0: "Pensions"})
+    thread_id = store.story_thread_rows()[0]["thread_id"]
+    _run(
+        store, _result([0], [[1.0, 0.0]], doc_ids=["a0"]), day="2026-10-21", labels={0: "Pensions"}
+    )
+    # A rerun of day two that finds something else entirely.
+    _run(store, _result([0], [[0.0, 1.0]], doc_ids=["b0"]), day="2026-10-21", labels={0: "Storm"})
+
+    timeline = store.thread_timeline(thread_id)
+    assert [r["day"] for r in timeline] == ["2026-10-20"], "day one survives"

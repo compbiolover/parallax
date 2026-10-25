@@ -434,6 +434,36 @@ diet spent the day on. Its limits:
   removes the last headline in a cluster even when every candidate looks like boilerplate.
   Nothing here touches scoring, embedding, or clustering, all of which ran before it.
 
+## Headlines and articles are not the same evidence, and are no longer counted alike
+
+GDELT backfill stores titles without bodies (`backfill.extract_bodies: false`, because the
+free endpoint throttles to ~1 request/5s). On a real corpus those stubs outnumber the full
+articles — 978 against 750 in the week of 2026-10-25, a mean of 12 words against 1,121.
+
+Two things follow, and they are handled separately because they are different claims:
+
+- **A headline cannot define a story.** Clustering on titles groups coverage by shared
+  keywords rather than by subject, which the story review reported in its own section
+  titles ("a sports-tagged cluster mixing WNBA, voting, and revenue"). `cluster.min_words`
+  (default 120) keeps stubs out of the clustering. Blindspot counts drop accordingly — 81
+  to 20 on the same day's data — because a blindspot is now a story one diet covered and
+  the other did not, rather than a keyword two outlets happened to share.
+- **A headline is still evidence that an outlet ran something.** Stubs stay in the
+  foundation profile at a quarter weight (`ingestion.pipeline.depth_weight`). Not zero:
+  dropping them would bias the corpus toward whoever publishes in a format `trafilatura`
+  can parse, which is the same bias in the other direction.
+
+The hazard both address is that **extraction depth is not random**. Paywalled outlets and
+the ones the extractor cannot read yield stubs, so counting a 12-word blurb like a
+1,100-word feature lets *which outlets the scraper can read* act on the comparison as if
+it were a finding. Measured on the live corpus, the quarter-weighting moved the author's
+own profile by about 1.4 points on care and 1.1 on loyalty, and the all-time JSD by
+-0.0002 — both diets shifted in the same direction, so the bias was roughly symmetric at
+that level. It is not safe to assume it stays symmetric on a narrower window.
+
+Length normalization does not substitute for either. It fixes the arithmetic, not the fact
+that a 12-word headline contains almost no moral vocabulary to measure.
+
 ## Story threads carry an identity the clustering does not
 
 The daily brief reviews running stories and prints a timeline for each. A thread is not

@@ -15,7 +15,7 @@ from compare.reference import resolve
 from ingestion.config import datastore_path, load_registry, load_settings
 from ingestion.datastore import Datastore
 
-from . import DEFAULT_WINDOW_DAYS, window_days
+from . import DEFAULT_MIN_WORDS, DEFAULT_WINDOW_DAYS, min_words, window_days
 from .blindspot import run_clustering
 
 
@@ -45,6 +45,14 @@ def main(argv: list[str] | None = None) -> int:
         help="min share of one diet for a cluster to be a blindspot",
     )
     parser.add_argument("--min-blindspot-size", type=int, default=2)
+    parser.add_argument(
+        "--min-words",
+        type=int,
+        help=(
+            f"skip documents shorter than this when clustering "
+            f"(default {DEFAULT_MIN_WORDS}; 0 clusters headline-only rows too)"
+        ),
+    )
     parser.add_argument(
         "--window-days",
         type=int,
@@ -92,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             window_days=(
                 args.window_days if args.window_days is not None else window_days(settings)
             ),
+            min_words=(args.min_words if args.min_words is not None else min_words(settings)),
         )
         print(
             f"Clustered {outcome.n_docs} docs -> {outcome.n_clusters} clusters "
