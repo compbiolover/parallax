@@ -111,8 +111,16 @@
 # verified live (they move) before the source is activated in ingestion.
 # =============================================================================
 
-version: 5
+version: 6
 updated: 2026-10-25
+# v6: filled the right-hand side of `policy_journals`, which was written to
+# span left, right and neither and held only the first and third. Five
+# conservative journals mirroring the five already there by role, plus a
+# `ce_wonk` persona so the library has a policy-first reader on each side.
+# Also nulled ce_national_review (paywalled: 20 feed items, 0 extractable,
+# 0 bodied documents since it was added). Measured reason: the CE side had no
+# source above 1,285 mean words against the self side's 1,289-3,874, so any
+# cross-diet framing comparison was comparing genres.
 # v5: retired three national_dailies feeds that contributed nothing (NYT
 # paywalled to 19-word stubs, WaPo 502, Politico 403) and added two whose
 # bodies read (LA Times World & Nation, CS Monitor USA). NOTE: this is a
@@ -799,8 +807,88 @@ catalog:
     role: "institutional-conservative magazine"
     ingest:
       type: rss
-      url: "https://www.nationalreview.com/feed/"   # verified 2026-08-10 (20 items)
+      # The feed answers with 20 items and every article behind it is paywalled:
+      # `extract_article` returned nothing for all of them on 2026-10-25, and the
+      # store holds 0 bodied documents from this source since it was added. Same
+      # shape as self_nyt_home. Left null; GDELT can still backfill by domain.
+      url: null
+    domain: nationalreview.com
     rationale: "Movement-conservative but institutionalist; argues with the populist outlets."
+
+  # ---------------------------------------------------------------------------
+  # policy_journals (conservative side)
+  #
+  # The stratum was written to span left, right and neither, and until now held
+  # only the first and third. Without it the comparison set essays against wire
+  # copy: measured 2026-10-25, the self side had seven sources averaging 1,289
+  # to 3,874 words and the CE side none above Christianity Today's 1,285, so a
+  # "how each side framed it" reading was comparing genres, not framings.
+  #
+  # These five mirror the five already here by role rather than by lean:
+  # ideas-and-public-life against Niskanen, law against Lawfare, political
+  # economy against Tax Foundation, foreign policy against Foreign Affairs.
+  # All verified 2026-10-25 with article bodies that extract.
+  # ---------------------------------------------------------------------------
+  - id: ce_first_things
+    name: "First Things"
+    medium: news
+    stratum: policy_journals
+    role: "religion and public life journal"
+    ingest:
+      type: rss
+      # Not /rss/feed, which 404s; /feed is the live one. 15 items, bodies
+      # 984-1527 words.
+      url: "https://www.firstthings.com/feed"
+    rationale: >
+      The flagship journal of religiously-grounded public argument. Ecumenical
+      rather than strictly evangelical, which is the point: it is where the
+      theological case for a political position gets made at length.
+  - id: ce_public_discourse
+    name: "Public Discourse (Witherspoon Institute)"
+    medium: news
+    stratum: policy_journals
+    role: "natural-law policy journal"
+    ingest:
+      type: rss
+      url: "https://www.thepublicdiscourse.com/feed/"
+    rationale: >
+      Natural-law argument applied to current legislation. The closest
+      conservative counterpart to Niskanen's register: premises stated, then
+      applied, rather than events reported.
+  - id: ce_law_liberty
+    name: "Law & Liberty"
+    medium: news
+    stratum: policy_journals
+    role: "law and political economy journal"
+    ingest:
+      type: rss
+      url: "https://lawliberty.org/feed/"
+    rationale: >
+      Constitutional and political-economy essays; the conservative counterpart
+      to Lawfare's register, if not its politics.
+  - id: ce_acton
+    name: "Acton Institute — Religion & Liberty"
+    medium: news
+    stratum: policy_journals
+    role: "religion and economics journal"
+    ingest:
+      type: rss
+      url: "https://rlo.acton.org/feed"
+    rationale: >
+      Where the religious case for market economics is argued. Pairs with Tax
+      Foundation on register while differing on nearly everything else.
+  - id: ce_providence
+    name: "Providence"
+    medium: news
+    stratum: policy_journals
+    role: "Christian foreign-policy journal"
+    ingest:
+      type: rss
+      url: "https://providencemag.com/feed/"
+    rationale: >
+      Christian realist foreign policy. The counterpart to Foreign Affairs in
+      this stratum, and the one source here that routinely covers the same
+      overseas events the self side reads about in wire copy.
 
   # ---------------------------------------------------------------------------
   # populist_digital
@@ -1298,6 +1386,40 @@ personas:
   # environments, and averaging them into one "conservative-evangelical diet" is
   # exactly the collapse CLAUDE.md §4 warns against.
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # The counterpart to `left_wonk`, and the reason the policy_journals stratum
+  # now has right-side members. Without it the library had a wonk on one side
+  # only, so any "how each side argues" reading was comparing a journal against
+  # a news desk. Same stratum shape as left_wonk: journals first, then the
+  # outlets that report what happened, then argument, then a little broadcast.
+  # ---------------------------------------------------------------------------
+  - id: ce_wonk
+    label: "Policy-first reader (conservative)"
+    short_label: "CE wonk"
+    family: right
+    description: >
+      Reads for argument and legislation rather than events: religious and
+      conservative policy journals first, reported faith media for what
+      happened, digital outlets for commentary, and little broadcast. The
+      register, not the lean, is what defines this persona, which is what makes
+      it comparable to the policy-first reader on the other side.
+    strata:
+      policy_journals: 0.45
+      faith_media: 0.25
+      digital_outlets: 0.2
+      national_cable: 0.1
+    sources:
+      ce_first_things: 1.0
+      ce_public_discourse: 0.9
+      ce_law_liberty: 0.9
+      ce_acton: 0.8
+      ce_providence: 0.7
+      ce_christianitytoday: 1.0
+      ce_worldnews: 0.8
+      ce_national_review: 1.0
+      ce_thefp: 0.8
+      ce_foxnews_latest: 0.6
+
   - id: ce_cable_passive
     label: "Cable-news viewer"
     short_label: "Cable viewer"
