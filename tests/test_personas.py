@@ -42,7 +42,6 @@ V2_WEIGHTS = {
         "self_npr_politics": 0.217,
         "self_pbs_newshour": 0.217,
         "self_bbc_world": 0.248,
-        "self_atlantic": 0.23,
         "self_vox": 0.18400000000000002,
         "self_goodgood": 0.115,
         "self_npr_upfirst": 0.1,
@@ -89,7 +88,8 @@ def test_the_migrated_personas_reproduce_the_version_2_diet_weights(persona_id):
     # and added two whose article bodies read. What this test still guards is
     # the thing a migration can break by accident, which is the ratios *among*
     # v2's sources. The step that v5's additions put in the divergence series
-    # is recorded against `version: 5` in config/sources.yaml.
+    # is recorded against `version: 5` in config/sources.yaml. v7 dropped
+    # self_atlantic (403 on every article), so it is absent from V2_WEIGHTS too.
     assert set(expected) <= set(resolved), f"v2 sources dropped: {set(expected) - set(resolved)}"
     common = {sid: resolved[sid] for sid in expected}
     assert _normalized(common) == pytest.approx(_normalized(expected), rel=1e-12)

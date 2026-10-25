@@ -111,8 +111,12 @@
 # verified live (they move) before the source is activated in ingestion.
 # =============================================================================
 
-version: 6
+version: 7
 updated: 2026-10-25
+# v7: dropped self_atlantic (theatlantic.com answers 403 to every article
+# fetch and its RSS summaries are ~2 words, so 0 documents were ever stored).
+# Radio Atlantic, a podcast, is unaffected. left_activist read the Atlantic as its
+# only long_form source, so it gets self_vox at 0.6 (the Atlantic's old weight).
 # v6: filled the right-hand side of `policy_journals`, which was written to
 # span left, right and neither and held only the first and third. Five
 # conservative journals mirroring the five already there by role, plus a
@@ -378,15 +382,6 @@ catalog:
   # ---------------------------------------------------------------------------
   # long_form
   # ---------------------------------------------------------------------------
-  - id: self_atlantic
-    name: "The Atlantic"
-    medium: news
-    stratum: long_form
-    role: "long-form magazine"
-    ingest:
-      type: rss
-      url: "https://www.theatlantic.com/feed/all/"
-    rationale: "Essayistic, argument-forward; high explicit-morality density."
   - id: self_vox
     name: "Vox"
     medium: news
@@ -1198,7 +1193,6 @@ personas:
       self_npr_politics: 0.7
       self_pbs_newshour: 0.7
       self_bbc_world: 0.8
-      self_atlantic: 1.0
       self_vox: 0.8
       self_goodgood: 0.5
       self_npr_upfirst: 1.0
@@ -1291,7 +1285,6 @@ personas:
       self_wapo_national: 0.8
       self_latimes: 1.0
       self_csmonitor: 0.8
-      self_atlantic: 0.8
       self_vox: 1.0
       self_npr_news: 1.0
 
@@ -1317,8 +1310,8 @@ personas:
       left_intercept: 0.8
       left_in_these_times: 0.7
       left_democracy_now: 0.8
-      self_atlantic: 0.6
       self_guardian_us: 1.0
+      self_vox: 0.6
       self_jacobin_radio: 1.0
 
   - id: left_moderate_dem
@@ -1370,7 +1363,6 @@ personas:
       left_intercept: 0.9
       left_mother_jones: 0.8
       left_truthout: 0.6
-      self_atlantic: 1.0
       self_vox: 0.8
       self_jacobin_radio: 1.0
       self_nyt_daily: 0.7
