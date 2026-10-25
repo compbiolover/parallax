@@ -39,6 +39,12 @@ from scoring.lexicon import is_demo_lexicon
 DEFAULT_OUT = Path(__file__).resolve().parent / "public" / "data" / "latest.js"
 DEFAULT_CATALOG_OUT = Path(__file__).resolve().parent / "public" / "data" / "catalog.js"
 
+# Story threads in the payload, and timeline points each. Matches the review in
+# summarize/summarizer.py: the email and the dashboard should show the same
+# stories the prose was written about, not a longer list of its own.
+STORY_LIMIT = 6
+STORY_TIMELINE_DAYS = 14
+
 
 def _caveat(lexicon: str | None, has_bands: bool = False) -> str:
     band_note = (
@@ -220,6 +226,12 @@ def build_payload(
         "history_window_days": history[-1]["window_days"] if history else None,
         "fairness_split": _fairness_payload(store, registry, pair),
         "liberty": _liberty_payload(store, registry, pair),
+        # Labels resolved through the registry as well as the store: a persona
+        # the store has no label row for would otherwise put its machine id on a
+        # surface a person reads, which CLAUDE.md §0 forbids outright.
+        "stories": _stories_payload(store, summaries, _label_of(store, registry)),
+        "stories_intro": (summaries.get("stories") or {"text": ""})["text"],
+        "motifs": (summaries.get("themes") or {"text": ""})["text"],
         "executive_summary": exec_row["text"] if exec_row else "",
         "summary_method": exec_row["method"] if exec_row else None,
         "lexicon": lexicon,
@@ -308,6 +320,69 @@ def _liberty_payload(store: Datastore, registry: Registry, pair: ReferencePair) 
         },
         "gap": gap(profiles, pair),
     }
+
+
+def _label_of(store: Datastore, registry: Registry) -> dict[str, str]:
+    """Human label per persona id, from the store first and the registry after."""
+    stored = store.diet_labels()
+    out = {}
+    for persona_id in registry.persona_ids():
+        persona = registry.persona(persona_id)
+        out[persona_id] = stored.get(persona_id) or (
+            persona.label if persona and persona.label else persona_id
+        )
+    return out | {k: v for k, v in stored.items() if v}
+
+
+def _stories_payload(store: Datastore, summaries: dict, labels: dict[str, str]) -> list[dict]:
+    """The day's story threads, each with its running timeline.
+
+    Links come from the thread's own documents, because a review is only
+    checkable if the reader can open what it reviewed — which is also the only
+    thing ``CLAUDE.md`` §0 permits doing with the text: summarize and link,
+    never republish.
+    """
+    day = store.latest_thread_day()
+    if not day:
+        return []
+    out = []
+    for row in store.threads_active_on(day, limit=STORY_LIMIT):
+        thread_id = row["thread_id"]
+        srow = summaries.get(f"thread:{thread_id}")
+        try:
+            diet_counts = json.loads(row["diet_counts"] or "{}")
+        except (TypeError, ValueError):
+            diet_counts = {}
+        timeline = [
+            {
+                "day": r["day"],
+                "doc_count": r["doc_count"],
+                "headline": r["headline"] or "",
+                "note": r["note"] or "",
+            }
+            for r in store.thread_timeline(thread_id, STORY_TIMELINE_DAYS)
+        ]
+        out.append(
+            {
+                "id": thread_id,
+                # The review's own story name, falling back to the cluster's
+                # keyword label on a day the prose did not land.
+                "title": row["review_title"] or row["title"],
+                "theme": row["theme_title"] or "",
+                "doc_count": row["doc_count"],
+                "diet_counts": {labels.get(d, d): n for d, n in sorted(diet_counts.items())},
+                "first_seen": row["first_seen"],
+                "days_running": len(timeline),
+                "summary": srow["text"] if srow else "",
+                "timeline": timeline,
+                "articles": [
+                    {"title": m["title"], "url": m["url"], "source": m["source_id"]}
+                    for m in store.thread_members(thread_id, limit=4)
+                    if m["title"]
+                ],
+            }
+        )
+    return out
 
 
 def _agenda_payload(store: Datastore, registry: Registry, pair: ReferencePair) -> dict | None:

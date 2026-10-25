@@ -851,12 +851,17 @@ python3 -m ingestion compare
 #    then group them into named themes (Claude when ANTHROPIC_API_KEY is set, else a
 #    built-in taxonomy; --no-claude-themes forces the taxonomy).
 #    Model: --theme-model, else `cluster.themes.model`, else claude-sonnet-5.
-#    Thinking depth: --theme-effort, else `cluster.themes.effort`, else low:
+#    Thinking depth: --theme-effort, else `cluster.themes.effort`, else low.
+#    This step also carries today's clusters onto persistent STORY THREADS,
+#    matched by embedding centroid, which is what gives the brief a running
+#    timeline per story (see LIMITATIONS.md for what a thread does not claim):
 python3 -m cluster run
 
 # 4. Charitable daily summary per diet + a cross-diet executive summary (Claude when
 #    ANTHROPIC_API_KEY is set, else a clearly-labeled numbers-only fallback).
-#    Model: --model, else `summarize.model` in settings, else claude-opus-5:
+#    Model: --model, else `summarize.model` in settings, else claude-opus-5.
+#    With story threads present it also writes the story review: the day's
+#    biggest threads, what moved on each, and the motifs across them:
 python3 -m summarize
 
 # 5. Export the dashboard payload, then view it:

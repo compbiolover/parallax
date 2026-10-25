@@ -18,6 +18,7 @@ run rather than once per surface.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -27,6 +28,7 @@ from ingestion.datastore import Datastore
 
 from .cluster import ClusterResult, compute_clustering
 from .themes import (
+    OTHER_KEY,
     UNSET,
     Article,
     Theme,
@@ -34,8 +36,11 @@ from .themes import (
     _Unset,
     assign_themes,
     group_blindspots,
+    taxonomy_theme,
 )
 from .titles import clean_title, clean_titles
+
+logger = logging.getLogger(__name__)
 
 _WORD_RE = re.compile(r"[a-z][a-z'-]+")
 _STOP = {
@@ -185,13 +190,47 @@ def label_clusters(cluster_titles: dict[int, list[str | None]], top: int = 3) ->
         return {c: label_cluster(cluster_titles[c]) for c in cids}
 
     terms = vec.get_feature_names_out()
+    # A term in *every* cluster carries no information about any of them, and
+    # TF-IDF alone does not say so: with few clusters the smoothed IDF of a
+    # universal term is still positive, so "trump" outranked "saudi" in a
+    # two-cluster corpus. Dropped explicitly rather than by tuning the
+    # vectorizer, because the rule is about labels, not about weighting.
+    everywhere: set[str] = set()
+    if len(cids) >= 2:
+        present = (matrix > 0).sum(axis=0).A1
+        universal = {terms[j] for j in range(len(terms)) if present[j] == len(cids)}
+        # And any n-gram built on a universal word: "trump" in every cluster
+        # makes "trump signs" distinctive only by its second word, and a label
+        # slot spent on the shared half of a bigram is a slot wasted.
+        words = {w for term in universal for w in term.split()}
+        everywhere = {t for t in terms if words & set(t.split())}
+
     labels: dict[int, str] = {}
     for i, c in enumerate(cids):
         row = matrix[i].toarray().ravel()
-        ranked = row.argsort()[::-1][:top]
-        chosen = [terms[j] for j in ranked if row[j] > 0]
-        labels[c] = " · ".join(chosen) if chosen else label_cluster(cluster_titles[c])
+        ranked = [j for j in row.argsort()[::-1] if row[j] > 0 and terms[j] not in everywhere]
+        labels[c] = " · ".join(_distinct([terms[j] for j in ranked], top)) or label_cluster(
+            cluster_titles[c]
+        )
     return labels
+
+
+def _distinct(ranked: list[str], top: int) -> list[str]:
+    """The top terms, minus any that merely repeat one already chosen.
+
+    `ngram_range=(1, 2)` scores "supreme" and "supreme court" separately and
+    both rank highly on the same cluster, so the label read "supreme · supreme
+    court · trump" — three slots, one fact. The longer term wins because it is
+    the more specific one.
+    """
+    chosen: list[str] = []
+    for term in ranked:
+        if any(term in other or other in term for other in chosen):
+            continue
+        chosen.append(term)
+        if len(chosen) == top:
+            break
+    return chosen
 
 
 def _representative(titles: list[str | None]) -> list[str]:
@@ -460,6 +499,9 @@ def run_clustering(
     themes = _theme_blindspots(
         store, blindspots, members, theme_model, theme_client, claude_themes, theme_effort
     )
+    # After theming, so a thread can report the motif it reads under, and after
+    # replace_clustering, so the clusters it matches on are the persisted ones.
+    _track_threads(store, result, labels, members)
     n_noise = sum(1 for lbl in result.labels if lbl == -1)
     return ClusteringOutcome(
         n_docs=result.n_docs,
@@ -469,6 +511,46 @@ def run_clustering(
         personas=sorted(members),
         themes=themes,
     )
+
+
+def _track_threads(
+    store: Datastore,
+    result: ClusterResult,
+    labels: dict[int, str],
+    members: dict[str, set[str]],
+) -> None:
+    """Carry today's clusters onto persistent story threads.
+
+    Failure here is logged and swallowed. Thread tracking is additive — it
+    feeds the timeline in the brief and nothing the divergence numbers depend
+    on — so a bad centroid or a locked row should not cost the run its
+    clustering, its blindspots or its themes, all of which are already
+    persisted by the time this is called.
+    """
+    from .threads import track
+
+    # Per-document themes, as blindspot_themes stores them, with a free
+    # taxonomy guess for the threads no blindspot covered. A thread with no
+    # motif is honest but not useful, and the taxonomy lookup costs nothing.
+    themes: dict[str, tuple[str, str]] = {
+        row["document_id"]: (row["theme_key"], row["theme_title"])
+        for row in store.blindspot_theme_rows()
+    }
+    for i, doc_id in enumerate(result.doc_ids):
+        if doc_id in themes or result.labels[i] == -1:
+            continue
+        title = result.titles[i]
+        if not title:
+            continue
+        guess = taxonomy_theme([title])
+        if guess.key != OTHER_KEY:
+            themes[doc_id] = (guess.key, guess.title)
+
+    day = datetime.now(UTC).date().isoformat()
+    try:
+        track(store, result, day=day, labels=labels, themes=themes, members=members)
+    except Exception as exc:  # noqa: BLE001 - additive step, never fatal
+        logger.warning("story-thread tracking failed (%s: %s)", type(exc).__name__, exc)
 
 
 def _theme_blindspots(

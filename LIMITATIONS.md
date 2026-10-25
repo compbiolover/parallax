@@ -434,6 +434,39 @@ diet spent the day on. Its limits:
   removes the last headline in a cluster even when every candidate looks like boilerplate.
   Nothing here touches scoring, embedding, or clustering, all of which ran before it.
 
+## Story threads carry an identity the clustering does not
+
+The daily brief reviews running stories and prints a timeline for each. A thread is not
+a cluster: clusters are recomputed and deleted on every run, so each day's clusters are
+matched onto persisted threads by embedding centroid (cosine, in the embedder's own
+space, threshold 0.62). Four limits follow, and all of them show up in a timeline before
+they show up anywhere else:
+
+- **The threshold is a judgement, not a measurement.** 0.62 was chosen against
+  `thenlper/gte-small` by inspection: below it unrelated politics stories merged, above it
+  a running story restarted as a new thread whenever its coverage moved to a new angle.
+  It has not been validated against hand-coded story boundaries, and it is not
+  transferable — change the embedder and it has to be re-checked. Centroids are filtered
+  by embedder for exactly this reason, so changing one restarts every thread rather than
+  silently matching across incompatible spaces.
+- **Threads are never merged or split after the fact.** Two threads that converge on one
+  story stay two rows with two timelines; a thread that is really two stories stays one.
+  The alternative rewrites history on every run, and a timeline that changes shape
+  overnight is worse than one that occasionally double-counts.
+- **A thread can drift.** The centroid moves 30% toward each day's coverage, so a story
+  that evolves stays matched — and a thread that drifts far enough is no longer about what
+  its `first_seen` date says it was. "Day 14 of coverage" is a claim about an unbroken
+  chain of centroid matches, not about an editor's judgement that it is the same story.
+- **A thread's title is only as good as its cluster.** The stored label is a c-TF-IDF
+  keyword list; the name in the brief is written by the summarizer from that day's
+  headlines, so it can change between days for a thread that has not changed. The id is
+  stable; the name is not.
+
+Where the clustering groups headlines that merely share keywords, the review says so
+rather than inventing a story around them — but a reader should treat a one-day thread as
+a cluster with a sentence attached, and only a multi-day timeline as evidence that a
+story is actually running.
+
 ## Theory caveats
 
 - **The liberal/conservative foundation asymmetry** (Graham, Haidt & Nosek 2009) — that

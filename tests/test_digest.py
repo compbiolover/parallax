@@ -1238,3 +1238,114 @@ def test_colour_follows_the_role_in_the_pair_not_the_list_position():
     payload["diets"] = list(reversed(payload["diets"]))
     assert _colours(payload)["self"] == colours["self"]
     assert _colours(payload)["modeled_ce"] == colours["modeled_ce"]
+
+
+# -- the story review -------------------------------------------------------
+
+
+def _story(**over):
+    base = {
+        "id": "france-protests",
+        "title": "France protests widen",
+        "theme": "Labour & the street",
+        "doc_count": 9,
+        "diet_counts": {"My diet": 7, "Modeled CE diet": 2},
+        "first_seen": "2026-10-18",
+        "days_running": 3,
+        "summary": "The strike spread to refineries today.\n\nBoth diets covered it.",
+        "timeline": [
+            {
+                "day": "2026-10-18",
+                "doc_count": 2,
+                "note": "Unions called the strike.",
+                "headline": "h",
+            },
+            {"day": "2026-10-21", "doc_count": 5, "note": "", "headline": "Pension vote delayed"},
+            {"day": "2026-10-25", "doc_count": 9, "note": "Refineries joined.", "headline": "h"},
+        ],
+        "articles": [
+            {
+                "title": "Refinery workers join",
+                "url": "https://example.test/a",
+                "source": "guardian",
+            },
+        ],
+    }
+    return {**base, **over}
+
+
+def test_stories_panel_is_absent_without_stories():
+    """A store whose cluster step never ran must not render an empty panel."""
+    assert render_html(_payload()).count("The stories") == 0
+
+
+def test_stories_panel_carries_title_prose_and_links():
+    html = render_html(_payload(stories=[_story()], stories_intro="Two stories led."))
+    assert "The stories" in html
+    assert "France protests widen" in html
+    assert "Two stories led." in html
+    assert "The strike spread to refineries today." in html
+    assert "https://example.test/a" in html
+    assert "Labour &amp; the street" in html
+    assert "day 3 of coverage" in html
+
+
+def test_a_timeline_needs_more_than_one_point():
+    """One point is not a timeline, it is today, and a one-row chart is noise."""
+    one = _story(timeline=[{"day": "2026-10-25", "doc_count": 9, "note": "n", "headline": "h"}])
+    html = render_html(_payload(stories=[one]))
+    assert "France protests widen" in html
+    assert "10-25" not in html
+
+
+def test_the_timeline_shows_every_covered_day():
+    html = render_html(_payload(stories=[_story()]))
+    for day in ("10-18", "10-21", "10-25"):
+        assert day in html
+    assert "Unions called the strike." in html
+    # The day with no note falls back to that day's headline.
+    assert "Pension vote delayed" in html
+
+
+def test_motifs_render_under_the_stories():
+    html = render_html(_payload(stories=[_story()], motifs="Both weeks ran on obligation."))
+    assert "Motifs across today" in html
+    assert "Both weeks ran on obligation." in html
+    assert html.index("France protests widen") < html.index("Both weeks ran on obligation.")
+
+
+def test_the_review_sits_above_the_foundation_charts():
+    """It answers "what was covered"; the charts answer "how did it differ"."""
+    html = render_html(_payload(stories=[_story()]))
+    assert html.index("The stories") < html.index("Foundation")
+
+
+def test_story_titles_are_escaped():
+    html = render_html(_payload(stories=[_story(title="Protests & <script>")]))
+    assert "<script>" not in html
+    assert "Protests &amp; &lt;script&gt;" in html
+
+
+def test_stories_reach_the_text_part_in_the_same_order():
+    payload = _payload(stories=[_story()], stories_intro="Two stories led.", motifs="Obligation.")
+    text = render_text(payload)
+    assert "THE STORIES" in text
+    assert "France protests widen" in text
+    assert "2026-10-18" in text
+    assert "https://example.test/a" in text
+    assert text.index("THE STORIES") < text.index("Over/under-indexing")
+
+
+def test_a_story_with_no_prose_still_renders_its_timeline():
+    """The model can skip a section; the counts are still worth showing."""
+    html = render_html(_payload(stories=[_story(summary="")]))
+    assert "France protests widen" in html
+    assert "10-18" in html
+
+
+def test_todays_row_shows_the_headline_not_the_note():
+    """The note is the lead sentence of the prose printed directly above it."""
+    story = _story()
+    html = render_html(_payload(stories=[story]))
+    assert "Refineries joined." not in html, "today's note would repeat the review"
+    assert "Unions called the strike." in html, "earlier days still carry their note"
