@@ -44,7 +44,7 @@ interesting ones and the least certain; both have their own section below.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install --upgrade pip                 # the bundled pip is usually out of date
-pip install -e ".[dev,llm,scoring]"       # ~a few hundred MB: torch lives in `scoring`
+pip install -e ".[dev,llm,scoring,embeddings]"  # ~a few hundred MB: torch lives in `scoring`; embeddings = sentence-transformers
 pre-commit install                        # secret scanning
 cp config/settings.example.yaml config/settings.yaml
 ```
