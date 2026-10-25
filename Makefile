@@ -13,10 +13,10 @@ help:  ## Show these targets
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-12s %s\n", $$1, $$2}'
 
 daily:  ## Full snapshot: ingest -> backfill -> cluster -> summarize -> snapshot -> export (+ digest if enabled)
-	$(PY) -m daily
+	./scripts/parallax-daily.sh
 
 daily-fast:  ## Today's feeds only — skips the slow GDELT backfill
-	$(PY) -m daily --skip backfill
+	./scripts/parallax-daily.sh --skip backfill
 
 podcasts:  ## Transcribe new podcast episodes (needs parallax[media]; hours, not minutes)
 	$(PY) -m ingestion podcasts $(if $(MAX_EPISODES),--max-episodes $(MAX_EPISODES))
