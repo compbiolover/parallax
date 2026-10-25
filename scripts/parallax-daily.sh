@@ -185,4 +185,4 @@ if [[ "$check_only" == 1 ]]; then
 fi
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-exec "${PARALLAX_PYTHON:-./.venv/bin/python3}" -m daily
+exec "${PARALLAX_PYTHON:-./.venv/bin/python3}" -m daily "$@"
