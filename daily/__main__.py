@@ -14,8 +14,13 @@ still run, so the dashboard is refreshed from whatever data did land.
 from __future__ import annotations
 
 import argparse
+import logging
 
 from .runner import STEPS, DailyConfig, format_report, run_daily
+
+# torch logs a macOS-only "Redirects are currently not supported" NOTE on import;
+# it is not actionable here, so keep it out of the daily log.
+logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").setLevel(logging.ERROR)
 
 
 def _parse(argv: list[str] | None) -> argparse.Namespace:
