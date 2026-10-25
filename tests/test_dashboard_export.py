@@ -581,3 +581,117 @@ def test_the_catalog_writes_a_window_assignment_so_file_urls_work(tmp_path):
 
     out = write_catalog(_reg(), pair(), tmp_path / "catalog.js")
     assert out.read_text(encoding="utf-8").startswith("window.PARALLAX_CATALOG = {")
+
+
+# -- story threads ----------------------------------------------------------
+
+
+def _with_thread(store):
+    """One thread, two days of coverage, and a review paragraph for it."""
+    store.set_meta("embedder", "test-embedder")
+    store.upsert_story_thread(
+        thread_id="france-protests",
+        title="France protests widen",
+        centroid="[1.0, 0.0]",
+        dim=2,
+        embedder="test-embedder",
+        day="2026-07-22",
+        theme_key="labour",
+        theme_title="Labour & the street",
+    )
+    store.upsert_story_thread(
+        thread_id="france-protests",
+        title="France protests widen",
+        centroid="[1.0, 0.0]",
+        dim=2,
+        embedder="test-embedder",
+        day="2026-07-23",
+    )
+    store.record_thread_day(
+        thread_id="france-protests",
+        day="2026-07-22",
+        doc_count=2,
+        diet_counts='{"self": 2}',
+        headline="Unions call a strike",
+    )
+    store.record_thread_day(
+        thread_id="france-protests",
+        day="2026-07-23",
+        doc_count=5,
+        diet_counts='{"self": 4, "modeled_ce": 1}',
+        headline="Refineries join",
+    )
+    store.replace_thread_documents([("self-doc", "france-protests")])
+    store.upsert_summary(
+        scope="thread:france-protests",
+        generated_utc="2026-07-23T00:00:00+00:00",
+        model="m",
+        method="claude",
+        text="The strike spread.",
+    )
+    store.upsert_summary(
+        scope="stories",
+        generated_utc="2026-07-23T00:00:00+00:00",
+        model="m",
+        method="claude",
+        text="One story led.",
+    )
+    store.upsert_summary(
+        scope="themes",
+        generated_utc="2026-07-23T00:00:00+00:00",
+        model="m",
+        method="claude",
+        text="Obligation ran through both.",
+    )
+    return store
+
+
+def test_payload_has_no_stories_before_the_cluster_step_runs():
+    payload = build_payload(_store_with_two_diets(), _reg(), pair("self", "modeled_ce"))
+    assert payload["stories"] == []
+    assert payload["stories_intro"] == ""
+
+
+def test_payload_carries_the_thread_with_its_timeline():
+    store = _with_thread(_store_with_two_diets())
+    payload = build_payload(store, _reg(), pair("self", "modeled_ce"))
+    assert payload["stories_intro"] == "One story led."
+    assert payload["motifs"] == "Obligation ran through both."
+    story = payload["stories"][0]
+    assert story["id"] == "france-protests"
+    assert story["theme"] == "Labour & the street"
+    assert story["summary"] == "The strike spread."
+    assert story["first_seen"] == "2026-07-22", "first_seen is what dates the timeline"
+    assert [p["day"] for p in story["timeline"]] == ["2026-07-22", "2026-07-23"]
+    assert story["days_running"] == 2
+
+
+def test_diet_counts_are_labelled_not_keyed_by_persona_id():
+    """Machine ids must never reach a surface a person reads (CLAUDE.md §0)."""
+    store = _with_thread(_store_with_two_diets())
+    payload = build_payload(store, _reg(), pair("self", "modeled_ce"))
+    counts = payload["stories"][0]["diet_counts"]
+    assert "self" not in counts
+    assert set(counts.values()) == {4, 1}
+
+
+def test_only_threads_covered_on_the_latest_day_are_exported():
+    """A thread that ran yesterday and not today should not lead today's brief."""
+    store = _with_thread(_store_with_two_diets())
+    store.upsert_story_thread(
+        thread_id="old-story",
+        title="Yesterday only",
+        centroid="[0.0, 1.0]",
+        dim=2,
+        embedder="test-embedder",
+        day="2026-07-22",
+    )
+    store.record_thread_day(
+        thread_id="old-story",
+        day="2026-07-22",
+        doc_count=9,
+        diet_counts="{}",
+        headline="h",
+    )
+    payload = build_payload(store, _reg(), pair("self", "modeled_ce"))
+    assert [s["id"] for s in payload["stories"]] == ["france-protests"]

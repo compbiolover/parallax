@@ -114,7 +114,13 @@ def build_config(args: argparse.Namespace, settings: dict) -> DailyConfig:
     cfg.min_cluster_size = args.min_cluster_size
     cfg.dominance = args.dominance
     cfg.min_blindspot_size = args.min_blindspot_size
-    cfg.model = args.model
+    # Only when actually given. `cfg.model = args.model` overwrote the
+    # settings-derived value with None on every run that did not pass --model,
+    # so `summarize.model` was read by DailyConfig.from_settings and then
+    # thrown away one line later: the daily brief always used the summarizer's
+    # hardcoded default, whatever settings.yaml said.
+    if args.model:
+        cfg.model = args.model
     if args.backfill_days is not None:
         cfg.backfill_days = args.backfill_days
     if args.max_per_source is not None:

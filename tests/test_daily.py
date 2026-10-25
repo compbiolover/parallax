@@ -242,3 +242,36 @@ def test_snapshot_window_days_layer_from_settings_and_flags():
     settings = {"daily": {"snapshot": {"window_days": 14}}}
     assert build_config(_parse([]), settings).window_days == 14
     assert build_config(_parse(["--window-days", "3"]), settings).window_days == 3
+
+
+def test_the_configured_summary_model_survives_the_cli_layer():
+    """`summarize.model` was read into the config and then overwritten with
+    None by build_config, so every daily run used the hardcoded default."""
+    import argparse
+
+    from daily.__main__ import build_config
+
+    settings = {"summarize": {"model": "claude-opus-5-5"}}
+    args = argparse.Namespace(
+        db=None,
+        settings=None,
+        out=None,
+        only=None,
+        skip=None,
+        max_items=None,
+        lexicon=None,
+        transformer=None,
+        min_cluster_size=2,
+        dominance=0.75,
+        min_blindspot_size=2,
+        model=None,
+        backfill_days=None,
+        max_per_source=None,
+        backfill_extract=None,
+        backfill_transformer=None,
+        window_days=None,
+        history_limit=None,
+    )
+    assert build_config(args, settings).model == "claude-opus-5-5"
+    args.model = "claude-haiku-4-5"
+    assert build_config(args, settings).model == "claude-haiku-4-5", "--model still wins"

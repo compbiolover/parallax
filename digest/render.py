@@ -590,6 +590,131 @@ def _theme_card(theme: dict, colour: str) -> str:
     )
 
 
+def _timeline_rows(timeline: list[dict], today: str) -> str:
+    """The running timeline, one row per day it was covered.
+
+    Days with no coverage are *not* drawn as gaps. A story is not a daily
+    series: the quiet days are the normal case, and a row of empty cells for
+    each of them would make a nine-day story unreadable on a phone while saying
+    nothing the dates do not already say.
+    """
+    if len(timeline) < 2:
+        return ""  # one point is not a timeline, it is today
+    rows = ""
+    peak = max((p.get("doc_count") or 0) for p in timeline) or 1
+    for point in timeline:
+        day = point.get("day") or ""
+        count = point.get("doc_count") or 0
+        is_today = day == today
+        # Today's note is the lead sentence of the review printed directly
+        # above this table, so the row would otherwise say it twice. The
+        # headline is the one piece of today the prose does not already carry.
+        note = (point.get("headline") or "").strip() if is_today else ""
+        if not note:
+            note = (point.get("note") or "").strip() or (point.get("headline") or "").strip()
+        # The bar is the only quantitative mark in the section, so it is scaled
+        # against the thread's own peak rather than an absolute: the question a
+        # reader asks of a timeline is "was today bigger than the 14th", not
+        # "how does this compare to every story in the corpus".
+        width = max(4, round(100 * count / peak))
+        weight = "600" if is_today else "400"
+        colour = INK if is_today else MUTED
+        rows += (
+            f'<tr><td style="padding:3px 8px 3px 0;vertical-align:top;white-space:nowrap;'
+            f'font:{weight} 11px -apple-system,sans-serif;color:{colour};">'
+            f"{_esc(day[5:] if len(day) >= 10 else day)}</td>"
+            f'<td width="56" style="padding:6px 8px 3px 0;vertical-align:top;">'
+            f'<div style="height:4px;border-radius:2px;background:{LINE};">'
+            f'<div style="width:{width}%;height:4px;border-radius:2px;'
+            f'background:{colour};"></div></div></td>'
+            f'<td style="padding:3px 0;vertical-align:top;font:{weight} 12px/1.45 '
+            f'-apple-system,sans-serif;color:{colour};">{_esc(note)}</td></tr>'
+        )
+    return (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="padding-top:8px;">{rows}</table>'
+    )
+
+
+def _story_links(story: dict) -> str:
+    """Two or three links, so the review is checkable against the source."""
+    articles = [a for a in (story.get("articles") or []) if a.get("url") and a.get("title")]
+    if not articles:
+        return ""
+    links = ""
+    for article in articles[:OUTLETS_PER_STORY]:
+        links += (
+            f'<div style="font:12px/1.5 -apple-system,sans-serif;padding-top:3px;">'
+            f'<a href="{_esc(article["url"])}" style="color:{INK};'
+            f'text-decoration:none;">{_esc(article["title"])}</a></div>'
+        )
+    return f'<div style="padding-top:8px;">{links}</div>'
+
+
+def _story_card(story: dict, today: str) -> str:
+    """One running story: what it is, what moved, and its timeline."""
+    title = story.get("title") or "(untitled story)"
+    bits = []
+    if story.get("theme"):
+        bits.append(str(story["theme"]))
+    days = story.get("days_running") or 0
+    if days > 1:
+        bits.append(f"day {days} of coverage")
+    meta = " &middot; ".join(_esc(b) for b in bits)
+    # Counts on their own line, in sentence case. They were in the uppercase
+    # meta row, where a label like "Modeled conservative-evangelical diet" came
+    # out as a shouted sentence wider than the card.
+    counts = story.get("diet_counts") or {}
+    tally = (
+        f'<div style="font:12px -apple-system,sans-serif;color:{MUTED};padding-bottom:8px;">'
+        + " &middot; ".join(f"{_esc(label)} {n}" for label, n in counts.items())
+        + "</div>"
+        if counts
+        else ""
+    )
+    summary = (story.get("summary") or "").strip()
+    body = _paragraphs(summary, "14px/1.6") if summary else ""
+    return (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="background:{CARD};border:1px solid {LINE};border-left:3px solid '
+        f'{MUTED};border-radius:10px;margin-bottom:10px;">'
+        f'<tr><td style="padding:12px 14px;">'
+        f'<div style="font:600 15px/1.35 -apple-system,BlinkMacSystemFont,sans-serif;'
+        f'color:{INK};">{_esc(title)}</div>'
+        f'<div style="font:11px -apple-system,sans-serif;color:{MUTED};'
+        f'text-transform:uppercase;letter-spacing:.05em;padding:4px 0 6px;">{meta}</div>'
+        f"{tally}{body}{_timeline_rows(story.get('timeline') or [], today)}"
+        f"{_story_links(story)}</td></tr></table>"
+    )
+
+
+def _stories_panel(payload: dict) -> str:
+    """The story review: the day's biggest threads, each with its history.
+
+    First panel after the headline number, because it is the part of the brief
+    that is about the news rather than about the measurement. The foundation
+    charts answer "how did the coverage differ"; this answers "what was the
+    coverage", and the second question is the one a reader has at 6am.
+    """
+    stories = [s for s in (payload.get("stories") or []) if s]
+    if not stories:
+        return ""
+    today = max((s.get("timeline") or [{}])[-1].get("day", "") for s in stories)
+    intro = (payload.get("stories_intro") or "").strip()
+    body = _paragraphs(intro, "15px/1.65") + ("<div style='height:12px'></div>" if intro else "")
+    body += "".join(_story_card(s, today) for s in stories)
+    motifs = (payload.get("motifs") or "").strip()
+    if motifs:
+        body += (
+            f'<div style="padding-top:6px;border-top:1px solid {LINE};margin-top:4px;">'
+            f'<div style="font:600 11px/1.4 -apple-system,sans-serif;'
+            f"text-transform:uppercase;letter-spacing:.07em;color:{MUTED};"
+            f'padding:10px 0 6px;">Motifs across today</div>'
+            f"{_paragraphs(motifs, '14px/1.6')}</div>"
+        )
+    return _panel("The stories", body)
+
+
 def _agenda_panel(payload: dict) -> str:
     """Attention divergence, set against the foundation number above it.
 
@@ -1333,6 +1458,10 @@ def _daily_panels(payload: dict, own_diet: str | None, head: str) -> str:
             # asks the reader to interpret the evidence before being told what it
             # was evidence of.
             _executive_panel(payload),
+            # The news before the measurement. Everything below this answers
+            # "how did the coverage differ"; this answers "what was covered",
+            # which is the question the reader actually arrived with.
+            _stories_panel(payload),
             # Before the foundation charts, because it is the number that explains
             # why the headline one is small.
             _agenda_panel(payload),
@@ -1390,7 +1519,11 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
         panels = "".join(
             [
                 _weekly_head(payload),
+                # Movement first here, unlike the daily layout: the weekly
+                # brief's own headline is how the gap moved over the week, and
+                # the story review is what filled it.
                 _movement_panel(payload),
+                _stories_panel(payload),
                 _drivers_panels(payload),
                 _framing_panel(payload),
                 _blindspot_panel(payload, own_diet),
@@ -1578,6 +1711,7 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
     if executive:
         lines += ["", "THE SHORT VERSION", "", executive]
 
+    lines += _stories_text(payload)
     lines += _agenda_text(payload)
 
     foundations = payload.get("foundations") or []
@@ -1630,6 +1764,53 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
     lines += _extra_text(payload)
     lines += _health_text(payload)
     return "\n".join(lines + _text_footer(payload))
+
+
+def _stories_text(payload: dict) -> list[str]:
+    """The story review in the text part, in the same order as the HTML.
+
+    Same reason the executive summary sits where it does: the two parts are one
+    brief, and a screen reader should not meet the sections in another order.
+    """
+    stories = [s for s in (payload.get("stories") or []) if s]
+    if not stories:
+        return []
+    lines = ["", "THE STORIES"]
+    intro = (payload.get("stories_intro") or "").strip()
+    if intro:
+        lines += ["", intro]
+    for story in stories:
+        bits = []
+        if story.get("theme"):
+            bits.append(str(story["theme"]))
+        days = story.get("days_running") or 0
+        if days > 1:
+            bits.append(f"day {days} of coverage")
+        counts = story.get("diet_counts") or {}
+        if counts:
+            bits.append(", ".join(f"{label} {n}" for label, n in counts.items()))
+        lines += ["", f"* {story.get('title') or '(untitled story)'}"]
+        if bits:
+            lines.append(f"  {' · '.join(bits)}")
+        summary = (story.get("summary") or "").strip()
+        if summary:
+            lines += ["", f"  {summary}"]
+        timeline = story.get("timeline") or []
+        if len(timeline) >= 2:
+            lines.append("  Timeline:")
+            for point in timeline:
+                note = (point.get("note") or point.get("headline") or "").strip()
+                lines.append(
+                    f"    {point.get('day', '')}  {point.get('doc_count', 0):>3}"
+                    + (f"  {note}" if note else "")
+                )
+        for article in (story.get("articles") or [])[:OUTLETS_PER_STORY]:
+            if article.get("url") and article.get("title"):
+                lines.append(f"    - {article['title']}  {article['url']}")
+    motifs = (payload.get("motifs") or "").strip()
+    if motifs:
+        lines += ["", "Motifs across today", "", motifs]
+    return lines
 
 
 def _text_footer(payload: dict) -> list[str]:
@@ -1690,6 +1871,7 @@ def _blindspot_text(payload: dict, own_diet: str | None) -> list[str]:
 def _render_weekly_text(payload: dict, own_diet: str | None) -> str:
     """The weekly layout as plain text, in the HTML's order."""
     lines = ["PARALLAX — weekly brief", *_weekly_text(payload)]
+    lines += _stories_text(payload)  # same position as _stories_panel in the HTML
     lines += _blindspot_text(payload, own_diet)
     executive = (payload.get("executive_summary") or "").strip()
     if executive:

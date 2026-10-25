@@ -33,6 +33,13 @@ class ClusterResult:
     coverage: list[frozenset[str]]
     titles: list[str | None]
     labels: list[int]  # cluster id per doc, -1 = noise
+    # The raw embedding per document, in the embedder's own space. Thread
+    # matching needs these and cannot use the reduced coordinates the
+    # clustering runs in: `_reduce` refits the SVD on each run's documents, so
+    # two days' reduced vectors are in different bases and a cosine between
+    # them is meaningless. Optional because older callers build a result
+    # without them, and nothing but thread matching reads it.
+    vectors: list[list[float]] | None = None
 
     @property
     def n_docs(self) -> int:
@@ -75,7 +82,7 @@ def compute_clustering(
 
     if len(ids) < max(2, min_cluster_size):
         # Too few documents to cluster meaningfully — everything is noise.
-        return ClusterResult(ids, sources, coverage, titles, [-1] * len(ids))
+        return ClusterResult(ids, sources, coverage, titles, [-1] * len(ids), vectors)
 
     dims = {len(v) for v in vectors}
     if len(dims) > 1:
@@ -88,7 +95,7 @@ def compute_clustering(
     X = np.asarray(vectors, dtype=np.float32)
     X = _reduce(X, svd_components, random_state)
     labels = _hdbscan_labels(X, min_cluster_size)
-    return ClusterResult(ids, sources, coverage, titles, [int(x) for x in labels])
+    return ClusterResult(ids, sources, coverage, titles, [int(x) for x in labels], vectors)
 
 
 def _reduce(X: np.ndarray, components: int, random_state: int) -> np.ndarray:
