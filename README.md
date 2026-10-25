@@ -49,6 +49,8 @@ pre-commit install                        # secret scanning
 cp config/settings.example.yaml config/settings.yaml
 ```
 
+For the real eMFD lexicon, download `emfd_scoring.csv` from the [eMFDscore dictionaries folder](https://github.com/medianeuroscience/emfdscore/tree/master/emfdscore/dictionaries) and place it in `data/` (see [Using the real eMFD lexicon](#using-the-real-emfd-lexicon)).
+
 Then:
 
 ```bash
