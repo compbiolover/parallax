@@ -1349,3 +1349,40 @@ def test_todays_row_shows_the_headline_not_the_note():
     html = render_html(_payload(stories=[story]))
     assert "Refineries joined." not in html, "today's note would repeat the review"
     assert "Unions called the strike." in html, "earlier days still carry their note"
+
+
+def test_sections_switch_off_blindspots_and_fairness_split():
+    from digest.render import build_digest
+
+    payload = _payload(
+        history=_history(5),
+        blindspots=[_spot("modeled_ce", "self")],
+        fairness_split={
+            "diets": {"self": {"equality": 0.7, "proportionality": 0.3, "docs_split": 40}},
+            "gap": 0.3,
+        },
+    )
+    on = build_digest(payload, "self")
+    off = build_digest(payload, "self", sections={"blindspots": False, "fairness_split": False})
+    assert "Blindspots by theme" in on.html and "equality vs proportionality" in on.html
+    for part in (off.html, off.text):
+        assert "Blindspots by theme" not in part
+        assert "equality vs proportionality" not in part
+
+
+def test_sections_switch_off_jsd_foundation_charts_and_liberty():
+    from digest.render import build_digest
+
+    payload = _payload(
+        history=_history(5),
+        liberty={"scorer": "x", "diets": {"self": {"docs_scored": 9, "mean": 0.1}}},
+    )
+    off = build_digest(
+        payload, "self", sections={"jsd": False, "foundation_charts": False, "liberty": False}
+    )
+    assert "divergence" not in off.subject.lower()
+    for part in (off.html, off.text):
+        assert "Jensen-Shannon" not in part
+        assert "Liberty / oppression" not in part
+        assert "Over/under-indexing" not in part
+    assert "Jensen-Shannon" in build_digest(payload, "self").text

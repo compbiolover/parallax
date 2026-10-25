@@ -155,6 +155,10 @@ def _delta(history: list[dict]) -> tuple[float | None, str, str | None]:
     return (latest["jsd_cumulative"] - previous["jsd_cumulative"], "", previous.get("date"))
 
 
+def _on(payload: dict, section: str) -> bool:
+    return section not in (payload.get("_sections_off") or ())
+
+
 def _headline(payload: dict) -> float | None:
     comparison = payload.get("comparison") or {}
     return comparison.get("jsd")
@@ -1061,7 +1065,11 @@ def _verdict(payload: dict) -> tuple[str, str]:
 def _weekly_subject(payload: dict) -> str:
     weekly = payload["weekly"]
     stories = len(payload.get("blindspots") or [])
-    tail = f" · {stories} {'story' if stories == 1 else 'stories'} covered mostly by one side"
+    tail = (
+        f" · {stories} {'story' if stories == 1 else 'stories'} covered mostly by one side"
+        if stories
+        else ""
+    )
     moved = _moved(weekly)
     if moved:
         e = moved[0]
@@ -1377,19 +1385,15 @@ def _weekly_text(payload: dict) -> list[str]:
     pair_line = f"{_named(payload, mine)} vs {_named(payload, theirs)}" + html.unescape(
         _others_note(payload)
     )
-    lines = [
-        "",
-        sentence,
-        lede,
-        pair_line,
-        "",
-        f"WHAT MOVED (positive = {_named(payload, mine)} leans)",
-    ]
-    for e in weekly["foundations"]:
+    lines = ["", sentence, lede, pair_line] if _on(payload, "jsd") else [""]
+    charts = _on(payload, "foundation_charts")
+    if charts:
+        lines += ["", f"WHAT MOVED (positive = {_named(payload, mine)} leans)"]
+    for e in weekly["foundations"] if charts else []:
         usual = f"  usual {_signed(e['low'], 2)} to {_signed(e['high'], 2)}" if "low" in e else ""
         flag = "  OUTSIDE RANGE" if e.get("moved") else ""
         lines.append(f"  {e['foundation']:<10} {_signed(e['now'], 2)}{usual}{flag}")
-    for e in _moved(weekly)[:1]:
+    for e in _moved(weekly)[:1] if charts else []:
         foundation, drivers = e["foundation"], (weekly.get("drivers") or {}).get(e["foundation"])
         if drivers:
             lines += ["", f"WHERE THE {foundation.upper()} GAP COMES FROM"]
@@ -1407,9 +1411,10 @@ def _weekly_text(payload: dict) -> list[str]:
             if (side.get("headline") or {}).get("url", "").startswith(("http://", "https://")):
                 lines.append(f"    {side['headline']['title']}")
                 lines.append(f"    {side['headline']['url']}")
-    jsd = weekly["jsd"]
-    context = _trend_context(jsd, len(jsd.get("series") or []))
-    lines += ["", f"Divergence this week: {jsd['now']:.3f}. {context}"]
+    if _on(payload, "jsd"):
+        jsd = weekly["jsd"]
+        context = _trend_context(jsd, len(jsd.get("series") or []))
+        lines += ["", f"Divergence this week: {jsd['now']:.3f}. {context}"]
     return lines
 
 
@@ -1452,7 +1457,7 @@ def _daily_panels(payload: dict, own_diet: str | None, head: str) -> str:
     """The all-time layout, for a week too thin to compare on its own."""
     return "".join(
         [
-            _panel("Today", head),
+            _panel("Today", head) if _on(payload, "jsd") else "",
             # Directly under the headline number, because it is the sentence that
             # says what the number means. It used to sit below every chart, which
             # asks the reader to interpret the evidence before being told what it
@@ -1465,9 +1470,9 @@ def _daily_panels(payload: dict, own_diet: str | None, head: str) -> str:
             # Before the foundation charts, because it is the number that explains
             # why the headline one is small.
             _agenda_panel(payload),
-            _composition_panel(payload),
-            _log_ratio_panel(payload),
-            _sparkline_panel(payload),
+            _composition_panel(payload) if _on(payload, "foundation_charts") else "",
+            _log_ratio_panel(payload) if _on(payload, "foundation_charts") else "",
+            _sparkline_panel(payload) if _on(payload, "jsd") else "",
             _blindspot_panel(payload, own_diet),
             _summary_panel(payload),
             _extra_panel(payload),
@@ -1518,16 +1523,16 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
     if payload.get("weekly"):
         panels = "".join(
             [
-                _weekly_head(payload),
+                _weekly_head(payload) if _on(payload, "jsd") else "",
                 # Movement first here, unlike the daily layout: the weekly
                 # brief's own headline is how the gap moved over the week, and
                 # the story review is what filled it.
-                _movement_panel(payload),
+                _movement_panel(payload) if _on(payload, "foundation_charts") else "",
                 _stories_panel(payload),
-                _drivers_panels(payload),
+                _drivers_panels(payload) if _on(payload, "foundation_charts") else "",
                 _framing_panel(payload),
                 _blindspot_panel(payload, own_diet),
-                _weekly_trend_panel(payload),
+                _weekly_trend_panel(payload) if _on(payload, "jsd") else "",
                 _executive_panel(payload),
                 _summary_panel(payload),
                 _health_panel(payload),
@@ -1574,6 +1579,9 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
 
 def _preheader(payload: dict) -> str:
     """The one line iOS shows under the subject in the inbox list."""
+    if not _on(payload, "jsd"):
+        lead = (payload.get("executive_summary") or "").strip().split("\n")[0]
+        return lead[:140] or "Today's coverage, summarized."
     if payload.get("weekly"):
         return _verdict(payload)[1]
     jsd = _headline(payload)
@@ -1689,7 +1697,9 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
         return _render_weekly_text(payload, own_diet)
     lines = ["PARALLAX — daily brief", ""]
     jsd = _headline(payload)
-    if jsd is None:
+    if not _on(payload, "jsd"):
+        pass
+    elif jsd is None:
         lines.append("Not enough scored documents to compare two diets yet.")
     else:
         lines.append(f"Jensen-Shannon divergence: {jsd:.3f}  (0 identical, 1 disjoint)")
@@ -1714,8 +1724,8 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
     lines += _stories_text(payload)
     lines += _agenda_text(payload)
 
-    foundations = payload.get("foundations") or []
-    for diet in _pair_diets(payload):
+    foundations = (payload.get("foundations") or []) if _on(payload, "foundation_charts") else []
+    for diet in _pair_diets(payload) if foundations else []:
         lines += ["", f"{_diet_label(diet)} ({diet.get('doc_count', 0)} docs)"]
         for f in foundations:
             value, spread = _foundation(diet, f)
@@ -1728,7 +1738,7 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
 
     ratios = (payload.get("comparison") or {}).get("log_ratios") or {}
     pair = _pair(payload)
-    if ratios:
+    if ratios and _on(payload, "foundation_charts"):
         who = (
             f"positive = {_named(payload, pair[0])} over-indexes, "
             f"negative = {_named(payload, pair[1])}"
@@ -1739,7 +1749,7 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
         lines += [f"  {f:<10} {_signed(ratios[f], 2)}" for f in ratios]
 
     history = [p for p in (payload.get("history") or []) if p.get("jsd_cumulative") is not None]
-    if len(history) >= 2:
+    if len(history) >= 2 and _on(payload, "jsd"):
         window = payload.get("history_window_days")
         peak = max(p["jsd_cumulative"] for p in history)
         lines += [
@@ -1884,17 +1894,46 @@ def _render_weekly_text(payload: dict, own_diet: str | None) -> str:
     return "\n".join(lines + _text_footer(payload))
 
 
-def build_digest(payload: dict, own_diet: str | None = None) -> Digest:
+def _without_sections(payload: dict, sections: dict | None) -> dict:
+    """Drop the payload keys behind sections the settings turned off.
+
+    Done on the payload rather than in each panel because both the HTML and the
+    text part read these keys, and an empty list/None already renders as no
+    panel. ``digest.sections`` in settings.yaml; absent keys mean on.
+    """
+    sections = sections or {}
+    drop: dict = {}
+    if not sections.get("blindspots", True):
+        drop.update(blindspots=[], blindspot_themes=[])
+    if not sections.get("fairness_split", True):
+        drop.update(fairness_split=None)
+    if not sections.get("liberty", True):
+        drop.update(liberty=None)
+    # The panels below read these two through _on(); the other switches act on
+    # keys the panels already treat as optional.
+    off = [k for k in ("jsd", "foundation_charts") if not sections.get(k, True)]
+    if off:
+        drop["_sections_off"] = off
+    return {**payload, **drop} if drop else payload
+
+
+def build_digest(
+    payload: dict, own_diet: str | None = None, sections: dict | None = None
+) -> Digest:
     """Render both parts plus the subject line.
 
     The subject carries the headline number and its movement, because on a
     phone that line is often the whole reading — it has to be true on its own,
     without the body to qualify it.
     """
+    payload = _without_sections(payload, sections)
     _check_own_diet(payload, own_diet)
     jsd = _headline(payload)
     date = (payload.get("generated_utc") or "")[:10]
-    if payload.get("weekly"):
+    if not _on(payload, "jsd"):
+        kind = "weekly" if payload.get("weekly") else "daily"
+        subject = f"Parallax {date} — {kind} brief"
+    elif payload.get("weekly"):
         subject = _weekly_subject(payload)
     elif jsd is None:
         subject = f"Parallax {date} — not enough data to compare"

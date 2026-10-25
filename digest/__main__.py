@@ -86,7 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     store = Datastore(db)
     try:
         digest = build_digest(
-            build_payload(store, registry, pair, limit), own_diet=own or pair.mine
+            build_payload(store, registry, pair, limit),
+            own_diet=own or pair.mine,
+            sections=(settings.get("digest", {}) or {}).get("sections"),
         )
     finally:
         store.close()

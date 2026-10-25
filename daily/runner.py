@@ -116,6 +116,7 @@ class DailyConfig:
 
     # digest
     own_diet: str | None = None  # whose blindspots lead the email
+    digest_sections: dict | None = None  # digest.sections: per-section on/off
     # The day the brief goes out, e.g. "friday". None sends on every run. A day
     # of news is too thin to compare on its own, so the brief is weekly by
     # default in settings.example.yaml; ingestion still has to run daily, since
@@ -160,6 +161,7 @@ class DailyConfig:
             model=(settings.get("summarize", {}) or {}).get("model"),
             summary_effort=(settings.get("summarize", {}) or {}).get("effort"),
             own_diet=dig.get("own_diet"),
+            digest_sections=dig.get("sections"),
             digest_weekday=_weekday(dig.get("weekday")),
             reference_mine=ref.get("mine"),
             reference_theirs=ref.get("theirs"),
@@ -429,7 +431,11 @@ def _step_digest(store, cfg: DailyConfig, registry, pair) -> str:
         due = today - timedelta(days=(today.weekday() - WEEKDAYS.index(cfg.digest_weekday)) % 7)
         if (store.get_meta("digest_last_sent") or "") >= due.isoformat():
             return f"not sent — already sent for {cfg.digest_weekday.capitalize()} {due}"
-    digest = build_digest(_payload(store, cfg, registry, pair), own_diet=cfg.own_diet or pair.mine)
+    digest = build_digest(
+        _payload(store, cfg, registry, pair),
+        own_diet=cfg.own_diet or pair.mine,
+        sections=cfg.digest_sections,
+    )
     reason = send(digest)
     if reason is None:
         if cfg.digest_weekday:
