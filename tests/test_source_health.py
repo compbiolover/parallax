@@ -27,6 +27,11 @@ def test_run_status_classifies_each_failure():
     assert _run_status(False, 5, 2) == "ok"
 
 
+def test_summary_only_is_not_reported_as_blocked():
+    assert _run_status(False, 5, 5, unread=5, summarised=5) == "summary"
+    assert _run_status(False, 5, 5, unread=5, summarised=0) == "blocked"
+
+
 def test_three_failed_runs_flag_a_source_and_one_does_not():
     store = Datastore(":memory:")
     reg = registry(mine={"a": 1.0, "b": 3.0}, theirs={"b": 1.0})
@@ -73,10 +78,10 @@ def test_parse_feed_tells_an_unreadable_feed_from_an_empty_one():
         parse_feed("<html><body>403 Forbidden</body")
 
 
-def test_a_paywall_behind_a_descriptive_feed_is_blocked():
+def test_a_paywall_behind_a_descriptive_feed_is_summary_only():
     # Every article page failed, though the feed's summaries stood in for them.
-    assert _run_status(False, 10, 0, unread=10) == "blocked"
-    assert _run_status(False, 10, 0, unread=3) == "ok"
+    assert _run_status(False, 10, 0, unread=10, summarised=10) == "summary"
+    assert _run_status(False, 10, 0, unread=3, summarised=3) == "ok"
 
 
 def test_a_new_sources_backlog_is_not_a_baseline():

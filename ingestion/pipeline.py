@@ -142,6 +142,8 @@ class RunStats:
     # Items whose article page could not be read, whether or not the feed's own
     # summary stood in. A paywall with descriptive feeds shows up only here.
     unread: int = 0
+    # Documents stored from the feed's own summary rather than an article body.
+    summarised: int = 0
     liberty_scored: int = 0
     per_source: dict[str, int] = field(default_factory=dict)
 
@@ -269,7 +271,7 @@ def run(
     sources = list(registry.ingestable(("rss",), scope))
     run_utc = _now_iso()
     for position, source in enumerate(sources, start=1):
-        before = (stats.stored, stats.fetched, stats.errors, stats.unread)
+        before = (stats.stored, stats.fetched, stats.errors, stats.unread, stats.summarised)
         started = time.monotonic()
         failed = _ingest_source(
             source,
@@ -301,7 +303,13 @@ def run(
         store.record_source_run(
             source.id,
             run_utc,
-            _run_status(failed, fetched, errors, stats.unread - before[3]),
+            _run_status(
+                failed,
+                fetched,
+                errors,
+                stats.unread - before[3],
+                stats.summarised - before[4],
+            ),
             items=fetched,
             stored=stats.stored - before[0],
             errors=errors,
@@ -314,12 +322,16 @@ def run(
     return stats
 
 
-def _run_status(failed: bool, fetched: int, errors: int, unread: int = 0) -> str:
+def _run_status(
+    failed: bool, fetched: int, errors: int, unread: int = 0, summarised: int = 0
+) -> str:
     """How one source's run went, as ``ingestion.health`` reads it."""
     if failed:
         return "unreadable"  # the feed itself did not parse: moved, gone, or refused
     if fetched == 0:
         return "empty"
+    if summarised and unread >= fetched:
+        return "summary"  # no article body was read, by design or not; the blurbs stood in
     if errors >= fetched or unread >= fetched:
         return "blocked"  # the feed answers but no article behind it could be read
     return "ok"
@@ -634,6 +646,8 @@ def _ingest_source(
             stats.errors += 1
             continue
         text, ingest_kind = read
+        if ingest_kind == SUMMARY:
+            stats.summarised += 1
         _ingest_one(
             store,
             source,

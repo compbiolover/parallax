@@ -31,6 +31,7 @@ MESSAGES = {
     "unreadable": "feed did not load: check the URL in config/sources.yaml",
     "empty": "feed loads but lists no items",
     "blocked": "feed loads but none of its articles could be read (paywall or blocked)",
+    "summary": "summary only: the feed's own blurbs are stored, no article body is read",
 }
 
 
@@ -93,7 +94,8 @@ def persona_impact(registry, issues: list[SourceIssue]) -> dict[str, float]:
 
     Only personas with something affected are returned.
     """
-    affected = {i.source_id for i in issues}
+    # Summary-only is a reading choice, not a failure, so it does not dent a diet.
+    affected = {i.source_id for i in issues if i.status != "summary"}
     impact = {}
     for persona_id in registry.persona_ids():
         weights = registry.weights_for(persona_id)
