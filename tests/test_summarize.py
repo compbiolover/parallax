@@ -323,7 +323,7 @@ def test_the_numbers_only_fallback_names_the_diets_too():
 
 
 def test_the_default_model_is_the_current_opus():
-    assert DEFAULT_MODEL == "claude-opus-5"
+    assert DEFAULT_MODEL == "claude-opus-5-5"
 
 
 def test_the_daily_run_honours_the_configured_summary_model():

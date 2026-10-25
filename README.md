@@ -687,17 +687,18 @@ scoring:
   taggers:
     liberty:
       enabled: true
-      model: claude-sonnet-5
+      model: claude-sonnet-5-5
       effort: low       # this matters: adaptive thinking at default `high` bills far more
       batch: true       # Batch API — half price, and the daily run is overnight anyway
 ```
 
-At roughly 200 documents a day the batched cost is about $17/month on Sonnet 5, $8 on
-Haiku 4.5, $42 on Opus 5 — but don't take the tier on faith:
+At roughly 200 documents a day the batched cost was about $17/month on Sonnet 5, $8 on
+Haiku 4.5, $42 on Opus 5, measured on the Claude 5 tier before the 5.5 models shipped —
+but don't take the tier on faith:
 
 ```bash
 python3 -m validation --scorer liberty --model claude-haiku-4-5 --limit 40
-python3 -m validation --scorer liberty --model claude-sonnet-5  --limit 40
+python3 -m validation --scorer liberty --model claude-sonnet-5-5 --limit 40
 ```
 
 That reports AUC/F1/kappa against hand-coded liberty labels, the same as every other
@@ -850,7 +851,7 @@ python3 -m ingestion compare
 # 3. Cluster stories from stored embeddings and detect blindspots in both directions,
 #    then group them into named themes (Claude when ANTHROPIC_API_KEY is set, else a
 #    built-in taxonomy; --no-claude-themes forces the taxonomy).
-#    Model: --theme-model, else `cluster.themes.model`, else claude-sonnet-5.
+#    Model: --theme-model, else `cluster.themes.model`, else claude-sonnet-5-5.
 #    Thinking depth: --theme-effort, else `cluster.themes.effort`, else low.
 #    This step also carries today's clusters onto persistent STORY THREADS,
 #    matched by embedding centroid, which is what gives the brief a running
@@ -859,7 +860,7 @@ python3 -m cluster run
 
 # 4. Charitable daily summary per diet + a cross-diet executive summary (Claude when
 #    ANTHROPIC_API_KEY is set, else a clearly-labeled numbers-only fallback).
-#    Model: --model, else `summarize.model` in settings, else claude-opus-5.
+#    Model: --model, else `summarize.model` in settings, else claude-opus-5-5.
 #    With story threads present it also writes the story review: the day's
 #    biggest threads, what moved on each, and the motifs across them:
 python3 -m summarize
