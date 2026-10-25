@@ -192,6 +192,53 @@ CREATE TABLE IF NOT EXISTS source_runs (
     PRIMARY KEY (source_id, run_utc)
 );
 
+-- A story thread: one running news story, tracked across days.
+--
+-- Clusters cannot do this on their own. `clusters.cluster_id` is a position in
+-- a fresh HDBSCAN run, so cluster 3 is a different story every morning, and
+-- `replace_clustering` drops the lot each run. A thread is the identity that
+-- survives: today's clusters are matched to it by embedding centroid, so
+-- "the France protests" stays one row while the clusters under it come and go.
+--
+-- The centroid is kept in the ORIGINAL embedding space, never the SVD-reduced
+-- one the clustering runs in: that basis is refit on each day's documents, so
+-- reduced coordinates from two days are not comparable and matching against
+-- them would be matching against noise.
+CREATE TABLE IF NOT EXISTS story_threads (
+    thread_id   TEXT PRIMARY KEY,        -- slug, stable for the thread's life
+    title       TEXT NOT NULL,           -- most recent cluster label (keyword readout)
+    -- The story's name as the review wrote it, which is what a reader is shown.
+    -- Kept apart from `title` because that one is a c-TF-IDF keyword list: it is
+    -- stable, neutral and useful for matching, and it reads like a debug line.
+    review_title TEXT,
+    theme_key   TEXT,                    -- the motif it reads under, if themed
+    theme_title TEXT,
+    centroid    TEXT NOT NULL,           -- JSON array of floats, L2-normalized
+    dim         INTEGER NOT NULL,
+    embedder    TEXT NOT NULL,           -- centroids from two embedders cannot be compared
+    first_seen  TEXT NOT NULL,           -- 'YYYY-MM-DD' (UTC)
+    last_seen   TEXT NOT NULL
+);
+
+-- One row per thread per day it was covered: the running timeline.
+CREATE TABLE IF NOT EXISTS thread_days (
+    thread_id   TEXT NOT NULL REFERENCES story_threads(thread_id) ON DELETE CASCADE,
+    day         TEXT NOT NULL,           -- 'YYYY-MM-DD' (UTC)
+    doc_count   INTEGER NOT NULL,
+    diet_counts TEXT NOT NULL,           -- JSON {{persona_id: n}}
+    headline    TEXT,                    -- one representative title from that day
+    note        TEXT,                    -- what moved, written by the summarize step
+    PRIMARY KEY (thread_id, day)
+);
+
+-- Which thread each document sits in, for drill-down. Rewritten each run like
+-- document_clusters, because a document's thread can change when a story is
+-- re-clustered.
+CREATE TABLE IF NOT EXISTS thread_documents (
+    document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+    thread_id   TEXT NOT NULL REFERENCES story_threads(thread_id) ON DELETE CASCADE
+);
+
 -- One aggregate snapshot per UTC date. Re-running the daily job on the same
 -- day overwrites that day's row rather than appending, so the series has one
 -- point per day regardless of how many times the pipeline ran.
@@ -320,6 +367,7 @@ class Datastore:
             ("foundation_scores", "equality", "REAL"),
             ("foundation_scores", "proportionality", "REAL"),
             ("podcast_episodes", "audio_url", "TEXT"),
+            ("story_threads", "review_title", "TEXT"),
         ]
         for table, column, decl in added:
             cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
@@ -1004,6 +1052,149 @@ class Datastore:
                 "method) VALUES (?,?,?,?)",
                 themes,
             )
+
+    # -- story threads ------------------------------------------------------
+
+    def story_thread_rows(self) -> list[sqlite3.Row]:
+        return list(self.conn.execute("SELECT * FROM story_threads ORDER BY last_seen DESC"))
+
+    def upsert_story_thread(
+        self,
+        *,
+        thread_id: str,
+        title: str,
+        centroid: str,
+        dim: int,
+        embedder: str,
+        day: str,
+        theme_key: str | None = None,
+        theme_title: str | None = None,
+    ) -> None:
+        """Create the thread or move it forward onto ``day``.
+
+        ``first_seen`` is written once and never updated: it is what makes a
+        timeline say "running since the 14th" rather than "since today".
+        """
+        with self._tx() as conn:
+            conn.execute(
+                """
+                INSERT INTO story_threads (thread_id, title, theme_key, theme_title,
+                                           centroid, dim, embedder, first_seen, last_seen)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(thread_id) DO UPDATE SET
+                    title=excluded.title,
+                    theme_key=COALESCE(excluded.theme_key, story_threads.theme_key),
+                    theme_title=COALESCE(excluded.theme_title, story_threads.theme_title),
+                    centroid=excluded.centroid, dim=excluded.dim,
+                    embedder=excluded.embedder, last_seen=excluded.last_seen
+                """,
+                (thread_id, title, theme_key, theme_title, centroid, dim, embedder, day, day),
+            )
+
+    def record_thread_day(
+        self,
+        *,
+        thread_id: str,
+        day: str,
+        doc_count: int,
+        diet_counts: str,
+        headline: str | None,
+    ) -> None:
+        """One timeline point. Re-running the day's pipeline overwrites it.
+
+        The note is left alone on conflict: it is written by a later step, and
+        a second cluster run on the same day would otherwise erase the prose
+        that the summarize step had already paid a model call for.
+        """
+        with self._tx() as conn:
+            conn.execute(
+                """
+                INSERT INTO thread_days (thread_id, day, doc_count, diet_counts, headline)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(thread_id, day) DO UPDATE SET
+                    doc_count=excluded.doc_count, diet_counts=excluded.diet_counts,
+                    headline=excluded.headline
+                """,
+                (thread_id, day, doc_count, diet_counts, headline),
+            )
+
+    def set_thread_review_title(self, thread_id: str, title: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE story_threads SET review_title=? WHERE thread_id=?",
+                (title, thread_id),
+            )
+
+    def set_thread_note(self, thread_id: str, day: str, note: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE thread_days SET note=? WHERE thread_id=? AND day=?",
+                (note, thread_id, day),
+            )
+
+    def replace_thread_documents(self, assignments: list[tuple[str, str]]) -> None:
+        with self._tx() as conn:
+            conn.execute("DELETE FROM thread_documents")
+            conn.executemany(
+                "INSERT OR REPLACE INTO thread_documents (document_id, thread_id) VALUES (?,?)",
+                assignments,
+            )
+
+    def thread_timeline(self, thread_id: str, limit: int = 14) -> list[sqlite3.Row]:
+        """The thread's days, oldest first, most recent ``limit`` of them."""
+        rows = list(
+            self.conn.execute(
+                "SELECT * FROM thread_days WHERE thread_id=? ORDER BY day DESC LIMIT ?",
+                (thread_id, limit),
+            )
+        )
+        return list(reversed(rows))
+
+    def threads_active_on(self, day: str, limit: int = 6) -> list[sqlite3.Row]:
+        """The day's biggest threads, by how many documents covered them.
+
+        Joined rather than read from ``story_threads.last_seen``: a thread that
+        ran yesterday and not today should not lead today's brief.
+        """
+        return list(
+            self.conn.execute(
+                """
+                SELECT t.*, d.doc_count, d.diet_counts, d.headline, d.note
+                  FROM story_threads t
+                  JOIN thread_days d ON d.thread_id = t.thread_id
+                 WHERE d.day = ?
+                 ORDER BY d.doc_count DESC, t.thread_id
+                 LIMIT ?
+                """,
+                (day, limit),
+            )
+        )
+
+    def latest_thread_day(self) -> str | None:
+        """The most recent day any thread was covered.
+
+        Read rather than assumed to be today: the summarize step can run on a
+        day the cluster step did not (a re-run, or a `--only` invocation), and
+        asking for today's threads then would silently produce no story review.
+        """
+        row = self.conn.execute("SELECT MAX(day) AS day FROM thread_days").fetchone()
+        return row["day"] if row and row["day"] else None
+
+    def thread_members(self, thread_id: str, limit: int = 6) -> list[sqlite3.Row]:
+        """Documents in a thread, newest first, with the link so it is checkable."""
+        return list(
+            self.conn.execute(
+                f"""
+                SELECT d.id, d.title, d.url, d.source_id, {DOC_DATE_SQL} AS dated
+                  FROM thread_documents td
+                  JOIN documents d ON d.id = td.document_id
+                 WHERE td.thread_id = ? AND d.is_duplicate = 0
+                 ORDER BY dated DESC
+                 LIMIT ?
+                """,
+                (thread_id, limit),
+            )
+        )
 
     def blindspot_theme_rows(self) -> list[sqlite3.Row]:
         return list(self.conn.execute("SELECT * FROM blindspot_themes"))

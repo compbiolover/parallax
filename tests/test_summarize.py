@@ -79,7 +79,7 @@ def test_parse_sections_splits_by_headers():
         DietContext("modeled_ce", "modeled_ce", 1, {}, []),
     ]
     text = "## self\nSelf paragraph.\n## modeled_ce\nOther paragraph.\n## Executive\nThe exec."
-    per_diet, executive = _parse_sections(text, contexts)
+    per_diet, executive, _ = _parse_sections(text, contexts)
     assert per_diet["self"] == "Self paragraph."
     assert per_diet["modeled_ce"] == "Other paragraph."
     assert executive == "The exec."
@@ -87,7 +87,7 @@ def test_parse_sections_splits_by_headers():
 
 def test_unparseable_response_falls_back_to_whole_text():
     contexts = [DietContext("self", "self", 1, {}, [])]
-    per_diet, executive = _parse_sections("just a blob with no headers", contexts)
+    per_diet, executive, _ = _parse_sections("just a blob with no headers", contexts)
     assert executive == "just a blob with no headers"
 
 
@@ -282,7 +282,7 @@ def test_a_heading_that_does_not_match_the_label_exactly_still_lands():
     text = (
         "## My Diet\nMine.\n## Modeled Conservative-Evangelical\nTheirs.\n## Executive\nThe exec."
     )
-    per_diet, executive = _parse_sections(text, _labelled_contexts())
+    per_diet, executive, _ = _parse_sections(text, _labelled_contexts())
     assert per_diet["self"] == "Mine."
     assert per_diet["modeled_ce"] == "Theirs."
     assert executive == "The exec."
@@ -293,7 +293,7 @@ def test_a_heading_in_the_short_form_lands_on_the_right_diet():
     which every label ends with, so "The modeled diet" matched the author's own
     and a section about the modeled diet was filed under `self`. That inverts
     the one guarantee the tool makes."""
-    per_diet, _ = _parse_sections(
+    per_diet, _, _ = _parse_sections(
         "## The modeled diet\nTheirs.\n## Executive\nE.", _labelled_contexts()
     )
     assert per_diet["modeled_ce"] == "Theirs."
@@ -303,12 +303,12 @@ def test_a_heading_in_the_short_form_lands_on_the_right_diet():
 def test_a_heading_that_fits_both_diets_is_not_guessed_at():
     """Dropping a section is recoverable. Attributing it to the wrong diet is
     not, and it is the failure nobody would notice."""
-    per_diet, _ = _parse_sections("## Diet\nWhose?\n", _labelled_contexts())
+    per_diet, _, _ = _parse_sections("## Diet\nWhose?\n", _labelled_contexts())
     assert per_diet == {"self": "", "modeled_ce": ""}
 
 
 def test_a_heading_carrying_extra_words_still_lands():
-    per_diet, _ = _parse_sections("## My diet today\nMine.\n", _labelled_contexts())
+    per_diet, _, _ = _parse_sections("## My diet today\nMine.\n", _labelled_contexts())
     assert per_diet["self"] == "Mine."
 
 
@@ -600,7 +600,7 @@ def test_a_section_is_matched_by_its_bracketed_id_first():
         "## Party-mainstream reader [left_moderate_dem]\nModerate prose.\n"
         "## Executive\nE.\n"
     )
-    per_diet, executive = _parse_sections(text, contexts)
+    per_diet, executive, _ = _parse_sections(text, contexts)
     assert per_diet["left_activist"] == "Activist prose."
     assert per_diet["left_moderate_dem"] == "Moderate prose."
     assert executive == "E."
@@ -608,7 +608,7 @@ def test_a_section_is_matched_by_its_bracketed_id_first():
 
 def test_an_invented_bracketed_id_falls_back_rather_than_inventing_a_section():
     contexts = [DietContext("self", "My diet", 3, {"care": 1.0}, [])]
-    per_diet, _ = _parse_sections("## My diet [not_a_persona]\nMine.\n", contexts)
+    per_diet, _, _ = _parse_sections("## My diet [not_a_persona]\nMine.\n", contexts)
     assert per_diet["self"] == "Mine."
 
 
@@ -686,3 +686,116 @@ def test_the_archive_fallback_is_not_called_this_week():
     prompt = build_user_prompt(ctx, None)
     assert "this week" not in prompt
     assert "documents (across the whole archive): 3" in prompt
+
+
+# -- the story review -------------------------------------------------------
+
+
+def _thread_ctx(**over):
+    from summarize.prompts import ThreadContext
+
+    base = {
+        "thread_id": "france-protests",
+        "title": "France protests widen",
+        "doc_count": 9,
+        "diet_counts": {"self": 7, "modeled_ce": 2},
+        "timeline": [("2026-10-18", 2, "Unions called it"), ("2026-10-25", 9, "Refineries joined")],
+        "headlines": ["Refinery workers join the strike"],
+        "theme_title": "Labour & the street",
+        "first_seen": "2026-10-18",
+    }
+    return ThreadContext(**{**base, **over})
+
+
+def test_the_prompt_asks_for_story_sections_only_when_there_are_threads():
+    from summarize.prompts import build_user_prompt
+
+    contexts = _labelled_contexts()
+    assert "## Stories" not in build_user_prompt(contexts, None)
+    with_threads = build_user_prompt(contexts, None, threads=[_thread_ctx()])
+    assert "## Stories" in with_threads
+    assert "`### [thread:<id>] <title>`" in with_threads
+    assert "## Themes" in with_threads
+
+
+def test_the_thread_block_carries_the_timeline_and_labels_not_ids():
+    from summarize.prompts import build_user_prompt
+
+    prompt = build_user_prompt(_labelled_contexts(), None, threads=[_thread_ctx()])
+    assert "[thread:france-protests]" in prompt
+    assert "2026-10-18: 2 documents" in prompt
+    assert "Labour & the street" in prompt
+    # Counts are printed with the human label, since this line gets paraphrased.
+    assert "coverage by diet today:" in prompt
+    assert "self=7" not in prompt
+
+
+def test_days_running_counts_timeline_points():
+    assert _thread_ctx().days_running == 2
+
+
+def test_story_sections_are_parsed_by_their_thread_id():
+    text = (
+        "## Stories\nTwo stories led.\n\n"
+        "### [thread:france-protests] France protests widen\n"
+        "The strike spread to refineries.\n\n"
+        "## Themes\nObligation ran through both.\n\n"
+        "## Executive\nFar apart on loyalty.\n"
+    )
+    _, executive, review = _parse_sections(text, _labelled_contexts(), [_thread_ctx()])
+    assert executive == "Far apart on loyalty."
+    assert review.intro == "Two stories led."
+    assert review.themes == "Obligation ran through both."
+    assert review.stories == {"france-protests": "The strike spread to refineries."}
+
+
+def test_a_story_heading_without_brackets_still_lands():
+    """Tolerant on purpose: the alternative is a silently missing section."""
+    text = "### thread:france-protests France protests\nIt spread.\n"
+    _, _, review = _parse_sections(text, _labelled_contexts(), [_thread_ctx()])
+    assert review.stories == {"france-protests": "It spread."}
+
+
+def test_an_unknown_thread_id_is_not_invented_as_a_story():
+    text = "### [thread:not-a-thread] Something\nProse.\n"
+    _, _, review = _parse_sections(text, _labelled_contexts(), [_thread_ctx()])
+    assert review.stories == {}
+
+
+def test_a_story_heading_wins_over_a_diet_label_in_the_same_line():
+    """A story title can read like a diet label; the id is the unambiguous part."""
+    text = "### [thread:france-protests] My diet and the protests\nProse.\n"
+    per_diet, _, review = _parse_sections(text, _labelled_contexts(), [_thread_ctx()])
+    assert review.stories == {"france-protests": "Prose."}
+    assert not per_diet.get("self")
+
+
+def test_a_reply_with_no_story_sections_still_yields_the_diets():
+    text = "## My diet [self]\nMine.\n\n## Executive\nApart.\n"
+    per_diet, executive, review = _parse_sections(text, _labelled_contexts(), [_thread_ctx()])
+    assert per_diet["self"] == "Mine."
+    assert executive == "Apart."
+    assert review.stories == {}
+
+
+def test_first_sentence_trims_to_the_lead():
+    from summarize.summarizer import _first_sentence
+
+    assert _first_sentence("The vote slipped. Unions met later.") == "The vote slipped."
+    assert _first_sentence("No terminator here") == "No terminator here"
+    long = "x" * 400
+    assert len(_first_sentence(long)) <= 240
+
+
+def test_the_review_title_is_taken_from_the_heading():
+    """The stored label is a keyword readout; the heading is the reader's line."""
+    text = "### [thread:france-protests] Refinery strike widens the pension fight\nProse.\n"
+    _, _, review = _parse_sections(text, _labelled_contexts(), [_thread_ctx()])
+    assert review.titles == {"france-protests": "Refinery strike widens the pension fight"}
+
+
+def test_a_heading_with_no_title_after_the_id_yields_no_title():
+    text = "### [thread:france-protests]\nProse.\n"
+    _, _, review = _parse_sections(text, _labelled_contexts(), [_thread_ctx()])
+    assert review.titles == {}
+    assert review.stories == {"france-protests": "Prose."}

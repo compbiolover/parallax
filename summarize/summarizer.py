@@ -14,9 +14,10 @@ body quotes. Auditable cluster-level quotes arrive with Phase 2.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from compare.divergence import jensen_shannon_divergence, log_ratios
@@ -29,6 +30,7 @@ from .prompts import (
     SYSTEM_PROMPT,
     ComparisonContext,
     DietContext,
+    ThreadContext,
     build_user_prompt,
 )
 
@@ -41,6 +43,17 @@ DEFAULT_MODEL = "claude-opus-5-5"
 SUMMARY_WINDOW_DAYS = 7
 
 
+# How many story threads the review covers. Six is about what fits in an email
+# before the reader stops, and the prompt orders them by coverage, so the cut
+# is at the bottom of the list rather than in the middle of the day.
+MAX_REVIEW_THREADS = 6
+
+# Timeline points per thread handed to the model. Two weeks is long enough for
+# "third day of coverage" and short enough that the prompt does not become
+# mostly history.
+THREAD_TIMELINE_DAYS = 14
+
+
 @dataclass
 class SummaryResult:
     per_diet: dict[str, str]
@@ -48,6 +61,13 @@ class SummaryResult:
     model: str
     method: str  # 'claude' | 'deterministic'
     generated_utc: str
+    # The story review. `stories` is {thread_id: prose}; `stories_intro` is the
+    # paragraph above the per-story sections, and `themes` the motifs across
+    # them. All empty on the deterministic path, which has no prose to give.
+    stories: dict[str, str] = field(default_factory=dict)
+    stories_intro: str = ""
+    themes: str = ""
+    titles: dict[str, str] = field(default_factory=dict)
 
 
 def gather(
@@ -120,6 +140,41 @@ def gather(
     return contexts, comparison
 
 
+def gather_threads(store: Datastore, limit: int = MAX_REVIEW_THREADS) -> list[ThreadContext]:
+    """The day's biggest story threads, with their running timelines.
+
+    Empty is a normal answer, not a failure: a store whose cluster step has
+    never run has no threads, and the brief simply has no story review in it.
+    """
+    day = store.latest_thread_day()
+    if not day:
+        return []
+    out: list[ThreadContext] = []
+    for row in store.threads_active_on(day, limit):
+        try:
+            diet_counts = json.loads(row["diet_counts"] or "{}")
+        except (TypeError, ValueError):
+            diet_counts = {}
+        timeline = [
+            (r["day"], r["doc_count"], r["headline"] or "")
+            for r in store.thread_timeline(row["thread_id"], THREAD_TIMELINE_DAYS)
+        ]
+        headlines = [m["title"] for m in store.thread_members(row["thread_id"]) if m["title"]]
+        out.append(
+            ThreadContext(
+                thread_id=row["thread_id"],
+                title=row["title"],
+                doc_count=row["doc_count"],
+                diet_counts=diet_counts,
+                timeline=timeline,
+                headlines=headlines,
+                theme_title=row["theme_title"] or "",
+                first_seen=row["first_seen"],
+            )
+        )
+    return out
+
+
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -160,6 +215,7 @@ class Summarizer:
     ) -> SummaryResult:
         contexts, comparison = gather(store, registry, pair, personas=personas)
         lexicon = store.get_meta("lexicon")
+        threads = gather_threads(store)
         if not contexts:
             return SummaryResult({}, "", self.model, "deterministic", _now_iso())
 
@@ -171,7 +227,7 @@ class Summarizer:
         if client is None:
             return self._deterministic(contexts, comparison, lexicon, reason)
         try:
-            text = self._call_claude(client, contexts, comparison, lexicon)
+            text = self._call_claude(client, contexts, comparison, lexicon, threads)
             if not text.strip():
                 # Opus 5 sometimes ends the turn on a thinking block alone: a
                 # 200, `end_turn`, no `max_tokens`, and no prose. It is a coin
@@ -181,7 +237,7 @@ class Summarizer:
                 # hence `DEFAULT_EFFORT` above, with this as the guard for the
                 # days the model thinks itself out of answering anyway.
                 logger.warning("Claude returned no summary text — asking once more")
-                text = self._call_claude(client, contexts, comparison, lexicon)
+                text = self._call_claude(client, contexts, comparison, lexicon, threads)
         except Exception as exc:
             # Never let an API hiccup leave the dashboard empty.
             logger.warning(
@@ -197,7 +253,7 @@ class Summarizer:
             # dashboard empty" meant.
             logger.warning("Claude returned no summary text — using the deterministic fallback")
             return self._deterministic(contexts, comparison, lexicon, NO_TEXT)
-        per_diet, executive = _parse_sections(text, contexts)
+        per_diet, executive, review = _parse_sections(text, contexts, threads)
         missing = [c.diet_id for c in contexts if not per_diet.get(c.diet_id, "").strip()]
         if missing:
             # A partial parse is a real state — a section can be missing because
@@ -210,10 +266,20 @@ class Summarizer:
                 "headings that do not name those diets",
                 ", ".join(missing),
             )
-        return SummaryResult(per_diet, executive, self.model, "claude", _now_iso())
+        return SummaryResult(
+            per_diet,
+            executive,
+            self.model,
+            "claude",
+            _now_iso(),
+            stories=review.stories,
+            stories_intro=review.intro,
+            themes=review.themes,
+            titles=review.titles,
+        )
 
-    def _call_claude(self, client, contexts, comparison, lexicon) -> str:
-        user = build_user_prompt(contexts, comparison, lexicon=lexicon)
+    def _call_claude(self, client, contexts, comparison, lexicon, threads=None) -> str:
+        user = build_user_prompt(contexts, comparison, lexicon=lexicon, threads=threads)
         resp = client.messages.create(
             model=self.model,
             max_tokens=MAX_TOKENS,
@@ -247,6 +313,48 @@ class Summarizer:
             method=result.method,
             text=result.executive,
         )
+        for scope, text in (("stories", result.stories_intro), ("themes", result.themes)):
+            if text.strip():
+                store.upsert_summary(
+                    scope=scope,
+                    generated_utc=result.generated_utc,
+                    model=result.model,
+                    method=result.method,
+                    text=text,
+                )
+        # Each story's prose goes to two places on purpose. The summaries row is
+        # what the dashboard and the email read today; the thread_days note is
+        # what makes the timeline readable *next* week, when today is a line in
+        # the middle of it and this row has been overwritten by a later day.
+        day = store.latest_thread_day()
+        for thread_id, text in result.stories.items():
+            if not text.strip():
+                continue
+            store.upsert_summary(
+                scope=f"thread:{thread_id}",
+                generated_utc=result.generated_utc,
+                model=result.model,
+                method=result.method,
+                text=text,
+            )
+            if day:
+                store.set_thread_note(thread_id, day, _first_sentence(text))
+            title = result.titles.get(thread_id, "")
+            if title:
+                store.set_thread_review_title(thread_id, title)
+
+
+def _first_sentence(text: str, limit: int = 240) -> str:
+    """The lead sentence, for a timeline row that has one line to spend.
+
+    A timeline is read down the left-hand side, so the note has to carry its
+    point in the first few words; the full paragraph stays in the summaries
+    row for the surfaces that have room for it.
+    """
+    flat = " ".join(text.split())
+    m = re.search(r"(?<=[.!?])\s", flat)
+    sentence = flat[: m.start()].rstrip() if m else flat
+    return sentence if len(sentence) <= limit else sentence[: limit - 1].rstrip() + "\u2026"
 
 
 def _response_text(resp) -> str:
@@ -382,7 +490,39 @@ def _heading_table(contexts) -> list[tuple[frozenset[str], str]]:
     return table
 
 
-def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
+@dataclass
+class _Review:
+    """The story review, split out of the model's reply."""
+
+    intro: str = ""
+    stories: dict[str, str] = field(default_factory=dict)
+    themes: str = ""
+    # The story name the review gave each thread, from its heading. The stored
+    # cluster label is a keyword readout ("supreme · trump · court"); this is
+    # the line a reader is shown.
+    titles: dict[str, str] = field(default_factory=dict)
+
+
+# `### [thread:france-protests] France protests` -> the id. Tolerant of the
+# model dropping the brackets or the prefix, because the alternative to a
+# tolerant match is a silently missing story section.
+_THREAD_HEAD = re.compile(r"(?:\[\s*)?thread:\s*([a-z0-9][a-z0-9-]*)", re.IGNORECASE)
+
+
+def _heading_title(head: str) -> str:
+    """The story name out of `### [thread:france-protests] France protests`."""
+    stripped = _THREAD_HEAD.sub("", head, count=1)
+    return stripped.strip(" []:-\u2014").strip()
+
+
+def _thread_id(head: str, known: set[str]) -> str | None:
+    m = _THREAD_HEAD.search(head)
+    if m and m.group(1).lower() in known:
+        return m.group(1).lower()
+    return None
+
+
+def _parse_sections(text: str, contexts, threads=None) -> tuple[dict[str, str], str, _Review]:
     """Split Claude's ``## <label> [<id>]`` / ``## Executive`` sections back apart.
 
     The bracketed id is tried first and the token matcher is the fallback. Token
@@ -394,6 +534,8 @@ def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
     """
     table = _heading_table(contexts)
     known = {ctx.diet_id for ctx in contexts}
+    thread_ids = {t.thread_id.lower() for t in (threads or [])}
+    heading_titles: dict[str, str] = {}
     sections: dict[str, str] = {}
     current: str | None = None
     buf: list[str] = []
@@ -408,20 +550,47 @@ def _parse_sections(text: str, contexts) -> tuple[dict[str, str], str]:
             flush()
             buf = []
             head = m.group(1).strip().lower()
-            current = (
-                "executive"
-                if head.startswith("exec")
-                else _bracketed_id(head, known) or _match_heading(head, table) or head
-            )
+            thread = _thread_id(head, thread_ids)
+            # Thread first: a story heading carries a title that can also look
+            # like a diet label ("My diet's week on pensions"), and the id is
+            # the unambiguous part.
+            if thread:
+                current = f"thread:{thread}"
+                heading_titles[thread] = _heading_title(m.group(1).strip())
+            elif head.startswith("exec"):
+                current = "executive"
+            elif head.startswith("stories") or head.startswith("the stories"):
+                current = "stories"
+            elif head.startswith("themes") or head.startswith("motifs"):
+                current = "themes"
+            else:
+                current = _bracketed_id(head, known) or _match_heading(head, table) or head
         else:
             buf.append(line)
     flush()
 
     executive = sections.pop("executive", "")
+    review = _Review(
+        intro=sections.pop("stories", ""),
+        themes=sections.pop("themes", ""),
+        stories={
+            tid: sections.pop(f"thread:{tid}")
+            for tid in sorted(thread_ids)
+            if sections.get(f"thread:{tid}", "").strip()
+        },
+        titles={tid: title for tid, title in heading_titles.items() if title},
+    )
     per_diet = {c.diet_id: sections.get(c.diet_id, "") for c in contexts}
-    if not executive and not any(per_diet.values()):
+    if not executive and not any(per_diet.values()) and not review.stories:
         executive = text.strip()  # unparseable -> keep whole thing
-    return per_diet, executive
+    if thread_ids and not review.stories:
+        # Same failure mode as a missing diet panel, and just as silent: the
+        # brief loses its lead section and nothing says why.
+        logger.warning(
+            "No story sections parsed — the model may not have used the "
+            "`### [thread:<id>]` headings the prompt asked for"
+        )
+    return per_diet, executive, review
 
 
 # -- deterministic fallback -------------------------------------------------
