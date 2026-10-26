@@ -1453,6 +1453,99 @@ def _caveat_for_email(payload: dict) -> str:
     return caveat
 
 
+def _starters(payload: dict, own: str | None) -> list[dict]:
+    """One conversation starter per blindspot direction, the author's own first.
+
+    The story is the first titled one in the direction's top themes. The
+    question is the one the summarizer wrote for that exact headline, or fixed
+    wording that says only what the coverage counts say when there is none
+    (no key, a failed call, or a story that changed since). The outlet is
+    linked rather than the headline: the headline is the story's lead title,
+    which is not necessarily that outlet's.
+    """
+    from cluster.themes import lead_story
+
+    written = payload.get("starter_questions") or {}
+    out = []
+    for dominant, group in _theme_groups(_themes(payload), own):
+        lead = lead_story(group)
+        if not lead:
+            continue
+        theme, story = lead
+        outlet = next((o for o in (story.get("outlets") or []) if o.get("label")), {})
+        url = (outlet.get("url") or "").strip()
+        item = {
+            "covered": _named(payload, dominant),
+            "quiet": _named(payload, theme.get("other_diet") or "?"),
+            "theme": theme.get("title") or "Other coverage",
+            "headline": story["title"],
+            "outlet": outlet.get("label") or "",
+            "url": url if url.startswith(("http://", "https://")) else "",
+            "dominant": dominant,
+        }
+        row = written.get(dominant) or {}
+        item["question"] = (
+            row["question"]
+            if row.get("headline") == item["headline"] and row.get("question")
+            else f"{item['covered']} gave this theme real attention and {item['quiet']} "
+            "barely did. What might make it worth leading with from inside that coverage?"
+        )
+        out.append(item)
+    return out
+
+
+def _starters_panel(payload: dict, own: str | None) -> str:
+    items = _starters(payload, own)
+    if not items:
+        return ""
+    colours = _colours(payload)
+    cards = ""
+    for item in items:
+        colour = colours.get(item["dominant"], DIET_A)
+        outlet = _esc(item["outlet"])
+        if item["outlet"] and item["url"]:
+            outlet = (
+                f'<a href="{_esc(item["url"])}" style="color:{colour};text-decoration:none;'
+                f'border-bottom:1px solid {LINE};">{outlet}</a>'
+            )
+        source = f" &middot; {outlet}" if outlet else ""
+        cards += (
+            f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            f'style="background:{CARD};border:1px solid {LINE};border-left:3px solid '
+            f'{colour};border-radius:10px;margin-bottom:8px;"><tr><td style="padding:10px 12px;">'
+            f'<div style="font:600 14px -apple-system,sans-serif;color:{INK};">'
+            f"{_esc(item['theme'])}</div>"
+            f'<div style="font:13px/1.5 -apple-system,sans-serif;color:{INK};padding:3px 0;">'
+            f"{_esc(chr(0x201C) + item['headline'] + chr(0x201D))}{source}</div>"
+            f'<div style="font:13px/1.5 -apple-system,sans-serif;color:{MUTED};">'
+            f"{_esc(item['question'])}</div></td></tr></table>"
+        )
+    note = (
+        f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};padding-top:4px;">'
+        f"These describe what each modeled media environment covered, not what any "
+        f"person believes.</div>"
+    )
+    return _panel("Conversation starters", cards + note)
+
+
+def _starters_text(payload: dict, own: str | None) -> list[str]:
+    items = _starters(payload, own)
+    if not items:
+        return []
+    lines = [
+        "",
+        "CONVERSATION STARTERS (what each modeled environment covered, not what anyone believes)",
+    ]
+    for item in items:
+        lines += ["", f"  {item['theme']}", f"    \u201c{item['headline']}\u201d"]
+        if item["outlet"]:
+            lines.append(f"    {item['outlet']}")
+        if item["url"]:
+            lines.append(f"    {item['url']}")
+        lines.append(f"    {item['question']}")
+    return lines
+
+
 def _daily_panels(payload: dict, own_diet: str | None, head: str) -> str:
     """The all-time layout, for a week too thin to compare on its own."""
     return "".join(
@@ -1474,6 +1567,7 @@ def _daily_panels(payload: dict, own_diet: str | None, head: str) -> str:
             _log_ratio_panel(payload) if _on(payload, "foundation_charts") else "",
             _sparkline_panel(payload) if _on(payload, "jsd") else "",
             _blindspot_panel(payload, own_diet),
+            _starters_panel(payload, own_diet),
             _summary_panel(payload),
             _extra_panel(payload),
         ]
@@ -1532,6 +1626,7 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
                 _drivers_panels(payload) if _on(payload, "foundation_charts") else "",
                 _framing_panel(payload),
                 _blindspot_panel(payload, own_diet),
+                _starters_panel(payload, own_diet),
                 _weekly_trend_panel(payload) if _on(payload, "jsd") else "",
                 _executive_panel(payload),
                 _summary_panel(payload),
@@ -1761,6 +1856,7 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
         ]
 
     lines += _blindspot_text(payload, own_diet)
+    lines += _starters_text(payload, own_diet)
 
     said = [d for d in _pair_diets(payload) if (d.get("summary") or "").strip()]
     if said:
@@ -1883,6 +1979,7 @@ def _render_weekly_text(payload: dict, own_diet: str | None) -> str:
     lines = ["PARALLAX — weekly brief", *_weekly_text(payload)]
     lines += _stories_text(payload)  # same position as _stories_panel in the HTML
     lines += _blindspot_text(payload, own_diet)
+    lines += _starters_text(payload, own_diet)
     executive = (payload.get("executive_summary") or "").strip()
     if executive:
         lines += ["", "THE SHORT VERSION", "", executive]

@@ -232,6 +232,11 @@ def build_payload(
         "stories": _stories_payload(store, summaries, _label_of(store, registry)),
         "stories_intro": (summaries.get("stories") or {"text": ""})["text"],
         "motifs": (summaries.get("themes") or {"text": ""})["text"],
+        "starter_questions": {
+            scope.removeprefix("starter:"): json.loads(row["text"])
+            for scope, row in summaries.items()
+            if scope.startswith("starter:")
+        },
         "executive_summary": exec_row["text"] if exec_row else "",
         "summary_method": exec_row["method"] if exec_row else None,
         "lexicon": lexicon,

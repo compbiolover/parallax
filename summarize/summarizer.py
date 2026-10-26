@@ -68,6 +68,8 @@ class SummaryResult:
     stories_intro: str = ""
     themes: str = ""
     titles: dict[str, str] = field(default_factory=dict)
+    # {dominant_diet: {"headline", "question"}}, the digest's conversation starters.
+    starters: dict[str, dict] = field(default_factory=dict)
 
 
 def gather(
@@ -276,7 +278,17 @@ class Summarizer:
             stories_intro=review.intro,
             themes=review.themes,
             titles=review.titles,
+            starters=self._starters(client, store, registry, pair, labels=store.diet_labels()),
         )
+
+    def _starters(self, client, store, registry, pair, labels) -> dict[str, dict]:
+        from cluster.blindspot import themes_from_store
+
+        from .starters import write_starters
+
+        members = {p: set(registry.weights_for(p)) for p in pair}
+        themes = [t.to_dict() for t in themes_from_store(store, members)]
+        return write_starters(client, self.model, self.effort, themes, labels)
 
     def _call_claude(self, client, contexts, comparison, lexicon, threads=None) -> str:
         user = build_user_prompt(contexts, comparison, lexicon=lexicon, threads=threads)
@@ -322,6 +334,14 @@ class Summarizer:
                     method=result.method,
                     text=text,
                 )
+        for dominant, row in result.starters.items():
+            store.upsert_summary(
+                scope=f"starter:{dominant}",
+                generated_utc=result.generated_utc,
+                model=result.model,
+                method=result.method,
+                text=json.dumps(row),
+            )
         # Each story's prose goes to two places on purpose. The summaries row is
         # what the dashboard and the email read today; the thread_days note is
         # what makes the timeline readable *next* week, when today is a line in

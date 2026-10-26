@@ -799,3 +799,28 @@ def test_a_heading_with_no_title_after_the_id_yields_no_title():
     _, _, review = _parse_sections(text, _labelled_contexts(), [_thread_ctx()])
     assert review.titles == {}
     assert review.stories == {"france-protests": "Prose."}
+
+
+def _theme(dominant, other, stories):
+    return {"title": "Faith", "dominant_diet": dominant, "other_diet": other, "stories": stories}
+
+
+def test_starters_come_from_the_first_titled_story_and_survive_bad_replies():
+    from summarize.starters import write_starters
+
+    themes = [
+        _theme("modeled_ce", "self", []),  # untitled top theme must not drop the direction
+        _theme("modeled_ce", "self", [{"title": "Court hears chaplain case"}]),
+    ]
+    good = _FakeClient(
+        blocks=[_FakeBlock('{"starters":[{"id":0,"question":"Why lead with this?"}]}')]
+    )
+    got = write_starters(good, "m", "low", themes, {"modeled_ce": "A", "self": "B"})
+    assert got == {
+        "modeled_ce": {"headline": "Court hears chaplain case", "question": "Why lead with this?"}
+    }
+    prompt = good.messages.calls[0]["messages"][0]["content"]
+    assert "Court hears chaplain case" in prompt and "modeled_ce" not in prompt
+    for reply in ("not json", '{"starters":[{"id":0,"question":"No question mark."}]}'):
+        bad = _FakeClient(blocks=[_FakeBlock(reply)])
+        assert write_starters(bad, "m", "low", themes, {}) == {}
