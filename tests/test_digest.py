@@ -1386,3 +1386,40 @@ def test_sections_switch_off_jsd_foundation_charts_and_liberty():
         assert "Liberty / oppression" not in part
         assert "Over/under-indexing" not in part
     assert "Jensen-Shannon" in build_digest(payload, "self").text
+
+
+def _themed(dominant, other, title, headline):
+    return {
+        "title": title,
+        "dominant_diet": dominant,
+        "other_diet": other,
+        "story_count": 1,
+        "article_count": 4,
+        "one_sided": 0.9,
+        "stories": [
+            {
+                "title": headline,
+                "articles": 4,
+                "outlets": [{"label": "Example", "url": "https://example.com/a"}],
+            }
+        ],
+    }
+
+
+def test_conversation_starters_cover_both_directions_own_first_and_link_the_source():
+    themes = [
+        _themed("self", "modeled_ce", "Climate", "Heat wave strains grid"),
+        _themed("modeled_ce", "self", "Religious liberty", "Court hears chaplain case"),
+    ]
+    payload = _payload(blindspot_themes=themes)
+    html, text = render_html(payload, own_diet="self"), render_text(payload, own_diet="self")
+    for out in (html, text):
+        assert "onversation starters" in out.lower()
+        assert "Heat wave strains grid" in out and "Court hears chaplain case" in out
+        assert "https://example.com/a" in out
+    # the author's own blindspot (modeled_ce-dominant) leads, per _own_first
+    assert text.index("Court hears chaplain case") < text.index("Heat wave strains grid")
+
+
+def test_no_starters_without_blindspots():
+    assert "onversation starters" not in render_html(_payload()).lower()

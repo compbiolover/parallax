@@ -1453,6 +1453,98 @@ def _caveat_for_email(payload: dict) -> str:
     return caveat
 
 
+def _starters(payload: dict, own: str | None) -> list[dict]:
+    """One conversation starter per blindspot direction, the author's own first.
+
+    Built from the blindspot themes already in the payload, with no model call:
+    the wording is fixed, so it can only say what the coverage counts say (this
+    environment gave the story attention, that one barely did) and never what
+    anyone believes. The headline is quoted verbatim and linked so it can be
+    checked.
+    """
+    out = []
+    for dominant, group in _theme_groups(_themes(payload), own):
+        theme = group[0]
+        story = next((s for s in (theme.get("stories") or []) if s and s.get("title")), None)
+        if not story:
+            continue
+        url = next(
+            (
+                o["url"]
+                for o in (story.get("outlets") or [])
+                if (o.get("url") or "").startswith(("http://", "https://"))
+            ),
+            "",
+        )
+        out.append(
+            {
+                "covered": _named(payload, dominant),
+                "quiet": _named(payload, theme.get("other_diet") or "?"),
+                "theme": theme.get("title") or "Other coverage",
+                "headline": story["title"],
+                "url": url,
+                "dominant": dominant,
+            }
+        )
+    return out
+
+
+def _starter_question(item: dict) -> str:
+    return (
+        f"{item['covered']} gave this real attention and {item['quiet']} barely did. "
+        "What might make it worth leading with from inside that coverage?"
+    )
+
+
+def _starters_panel(payload: dict, own: str | None) -> str:
+    items = _starters(payload, own)
+    if not items:
+        return ""
+    colours = _colours(payload)
+    cards = ""
+    for item in items:
+        colour = colours.get(item["dominant"], DIET_A)
+        headline = _esc(f"\u201c{item['headline']}\u201d")
+        if item["url"]:
+            headline = (
+                f'<a href="{_esc(item["url"])}" style="color:{colour};text-decoration:none;'
+                f'border-bottom:1px solid {LINE};">{headline}</a>'
+            )
+        cards += (
+            f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            f'style="background:{CARD};border:1px solid {LINE};border-left:3px solid '
+            f'{colour};border-radius:10px;margin-bottom:8px;"><tr><td style="padding:10px 12px;">'
+            f'<div style="font:600 14px -apple-system,sans-serif;color:{INK};">'
+            f"{_esc(item['theme'])}</div>"
+            f'<div style="font:13px/1.5 -apple-system,sans-serif;color:{INK};padding:3px 0;">'
+            f"{headline}</div>"
+            f'<div style="font:13px/1.5 -apple-system,sans-serif;color:{MUTED};">'
+            f"{_esc(_starter_question(item))}</div></td></tr></table>"
+        )
+    note = (
+        f'<div style="font:12px/1.5 -apple-system,sans-serif;color:{MUTED};padding-top:4px;">'
+        f"These describe what each modeled media environment covered, not what any "
+        f"person believes. One starter per direction.</div>"
+    )
+    return _panel("Conversation starters", cards + note)
+
+
+def _starters_text(payload: dict, own: str | None) -> list[str]:
+    items = _starters(payload, own)
+    if not items:
+        return []
+    lines = [
+        "",
+        "CONVERSATION STARTERS (what each modeled environment covered, not what anyone believes)",
+    ]
+    for item in items:
+        lines += ["", f"  {item['theme']}", f"    \u201c{item['headline']}\u201d"]
+        if item["url"]:
+            lines.append(f"    {item['url']}")
+        lines.append(f"    {_starter_question(item)}")
+    return lines
+
+
 def _daily_panels(payload: dict, own_diet: str | None, head: str) -> str:
     """The all-time layout, for a week too thin to compare on its own."""
     return "".join(
@@ -1474,6 +1566,7 @@ def _daily_panels(payload: dict, own_diet: str | None, head: str) -> str:
             _log_ratio_panel(payload) if _on(payload, "foundation_charts") else "",
             _sparkline_panel(payload) if _on(payload, "jsd") else "",
             _blindspot_panel(payload, own_diet),
+            _starters_panel(payload, own_diet),
             _summary_panel(payload),
             _extra_panel(payload),
         ]
@@ -1532,6 +1625,7 @@ def render_html(payload: dict, own_diet: str | None = None) -> str:
                 _drivers_panels(payload) if _on(payload, "foundation_charts") else "",
                 _framing_panel(payload),
                 _blindspot_panel(payload, own_diet),
+                _starters_panel(payload, own_diet),
                 _weekly_trend_panel(payload) if _on(payload, "jsd") else "",
                 _executive_panel(payload),
                 _summary_panel(payload),
@@ -1761,6 +1855,7 @@ def render_text(payload: dict, own_diet: str | None = None) -> str:
         ]
 
     lines += _blindspot_text(payload, own_diet)
+    lines += _starters_text(payload, own_diet)
 
     said = [d for d in _pair_diets(payload) if (d.get("summary") or "").strip()]
     if said:
@@ -1883,6 +1978,7 @@ def _render_weekly_text(payload: dict, own_diet: str | None) -> str:
     lines = ["PARALLAX — weekly brief", *_weekly_text(payload)]
     lines += _stories_text(payload)  # same position as _stories_panel in the HTML
     lines += _blindspot_text(payload, own_diet)
+    lines += _starters_text(payload, own_diet)
     executive = (payload.get("executive_summary") or "").strip()
     if executive:
         lines += ["", "THE SHORT VERSION", "", executive]
