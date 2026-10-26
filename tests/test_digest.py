@@ -1423,3 +1423,22 @@ def test_conversation_starters_cover_both_directions_own_first_and_link_the_sour
 
 def test_no_starters_without_blindspots():
     assert "onversation starters" not in render_html(_payload()).lower()
+
+
+def test_starter_uses_written_question_only_for_the_same_headline_and_links_the_outlet():
+    theme = _themed("self", "modeled_ce", "Climate", "Heat wave strains grid")
+    theme["stories"].insert(0, None)
+    untitled = _themed("self", "modeled_ce", "Sports", "")
+    for question, headline, expect in (
+        ("Why this one?", "Heat wave strains grid", True),
+        ("Why this one?", "A different story", False),
+    ):
+        payload = _payload(
+            blindspot_themes=[untitled, theme],
+            starter_questions={"self": {"headline": headline, "question": question}},
+        )
+        html = render_html(payload)
+        assert ("Why this one?" in html) is expect
+        assert "Heat wave strains grid" in html  # untitled top theme did not drop it
+        assert '<a href="https://example.com/a"' in html and ">Example</a>" in html
+        assert "One starter per direction" not in html

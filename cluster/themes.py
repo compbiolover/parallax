@@ -1162,3 +1162,17 @@ def _host(url: str | None) -> str:
         return ""
     host = re.sub(r"^\w+://", "", url).split("/")[0].split("@")[-1]
     return host[4:] if host.startswith("www.") else host
+
+
+def lead_story(themes: list[dict]) -> tuple[dict, dict] | None:
+    """``(theme, story)`` for the first titled story in one direction's themes.
+
+    Skips a top theme with no usable story rather than dropping the direction.
+    Shared by the digest and the summarizer so the story a conversation starter
+    is written about is the story the email then shows.
+    """
+    for theme in themes:
+        for story in theme.get("stories") or []:
+            if story and story.get("title"):
+                return theme, story
+    return None
