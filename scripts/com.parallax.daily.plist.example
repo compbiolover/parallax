@@ -38,6 +38,9 @@
   <!-- Absolute path: launchd inherits no PATH and no working directory. -->
   <key>ProgramArguments</key>
   <array>
+    <!-- Holds the Mac awake for the run; without it, idle sleep suspends the job. -->
+    <string>/usr/bin/caffeinate</string>
+    <string>-i</string>
     <string>/ABSOLUTE/PATH/TO/parallax/scripts/parallax-daily.sh</string>
   </array>
 
